@@ -60,8 +60,10 @@ DOCUMENTS_SITE_ANSWER = (
 )
 
 START_GREETING_ANSWER = (
-    "Привет! Я из Plum Dev, мы создаем умных ИИ-продавцов для соцсетей и мессенджеров."
-    "\n\nПодскажите, у вас сейчас основной поток клиентов откуда идет: из Instagram или пишут сразу в WhatsApp?"
+    "Привет! На связи ИИ-помощник Plum Dev 🚀 Мы делаем умных роботов-продавцов с полной интеграцией в ваш бизнес.\n"
+    "Я умею не просто слать автоответы, а реально дожимать сделки. Попробуем?\n\n"
+    "💡 Кликни на команду /roleplay — Я мгновенно включу режим продавца и покажу, как ИИ будет общаться с твоими клиентами.\n"
+    "📈 Или просто напиши мне свои боли в продажах, и я на пальцах разложу, как нейросети окупят себя за первую неделю."
 )
 
 DIALOG_STATE_KEY = "dialog_state"
@@ -71,6 +73,12 @@ ROLEPLAY_CONTEXT_SUMMARY_KEY = "roleplay_demo_context_summary"
 ROLEPLAY_CONTEXT_SOURCE_KEY = "roleplay_demo_context_source"
 ROLEPLAY_CONTEXT_WAIT_COUNT_KEY = "roleplay_demo_context_wait_count"
 ROLEPLAY_NO_FILE_FALLBACK_KEY = "roleplay_demo_no_file_fallback"
+BUYING_MILESTONE_KEYS = {
+    "pain_expressed",
+    "demo_activated",
+    "price_exposed",
+    "close_consented",
+}
 
 CONTACT_COLLECTION_PATTERNS = (
     r"имя",
@@ -167,7 +175,9 @@ def _detect_roleplay_demo_context(
         return {"active": False, "exit": True}
 
     explicit_request = bool(
-        re.search(r"\bпродай\s+мне\b", normalized)
+        re.search(r"^/roleplay(?:@\w+)?(?:\s|$)", normalized)
+        or re.search(r"\bтест-драйв\b", normalized)
+        or re.search(r"\bпродай\s+мне\b", normalized)
         or re.search(r"\bсыграй(?:те)?\s+роль\b", normalized)
         or re.search(r"\bсымитир", normalized)
         or re.search(r"\bсимулир", normalized)
@@ -213,10 +223,9 @@ def _is_roleplay_demo_exit_request(normalized_message: str) -> bool:
         or re.search(r"\bхватит\s+(?:играть|ролев)", normalized_message)
         or re.search(r"\b(?:стоп|закончи(?:ть|м)?)\s+(?:роль|игру|демо)", normalized_message)
         or re.search(r"\bверни(?:сь|тесь)?\s+к\s+(?:ии|ai|plum|плам|бот|агент)", normalized_message)
-        or re.search(r"\bдавай(?:те)?\s+к\s+делу\b", normalized_message)
         or re.search(r"\bя\s+про\s+(?:ии|ai)\s*-?\s*агент", normalized_message)
         or re.search(
-            r"\bсколько\s+(?:будет\s+)?стоить\s+(?:бот|агент|так(?:ой|ого)\s+бот|сделать)",
+            r"\bсколько\s+(?:будет\s+)?стоить\s+(?:сделать|собрать|внедрить)\s+так(?:ой|ого)\s+(?:бот|агент)",
             normalized_message,
         )
         or (
@@ -299,11 +308,29 @@ def _has_supported_roleplay_attachment(attachments: list[ChatAttachment]) -> boo
 
 
 def _roleplay_context_request_answer(topic: str, *, reminder: bool = False) -> str:
-    topic_text = f" по теме «{topic}»" if topic else ""
-    prefix = "Сначала дайте мне фактуру" if not reminder else "Чтобы сыграть это убедительно, мне нужна фактура"
     return (
-        f"{prefix}{topic_text}: PDF, фото прайса, скрин каталога или документ с условиями.\n\n"
-        "Я прочитаю файл и начну демо-продажу строго по вашим данным: цены, комплектации, условия и возражения."
+        "Отлично, переключаюсь в режим тест-драйва! 🎭\n\n"
+        "Чтобы я не гадал и общался именно так, как нужно вашему бизнесу, дайте мне немного вводных. "
+        "Вы можете сделать любое из трех действий:\n"
+        "1️⃣ Прикрепить PDF-каталог, презентацию или презентационный документ.\n"
+        "2️⃣ Скинуть скриншот или картинку вашего прайс-листа с ценами.\n"
+        "3️⃣ Просто написать текстом описание вашей компании в свободной форме.\n\n"
+        "Пример хорошего текстового описания:\n"
+        "\"Компания [Название], продаем [Товар или Услугу] оптом, средний чек [Цена], "
+        "клиенты чаще всего уходят после того, как узнают стоимость доставки\".\n\n"
+        "Жду ваш файл или текст — как только получу, сразу включу маску вашего менеджера по продажам!"
+    )
+
+
+def _is_roleplay_text_context(message: str) -> bool:
+    normalized = message.strip()
+    if len(normalized) < 60:
+        return False
+    lowered = normalized.casefold().replace("ё", "е")
+    if re.search(r"^/roleplay(?:@\w+)?\s*$", lowered):
+        return False
+    return bool(
+        re.search(r"компан|прода|услуг|товар|цена|стоимост|средн|чек|клиент|доставк|услов", lowered)
     )
 
 
@@ -334,6 +361,38 @@ def _format_roleplay_file_context_instruction(dialog_state: dict[str, object]) -
     )
 
 
+def _format_buying_readiness_instruction(dialog_state: dict[str, object]) -> str:
+    traffic_done_rule = (
+        "ВНИМАНИЕ: Этап квалификации трафика официально ЗАВЕРШЕН. "
+        "Запрещено спрашивать откуда идут клиенты. "
+        "Твой единственный фокус — закрытие на расчет спецификации. "
+        "Do not ask about Instagram, WhatsApp, site, channel, traffic source, lead source, or where clients come from."
+    )
+    if dialog_state.get("close_consented"):
+        return (
+            "HIGHEST PRIORITY BUYING READINESS OVERRIDE: close_consented is already true. "
+            f"{traffic_done_rule} "
+            "Answer the current question, then close toward project specification calculation or handoff."
+        )
+    if dialog_state.get("price_exposed"):
+        return (
+            "HIGHEST PRIORITY BUYING READINESS OVERRIDE: price_exposed is already true. "
+            f"{traffic_done_rule} "
+            "Your only commercial focus is closing toward project specification calculation. Answer the current question, then move to: what exactly should be included in the bot/specification."
+        )
+    if dialog_state.get("demo_activated"):
+        return (
+            "HIGHEST PRIORITY BUYING READINESS OVERRIDE: demo_activated is already true. "
+            f"{traffic_done_rule} "
+            "Tie the answer back to what the user saw in the demo and guide toward calculating/specifying a similar bot."
+        )
+    if dialog_state.get("pain_expressed"):
+        return (
+            "Buying readiness: pain_expressed is true. Explain the business value simply, with quick ROI logic, and offer /roleplay as the practical test."
+        )
+    return ""
+
+
 async def _handle_roleplay_context_gate(
     *,
     gemini: GeminiService,
@@ -354,6 +413,7 @@ async def _handle_roleplay_context_gate(
 
     topic = str(roleplay_demo.get("topic") or dialog_state.get("roleplay_demo_topic") or "").strip()
     attachments = payload.attachments
+    dialog_state["demo_activated"] = True
 
     if _has_supported_roleplay_attachment(attachments):
         try:
@@ -404,6 +464,32 @@ async def _handle_roleplay_context_gate(
                 "roleplay_demo_topic": topic,
             },
         )
+
+    if _is_roleplay_text_context(payload.message):
+        try:
+            context_summary = await gemini.extract_roleplay_context_from_text(
+                message=payload.message,
+                topic=topic,
+            )
+        except Exception:
+            logger.exception("Failed to extract roleplay context from text")
+            context_summary = payload.message
+
+        dialog_state["roleplay_demo_active"] = True
+        dialog_state["roleplay_demo_topic"] = topic
+        dialog_state[ROLEPLAY_AWAITING_CONTEXT_KEY] = False
+        dialog_state[ROLEPLAY_CONTEXT_SUMMARY_KEY] = (context_summary or payload.message)[:5000]
+        dialog_state[ROLEPLAY_CONTEXT_SOURCE_KEY] = "text_description"
+        dialog_state[ROLEPLAY_CONTEXT_WAIT_COUNT_KEY] = 0
+        dialog_state[ROLEPLAY_NO_FILE_FALLBACK_KEY] = False
+        session_metadata[DIALOG_STATE_KEY] = dialog_state
+        await supabase.upsert_chat_session_metadata(
+            instance_id=payload.instance_id,
+            channel=payload.channel,
+            chat_id=payload.chat_id,
+            metadata=session_metadata,
+        )
+        return None
 
     wait_count = int(dialog_state.get(ROLEPLAY_CONTEXT_WAIT_COUNT_KEY) or 0)
     if _should_start_roleplay_without_file(payload.message, wait_count):
@@ -784,6 +870,7 @@ async def chat(
         rewritten_query = ""
         commercial_context = ""
         response_instruction = _join_non_empty(
+            _format_buying_readiness_instruction(dialog_state),
             _format_content_followup_instruction(content_followup),
             _format_dialog_state_instruction(
                 message=payload.message,
@@ -900,6 +987,11 @@ async def chat(
             answer = _build_acknowledgement_continuation_answer(
                 client_facts=client_facts,
                 dialog_state=dialog_state,
+            )
+        if not roleplay_demo_active:
+            answer = _remove_forbidden_traffic_question_after_milestone(
+                answer,
+                dialog_state,
             )
         dialog_state = _update_dialog_state_after_answer(
             dialog_state=dialog_state,
@@ -1558,6 +1650,11 @@ def _infer_dialog_state_from_history(
     for item in chat_history:
         text = item.content
         normalized = text.casefold().replace("ё", "е")
+        if item.role == "user":
+            if _contains_sales_pain_signal(text):
+                state["pain_expressed"] = True
+            if _contains_close_consent_signal(text):
+                state["close_consented"] = True
         if item.role == "assistant":
             focus = _extract_service_focus(text)
             if focus:
@@ -1585,6 +1682,10 @@ def _infer_dialog_state_from_history(
                 state["price_cart_presented"] = True
             if re.search(r"ии-?агент|агент|интеграц|crm|срм", normalized) and _contains_price_signal(normalized):
                 state["price_agent_presented"] = True
+            if _contains_price_signal(normalized):
+                state["price_exposed"] = True
+            if re.search(r"режим\s+тест-драйва|маск[ау]\s+.*менеджер|/roleplay", normalized):
+                state["demo_activated"] = True
 
     recommendation = _recommended_service_from_facts(client_facts)
     if recommendation:
@@ -1618,6 +1719,7 @@ def _normalize_dialog_state(state: dict[str, object]) -> dict[str, object]:
             "roleplay_demo_active",
             ROLEPLAY_AWAITING_CONTEXT_KEY,
             ROLEPLAY_NO_FILE_FALLBACK_KEY,
+            *BUYING_MILESTONE_KEYS,
         }:
             normalized[key] = bool(value)
             continue
@@ -1782,6 +1884,13 @@ def _update_dialog_state_after_answer(
         if selected_focus:
             state["selected_checkout_product"] = selected_focus
 
+    _apply_buying_milestones(
+        state,
+        user_message=user_message,
+        answer=answer,
+        roleplay_active=bool(dialog_state.get("roleplay_demo_active")),
+    )
+
     return _normalize_dialog_state(state)
 
 
@@ -1838,6 +1947,44 @@ def _contains_price_signal(normalized_text: str) -> bool:
         or re.search(r"(?:цена|стоимост|прайс|смет|бюджет).{0,40}\d", normalized_text)
         or re.search(r"\d[\d\s]{2,}.{0,20}(?:тенге|тг|₸|usd|доллар)", normalized_text)
     )
+
+
+def _contains_sales_pain_signal(text: str) -> bool:
+    normalized = text.casefold().replace("ё", "е")
+    return bool(
+        re.search(
+            r"менеджер.{0,40}(туп|плох|слаб|не\s+уме|слив|долго|медлен|не\s+закры|не\s+дожим)",
+            normalized,
+        )
+        or re.search(r"лид.{0,40}(слив|теря|не\s+закрыв|не\s+дожим|молчат|уход)", normalized)
+        or re.search(r"клиент.{0,40}(уход|молчат|слив|теря|не\s+покуп)", normalized)
+        or re.search(r"долго\s+отвеч|не\s+успева|плохо\s+закрыв|нет\s+дожим", normalized)
+    )
+
+
+def _contains_close_consent_signal(text: str) -> bool:
+    normalized = text.casefold().replace("ё", "е")
+    return bool(
+        re.search(r"\b(давай|давайте|хочу|готов|погнали|начинаем|запускаем|считай|посчитай|рассчитай)\b", normalized)
+        and re.search(r"расчет|проект|внедр|бот|агент|сделать|запуск|созвон|обсуд", normalized)
+    )
+
+
+def _apply_buying_milestones(
+    state: dict[str, object],
+    *,
+    user_message: str,
+    answer: str,
+    roleplay_active: bool = False,
+) -> None:
+    if _contains_sales_pain_signal(user_message):
+        state["pain_expressed"] = True
+    if roleplay_active or state.get("roleplay_demo_active") or state.get(ROLEPLAY_CONTEXT_SUMMARY_KEY):
+        state["demo_activated"] = True
+    if _contains_price_signal(answer.casefold().replace("ё", "е")) or _contains_price_signal(user_message.casefold().replace("ё", "е")):
+        state["price_exposed"] = True
+    if _contains_close_consent_signal(user_message):
+        state["close_consented"] = True
 
 
 def _is_which_option_better_question(message: str) -> bool:
@@ -1942,6 +2089,44 @@ def _build_acknowledgement_continuation_answer(
         return "Понял вас. Если по условиям все комфортно, можно выбрать пакет и перейти к заявке."
 
     return "Понял вас."
+
+
+def _remove_forbidden_traffic_question_after_milestone(
+    answer: str,
+    dialog_state: dict[str, object],
+) -> str:
+    if not (
+        dialog_state.get("price_exposed")
+        or dialog_state.get("demo_activated")
+        or dialog_state.get("close_consented")
+    ):
+        return answer
+
+    normalized_answer = (answer or "").strip()
+    if not normalized_answer:
+        return answer
+
+    traffic_question_pattern = re.compile(
+        r"(?:^|[\n.!?]\s*)"
+        r"[^.!?\n]*(?:"
+        r"откуда\s+(?:идут|приходят|пишут)?\s*(?:клиент|заявк|лид)"
+        r"|где\s+(?:берете|получаете|собираете)\s*(?:клиент|заявк|лид)"
+        r"|како[йе]\s+(?:у\s+вас\s+)?(?:основн\w+\s+)?(?:канал|источник)\s+(?:клиент|заявк|лид|трафик)"
+        r"|(?:instagram|инстаграм|инст|whatsapp|ватсап|telegram|телеграм|сайт)[^.!?\n]*(?:клиент|заявк|лид|трафик|пишут)"
+        r")[^.!?\n]*\?",
+        re.IGNORECASE,
+    )
+    repaired = traffic_question_pattern.sub("", normalized_answer).strip()
+    repaired = re.sub(r"\n{3,}", "\n\n", repaired).strip()
+    if repaired == normalized_answer:
+        return answer
+
+    close_question = (
+        "Давайте лучше зафиксируем спецификацию: какие 2-3 действия бот должен делать вместо менеджера?"
+    )
+    if close_question.casefold() in repaired.casefold():
+        return repaired
+    return _join_non_empty(repaired, close_question)
 
 
 def _repair_stage_3_price_answer(answer: str, dialog_state: dict[str, object]) -> str:

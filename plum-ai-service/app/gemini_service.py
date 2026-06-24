@@ -48,10 +48,11 @@ GENERAL - greetings, small talk, unrelated messages, or simple non-technical que
 ROLEPLAY - the user asks to demonstrate, simulate, roleplay, act as a seller/manager/consultant in a niche, or show how the AI would sell a product/service in a pretend conversation.
 RAG_REQUIRED - AI agents, knowledge bases, integrations, CRM, funnel automation, smart carts, implementation details, cases, portfolio, or any question requiring exact knowledge-base facts.
 CHECKOUT - the user wants pricing, a project estimate, to buy a ready solution, book a call, start implementation, create a cart/deal, or proceed with purchase.
-EXIT_ROLEPLAY - the conversation is currently in a roleplay/demo/simulation and the user wants to stop acting, remove the role mask, return to the real AI-agent/Plum Dev discussion, get back to business, or asks how much it costs to build a bot like the demonstrated roleplay.
+EXIT_ROLEPLAY - the conversation is currently in a roleplay/demo/simulation and the user directly asks to stop the game, remove the role mask, exit roleplay, or return to the real AI-agent/Plum Dev discussion.
 
 Do not infer CHECKOUT from a generic confirmation alone. Contextual stage transitions are handled by the dedicated sales-stage router.
-If EXIT_ROLEPLAY applies, include EXIT_ROLEPLAY together with RAG_REQUIRED when the user asks about AI agents, bot cost, automation, or implementing a similar bot.
+EXIT_ROLEPLAY is allowed ONLY for explicit exit intent. If the user describes their product, product specs, pricing, delivery, order terms, wholesale/retail conditions, or business context for the roleplay, this is strictly ROLEPLAY context, not EXIT_ROLEPLAY.
+If EXIT_ROLEPLAY applies and the same message asks about AI agents, bot cost, automation, or implementing a similar bot, include RAG_REQUIRED too.
 If ROLEPLAY applies, return ROLEPLAY. Do not also return RAG_REQUIRED unless the user is asking about Plum Dev implementation facts.
 
 Your response must be a valid JSON array of strings.
@@ -66,8 +67,9 @@ Do not explain. Do not wrap the JSON in markdown."""
 
 EXIT_ROLEPLAY_ROUTER_RULE = """Additional route:
 ROLEPLAY - use when the user asks to demonstrate, simulate, roleplay, or act as a seller/manager/consultant in a niche.
-EXIT_ROLEPLAY - use when the recent conversation is a roleplay/demo/simulation and the user semantically asks to stop it or return to the real AI-agent/Plum Dev business discussion. This includes indirect wording such as "хватит", "завязывай", "давай к делу", "сними маску", "выйди из роли", "вернись к ИИ", "я про ИИ агента", or "сколько стоит сделать такого бота".
-If EXIT_ROLEPLAY applies and the user asks about building, pricing, automation, or AI agents, return both EXIT_ROLEPLAY and RAG_REQUIRED."""
+EXIT_ROLEPLAY - use ONLY when the recent conversation is a roleplay/demo/simulation and the user directly asks to stop the game, exit the role, remove the mask, or return to Plum Dev / AI-agent discussion. Valid examples: "выйди из роли", "сними маску", "хватит играть", "вернись к Plum Dev", "я про ИИ-агента, не играй роль".
+Never classify EXIT_ROLEPLAY when the user is describing their product, catalog, price, delivery, order, wholesale terms, retail terms, objections, or business conditions for the roleplay. Those messages are ROLEPLAY context.
+If EXIT_ROLEPLAY applies and the user asks about building, pricing, automation, or AI agents in the same message, return both EXIT_ROLEPLAY and RAG_REQUIRED."""
 
 SALES_STAGE_ROUTER_PROMPT = """You classify the next sales-dialog stage for an AI development and automation consultant.
 
@@ -375,7 +377,11 @@ This mode is isolated from Plum Dev sales.
 Do not sell AI agents, automation, audits, checkout products, CRM handoff, implementation packages, or Plum Dev services.
 Do not use RAG, tenant commercial context, previous AI-service offers, or AI-agent prices.
 Stay inside the requested seller role until the user clearly exits the demo.
+When demo file/text context is provided, fully erase the Plum Dev identity. You are no longer an AI assistant. You are a leading, sharp, very polite sales manager of the company described in the user's data.
 If a demo file/context is provided, use only facts from that file/context for concrete prices, terms, product specs, availability, delivery, guarantees, and conditions. Do not invent missing facts.
+When starting after receiving demo context, do not say meta phrases like "я изучил файл", "давайте начнем", or "переключаюсь". Start first as the seller with a strong greeting to the end customer, using the company/product facts if present.
+Never generate bracket placeholders such as [Имя менеджера], [Название компании], [Product], or [Price]. Invent a realistic human name, for example Алексей, Дмитрий, Елена, Марина, and speak like a real person.
+If the user asks about a missing fact, stay in role and honestly say that you will clarify it, then ask one useful sales question.
 If no demo file/context is provided, you may improvise from general knowledge, but be transparent that a file or catalog would make the demo more exact.
 If the user switches niche with a short phrase such as "а теперь продавца пептидов", treat it as a new roleplay request.
 If the requested niche involves health, supplements, peptides, medication, or weight loss, keep claims cautious: do not promise treatment, guaranteed weight loss, diagnosis, dosage, or medical safety. Suggest checking contraindications with a doctor when relevant.
@@ -407,6 +413,17 @@ NO_REPEAT_RULE = (
     "вопрос, зафиксируй его ответ, поддержи его мотивацию и двигайся дальше по "
     "воронке к следующему логичному шагу. Не повторяй прошлые реплики."
 )
+
+TEXTUAL_PAIN_ROI_RULE = (
+    "ОБРАБОТКА ТЕКСТОВЫХ БОЛЕЙ: Если пользователь без /roleplay описывает проблему в продажах "
+    "('менеджеры тупят', 'лиды сливаются', 'долго отвечают', 'не дожимают'), объясни на пальцах экономику ИИ. "
+    "Покажи, что ИИ не устает, отвечает примерно за 3 секунды и доносит ценность продукта до каждого обращения. "
+    "Дай короткий расчет: если бот спасает хотя бы 2-3 слитых лида в неделю за счет быстрых ответов и нормального дожима, "
+    "интеграция может окупиться очень быстро. Не обещай гарантированный доход. "
+    "В конце мягко напомни: 'Кстати, мы можем проверить это прямо сейчас на вашем продукте — просто введите /roleplay'."
+)
+
+BUYING_READINESS_TRAFFIC_DONE_MARKER = "Этап квалификации трафика официально ЗАВЕРШЕН"
 
 
 def is_retryable_gemini_unavailable(exc: BaseException) -> bool:
@@ -672,6 +689,10 @@ class GeminiService:
             final_system_prompt,
             FINAL_SYSTEM_PROMPT,
         )
+        if BUYING_READINESS_TRAFFIC_DONE_MARKER in response_instruction:
+            base_system_prompt = self._sanitize_prompt_traffic_qualification_rules(
+                base_system_prompt
+            )
         system_instruction = "\n\n".join(
             [
                 SALES_MASTER_PROMPT,
@@ -701,6 +722,10 @@ class GeminiService:
         tenant_prompt_addon = self._sanitize_prompt_checkout_rules(
             self._sanitize_prompt_flow_rules(system_prompt_addon)
         )
+        if BUYING_READINESS_TRAFFIC_DONE_MARKER in response_instruction:
+            tenant_prompt_addon = self._sanitize_prompt_traffic_qualification_rules(
+                tenant_prompt_addon
+            )
         if tenant_prompt_addon:
             system_instruction = "\n\n".join(
                 [
@@ -782,6 +807,37 @@ class GeminiService:
                 "The extracted facts are session-local and must not be treated as tenant knowledge base."
             ),
             attachments=attachments,
+            temperature=0,
+            max_output_tokens=768,
+        )
+
+    async def extract_roleplay_context_from_text(
+        self,
+        *,
+        message: str,
+        topic: str,
+    ) -> str:
+        prompt = "\n\n".join(
+            [
+                "Analyze the user's text description for a sales roleplay.",
+                f"Requested roleplay niche/product: {topic or 'infer from text'}",
+                "User-provided company/product description:",
+                message,
+                (
+                    "Extract concrete facts for the roleplay: company name if present, product/service, prices, average check, "
+                    "target customers, delivery/payment terms, key objections, USP, and what the seller should ask first. "
+                    "Do not invent missing facts. Return a compact Russian fact sheet."
+                ),
+            ]
+        )
+        return await self._generate_text(
+            model=self.settings.general_model,
+            model_pool=self.settings.general_model_pool,
+            prompt=prompt,
+            system_instruction=(
+                "You extract temporary sales-demo context from user-provided text. "
+                "The extracted facts are session-local and must not be treated as tenant knowledge base."
+            ),
             temperature=0,
             max_output_tokens=768,
         )
@@ -1056,7 +1112,7 @@ class GeminiService:
 
     @staticmethod
     def _ensure_exit_roleplay_router_rule(system_prompt: str) -> str:
-        if "EXIT_ROLEPLAY" in (system_prompt or ""):
+        if "Never classify EXIT_ROLEPLAY when the user is describing" in (system_prompt or ""):
             return system_prompt
         return "\n\n".join([system_prompt.rstrip(), EXIT_ROLEPLAY_ROUTER_RULE])
 
@@ -1115,12 +1171,40 @@ class GeminiService:
         return "\n".join(lines).strip()
 
     @staticmethod
+    def _sanitize_prompt_traffic_qualification_rules(prompt: str) -> str:
+        normalized_prompt = (prompt or "").strip()
+        if not normalized_prompt:
+            return ""
+
+        traffic_qualification_patterns = (
+            r"откуда\s+(?:идут|приходят|пишут)",
+            r"поток\s+клиент",
+            r"канал\s+(?:заяв|клиент|трафик)",
+            r"источник\s+(?:заяв|клиент|трафик)",
+            r"instagram|инстаграм|инст\b",
+            r"whatsapp|ватсап",
+            r"telegram|телеграм",
+            r"сайт.{0,40}(?:заяв|клиент|трафик)",
+        )
+
+        lines: list[str] = []
+        for line in normalized_prompt.splitlines():
+            normalized_line = line.strip().casefold().replace("ё", "е")
+            if any(re.search(pattern, normalized_line) for pattern in traffic_qualification_patterns):
+                continue
+            lines.append(line)
+
+        return "\n".join(lines).strip()
+
+    @staticmethod
     def _ensure_critical_commercial_trigger_rule(system_prompt: str) -> str:
         rules = []
         if CRITICAL_COMMERCIAL_TRIGGER_RULE not in system_prompt:
             rules.append(CRITICAL_COMMERCIAL_TRIGGER_RULE)
         if NO_REPEAT_RULE not in system_prompt:
             rules.append(NO_REPEAT_RULE)
+        if TEXTUAL_PAIN_ROI_RULE not in system_prompt:
+            rules.append(TEXTUAL_PAIN_ROI_RULE)
         if UNIFIED_COMMERCIAL_RULES_PROMPT not in system_prompt:
             rules.append(UNIFIED_COMMERCIAL_RULES_PROMPT)
         if OTHER_PLATFORM_GUARD_PROMPT not in system_prompt:
@@ -1939,13 +2023,14 @@ class GeminiService:
             "сними маску",
             "хватит играть",
             "хватит роль",
-            "завязывай",
-            "давай к делу",
             "вернись к ии",
             "вернись к ai",
+            "вернись к plum",
+            "вернись к плам",
             "я про ии агента",
-            "сколько стоит сделать такого бота",
             "сколько будет стоить сделать такого бота",
+            "сколько стоит собрать такого бота",
+            "сколько стоит внедрить такого агента",
         )
         if any(keyword in normalized for keyword in exit_roleplay_keywords):
             routes = [Route.exit_roleplay]
@@ -1954,7 +2039,9 @@ class GeminiService:
             return routes
 
         roleplay_keywords = (
+            "/roleplay",
             "сыграй роль",
+            "тест-драйв",
             "сымитир",
             "симулир",
             "продай мне",
