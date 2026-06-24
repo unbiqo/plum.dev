@@ -79,6 +79,11 @@ async def _send_ai_answer(
     )
 
     try:
+        await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    except Exception:
+        logger.debug("Failed to send Telegram typing action", exc_info=True)
+
+    try:
         answer = await _request_ai_service(payload)
     except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
         logger.warning("AI service request failed: %s", exc)

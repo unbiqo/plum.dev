@@ -1,0 +1,15 @@
+cd C:\projects\plum-dev\plum-ai-service
+
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload
+
+
+
+cd C:\projects\plum-dev\plum_tg_bot
+
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+.\.venv\Scripts\python.exe bot.py

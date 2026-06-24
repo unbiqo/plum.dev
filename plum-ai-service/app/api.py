@@ -1,12 +1,15 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
@@ -56,14 +59,15 @@ DOCUMENT_REQUEST_PATTERNS = (
 
 DOCUMENTS_SITE_ANSWER = (
     "Кейсы, портфолио и демо будут собраны на сайте: https://your-portfolio.dev/."
-    "\n\nМогу пока быстро сориентировать, какой сценарий AI-автоматизации подойдет под вашу воронку."
+    "\n\nМогу пока быстро сориентировать, какой сценарий AI-автоматизации подойдет под вашу воронку — что сейчас важнее автоматизировать?"
 )
 
 START_GREETING_ANSWER = (
     "Привет! На связи ИИ-помощник Plum Dev 🚀 Мы делаем умных роботов-продавцов с полной интеграцией в ваш бизнес.\n"
     "Я умею не просто слать автоответы, а реально дожимать сделки. Попробуем?\n\n"
     "💡 Кликни на команду /roleplay — Я мгновенно включу режим продавца и покажу, как ИИ будет общаться с твоими клиентами.\n"
-    "📈 Или просто напиши мне свои боли в продажах, и я на пальцах разложу, как нейросети окупят себя за первую неделю."
+    "📈 Или просто напиши мне свои боли в продажах, и я на пальцах разложу, как нейросети окупят себя за первую неделю.\n\n"
+    "С чего начнем: /roleplay или разберем вашу воронку?"
 )
 
 DIALOG_STATE_KEY = "dialog_state"
@@ -103,11 +107,126 @@ CONTACT_PLACEHOLDER_PATTERNS = (
     r"^\s*(написал[аи]?|отправил[аи]?|лови|да|ок|ага|угу|готово|\+|сейчас|уже)\s*[.!)]*\s*$",
 )
 PHONE_PATTERN = re.compile(r"(?:\+?\d[\s().-]*){7,}")
+
+# Russian number words used to parse phone numbers written as text
+_RU_HUNDREDS: dict[str, int] = {
+    "сто": 100, "двести": 200, "триста": 300, "четыреста": 400,
+    "пятьсот": 500, "шестьсот": 600, "семьсот": 700, "восемьсот": 800, "девятьсот": 900,
+}
+_RU_TENS: dict[str, int] = {
+    "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50,
+    "шестьдесят": 60, "семьдесят": 70, "восемьдесят": 80, "девяносто": 90,
+}
+_RU_ONES_MAP: dict[str, int] = {
+    "ноль": 0, "нуль": 0, "один": 1, "одна": 1, "два": 2, "две": 2,
+    "три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9,
+    "десять": 10, "одиннадцать": 11, "двенадцать": 12, "тринадцать": 13,
+    "четырнадцать": 14, "пятнадцать": 15, "шестнадцать": 16, "семнадцать": 17,
+    "восемнадцать": 18, "девятнадцать": 19,
+}
+_ALL_DIGIT_WORDS: frozenset[str] = frozenset(_RU_HUNDREDS) | frozenset(_RU_TENS) | frozenset(_RU_ONES_MAP)
+
 PROJECT_DETAIL_PATTERN = re.compile(
     r"(?:сфера|ниша|бизнес|сайт|instagram|инст|crm|срм|воронк|заявк|лид|бот|агент|автоматизац|интеграц)",
     re.IGNORECASE,
 )
 AI_SERVICE_IMAGE_URLS: dict[str, str] = {}
+
+
+async def send_platform_typing_indicator(platform: str, user_id: str) -> None:
+    normalized_platform = (platform or "").strip().lower()
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return
+
+    try:
+        if normalized_platform == "telegram":
+            token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+            if not token:
+                logger.debug("Telegram typing indicator skipped: bot token is not configured in AI service")
+                return
+            await asyncio.to_thread(
+                _post_form_urlencoded,
+                f"https://api.telegram.org/bot{token}/sendChatAction",
+                {
+                    "chat_id": normalized_user_id,
+                    "action": "typing",
+                },
+                {},
+            )
+            return
+
+        if normalized_platform == "instagram":
+            access_token = os.getenv("META_PAGE_ACCESS_TOKEN") or os.getenv("INSTAGRAM_PAGE_ACCESS_TOKEN")
+            endpoint = os.getenv(
+                "INSTAGRAM_MESSAGES_ENDPOINT",
+                "https://graph.facebook.com/v19.0/me/messages",
+            )
+            if not access_token:
+                logger.debug("Instagram typing indicator skipped: Meta access token is not configured")
+                return
+            await asyncio.to_thread(
+                _post_json,
+                f"{endpoint}?access_token={urllib_parse.quote(access_token)}",
+                {
+                    "recipient": {"id": normalized_user_id},
+                    "sender_action": "typing_on",
+                },
+                {},
+            )
+            return
+
+        if normalized_platform == "whatsapp":
+            endpoint = os.getenv("WHATSAPP_TYPING_ENDPOINT")
+            token = os.getenv("WHATSAPP_ACCESS_TOKEN")
+            if not endpoint:
+                logger.debug("WhatsApp typing indicator skipped: provider endpoint is not configured")
+                return
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            await asyncio.to_thread(
+                _post_json,
+                endpoint,
+                {
+                    "recipient": normalized_user_id,
+                    "sender_action": "typing_on",
+                },
+                headers,
+            )
+            return
+
+        logger.debug("Typing indicator skipped for platform=%s", platform)
+    except Exception:
+        logger.exception("Failed to send typing indicator for platform=%s user_id=%s", platform, user_id)
+
+
+def _post_form_urlencoded(url: str, data: dict[str, str], headers: dict[str, str]) -> None:
+    body = urllib_parse.urlencode(data).encode("utf-8")
+    request = urllib_request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            **headers,
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=3):
+        return
+
+
+def _post_json(url: str, data: dict[str, object], headers: dict[str, str]) -> None:
+    body = json.dumps(data).encode("utf-8")
+    request = urllib_request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            **headers,
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=3):
+        return
 
 
 def _has_explicit_commercial_intent(
@@ -167,38 +286,15 @@ def _detect_roleplay_demo_context(
     dialog_state: dict[str, object],
 ) -> dict[str, object]:
     normalized = message.casefold().replace("ё", "е")
-    previous_assistant = _last_assistant_message(chat_history).casefold().replace("ё", "е")
     was_active = bool(dialog_state.get("roleplay_demo_active"))
     was_waiting_for_context = bool(dialog_state.get(ROLEPLAY_AWAITING_CONTEXT_KEY))
 
     if (was_active or was_waiting_for_context) and _is_roleplay_demo_exit_request(normalized):
         return {"active": False, "exit": True}
 
-    explicit_request = bool(
-        re.search(r"^/roleplay(?:@\w+)?(?:\s|$)", normalized)
-        or re.search(r"\bтест-драйв\b", normalized)
-        or re.search(r"\bпродай\s+мне\b", normalized)
-        or re.search(r"\bсыграй(?:те)?\s+роль\b", normalized)
-        or re.search(r"\bсымитир", normalized)
-        or re.search(r"\bсимулир", normalized)
-        or re.search(r"\bубеди\s+меня\b", normalized)
-        or re.search(r"\bдокажи\b", normalized) and re.search(r"эффектив|работ", normalized)
-        or re.search(r"\bпокажи\s+пример\b", normalized)
-        or re.search(r"\bбудь\s+(?:продавц|менеджер|консультант)", normalized)
-        or re.search(r"\bведи\s+диалог\s+будто\s+ты\s+продав", normalized)
-    )
-    switch_role = bool(
-        re.search(r"\bа\s+теперь\b.{0,40}\bпродавц", normalized)
-        or re.search(r"\bтеперь\b.{0,40}\bпродавц", normalized)
-    )
-    previous_was_demo_scene = bool(
-        re.search(r"представьте,\s+что\s+я\s+[—-]\s+ваш\s+ии-?(?:консультант|бот)", previous_assistant)
-        or re.search(r"напишите.{0,80}(сомнение|возражение)", previous_assistant)
-    )
+    explicit_request = _is_explicit_roleplay_command(message)
 
-    active = explicit_request or switch_role or was_active or was_waiting_for_context
-    if switch_role and not (was_active or previous_was_demo_scene):
-        active = explicit_request
+    active = explicit_request or was_active or was_waiting_for_context
     if not active:
         return {"active": False}
 
@@ -209,8 +305,25 @@ def _detect_roleplay_demo_context(
     return {
         "active": True,
         "topic": topic,
-        "new_request": explicit_request or switch_role,
+        "new_request": explicit_request,
     }
+
+
+def _is_explicit_roleplay_command(message: str) -> bool:
+    normalized = message.strip().casefold().replace("ё", "е")
+    return bool(
+        re.search(r"^/roleplay(?:@\w+)?(?:\s|$)", normalized)
+        or re.search(r"\b(?:отыграй|сыграй|играй)\s+роль\b", normalized)
+        or re.search(r"\b(?:представь|представьте),?\s+что\s+ты\b", normalized)
+        or re.search(r"\bбудь\s+(?:продавц|менеджер|консультант)", normalized)
+        or re.search(r"\bведи\s+диалог\s+будто\s+ты\b", normalized)
+        or re.search(r"\b(?:включи|запусти)\s+(?:режим\s+)?(?:продавц|менеджер|консультант|ролев)", normalized)
+        # B2C simulation: "Я твой клиент..., погнали" style roleplay invitations
+        or re.search(r"\bя\s+(?:твой|ваш)\s+клиент\b.{0,60}\b(?:погнали|поехали|начинаем|давай|вперед|старт)\b", normalized)
+        or re.search(r"\b(?:погнали|поехали)\b.{0,40}\bя\s+(?:твой|ваш)\s+клиент\b", normalized)
+        or re.search(r"\b(?:я\s+)?в\s+роли\s+(?:клиент|покупател)\b", normalized)
+        or re.search(r"\bпишу\s+(?:как|будто|в\s+роли)\s+(?:клиент|покупател)\b", normalized)
+    )
 
 
 def _is_roleplay_demo_exit_request(normalized_message: str) -> bool:
@@ -222,8 +335,12 @@ def _is_roleplay_demo_exit_request(normalized_message: str) -> bool:
         or re.search(r"\bсними(?:те)?\s+маск", normalized_message)
         or re.search(r"\bхватит\s+(?:играть|ролев)", normalized_message)
         or re.search(r"\b(?:стоп|закончи(?:ть|м)?)\s+(?:роль|игру|демо)", normalized_message)
+        or re.search(r"\bдавай(?:те)?\s+к\s+делу\b", normalized_message)
+        or re.search(r"\bя\s+готов(?:а)?\s+купить\b", normalized_message)
         or re.search(r"\bверни(?:сь|тесь)?\s+к\s+(?:ии|ai|plum|плам|бот|агент)", normalized_message)
         or re.search(r"\bя\s+про\s+(?:ии|ai)\s*-?\s*агент", normalized_message)
+        or re.search(r"\b(?:ваш|твой)\s+(?:ии|ai|бот|агент)", normalized_message)
+        or re.search(r"\b(?:как|сколько|что)\b.{0,80}\b(?:разработ|имплемент|внедр|собрать|сделать)\b.{0,80}\b(?:бот|агент|ии|ai)", normalized_message)
         or re.search(
             r"\bсколько\s+(?:будет\s+)?стоить\s+(?:сделать|собрать|внедрить)\s+так(?:ой|ого)\s+(?:бот|агент)",
             normalized_message,
@@ -308,6 +425,12 @@ def _has_supported_roleplay_attachment(attachments: list[ChatAttachment]) -> boo
 
 
 def _roleplay_context_request_answer(topic: str, *, reminder: bool = False) -> str:
+    if reminder:
+        return (
+            "Я все еще жду вводные для тест-драйва.\n\n"
+            "Можно прислать PDF, скрин прайса или короткое описание компании текстом. "
+            "Если файла нет, напишите «без файла» — начну демо на общих знаниях."
+        )
     return (
         "Отлично, переключаюсь в режим тест-драйва! 🎭\n\n"
         "Чтобы я не гадал и общался именно так, как нужно вашему бизнесу, дайте мне немного вводных. "
@@ -319,6 +442,15 @@ def _roleplay_context_request_answer(topic: str, *, reminder: bool = False) -> s
         "\"Компания [Название], продаем [Товар или Услугу] оптом, средний чек [Цена], "
         "клиенты чаще всего уходят после того, как узнают стоимость доставки\".\n\n"
         "Жду ваш файл или текст — как только получу, сразу включу маску вашего менеджера по продажам!"
+    )
+
+
+def _build_price_override_answer() -> str:
+    return (
+        "По Plum Dev ориентир такой: базовый ИИ-ассистент для приема и дожима заявок — от $300.\n\n"
+        "Если нужно собрать все вместе — база знаний, сценарии продаж, интеграции и передачу заявок менеджеру — "
+        "сначала фиксируем спецификацию, чтобы не называть цену с потолка.\n\n"
+        "Давайте соберу расчет: какие 2-3 действия бот должен делать вместо менеджера?"
     )
 
 
@@ -362,6 +494,12 @@ def _format_roleplay_file_context_instruction(dialog_state: dict[str, object]) -
 
 
 def _format_buying_readiness_instruction(dialog_state: dict[str, object]) -> str:
+    if dialog_state.get("contact_phone_collected"):
+        return (
+            "HIGHEST PRIORITY CONTACT COMPLETION OVERRIDE: a valid phone/WhatsApp contact is already collected. "
+            "It is categorically forbidden to ask which WhatsApp number to use, ask for a phone again, or request contact details again. "
+            "Close the loop with a final confirmation: the number is recorded, the specification is being passed to a manager, and they will contact the client in WhatsApp soon."
+        )
     traffic_done_rule = (
         "ВНИМАНИЕ: Этап квалификации трафика официально ЗАВЕРШЕН. "
         "Запрещено спрашивать откуда идут клиенты. "
@@ -540,6 +678,7 @@ async def _build_and_log_roleplay_gate_response(
     answer: str,
     metadata: dict[str, Any],
 ) -> ChatResponse:
+    answer = _format_messenger_answer(answer)
     response = ChatResponse(
         route=Route.roleplay,
         routes=[Route.roleplay],
@@ -574,6 +713,9 @@ async def chat(
 
     try:
         _check_rate_limit(payload.channel, payload.chat_id)
+        asyncio.create_task(
+            send_platform_typing_indicator(payload.channel, payload.chat_id)
+        )
         tenant_settings = await supabase.get_tenant_settings(
             instance_id=payload.instance_id,
         )
@@ -674,7 +816,7 @@ async def chat(
             response = ChatResponse(
                 route=Route.general,
                 routes=[Route.general],
-                answer=START_GREETING_ANSWER,
+                answer=_format_messenger_answer(START_GREETING_ANSWER),
                 checkout=False,
                 metadata={
                     "start_greeting": True,
@@ -702,13 +844,57 @@ async def chat(
             response = ChatResponse(
                 route=Route.general,
                 routes=[Route.general],
-                answer=DOCUMENTS_SITE_ANSWER,
+                answer=_format_messenger_answer(DOCUMENTS_SITE_ANSWER),
                 checkout=False,
                 metadata={
                     "document_request_redirect": True,
                     "rag_context_found": False,
                     "tenant_found": bool(tenant_settings),
                     "client_facts": client_facts,
+                    "server_history_used": bool(logged_history),
+                    "logged_history_messages": len(logged_history),
+                    "payload_history_messages": len(payload.chat_history),
+                    "effective_history_messages": len(effective_history),
+                },
+            )
+            await supabase.log_chat(
+                channel=payload.channel,
+                chat_id=payload.chat_id,
+                instance_id=payload.instance_id,
+                message=payload.message,
+                ai_response=response.answer,
+                routes=response.routes,
+                metadata=_build_log_metadata(response),
+            )
+            return response
+
+        if not roleplay_demo.get("active") and _is_explicit_plum_price_request(payload.message):
+            dialog_state["price_exposed"] = True
+            dialog_state["close_consented"] = True
+            if _is_all_functions_answer(payload.message) or re.search(
+                r"все\s+(?:вместе|функц|задач)|полностью|под\s+ключ",
+                payload.message.casefold().replace("ё", "е"),
+            ):
+                dialog_state["automation_goal"] = "all_sales_agent_functions"
+            session_metadata[DIALOG_STATE_KEY] = dialog_state
+            await supabase.upsert_chat_session_metadata(
+                instance_id=payload.instance_id,
+                channel=payload.channel,
+                chat_id=payload.chat_id,
+                metadata=session_metadata,
+            )
+            response = ChatResponse(
+                route=Route.checkout,
+                routes=[Route.checkout],
+                answer=_format_messenger_answer(_build_price_override_answer()),
+                checkout=False,
+                metadata={
+                    "price_override": True,
+                    "rag_context_found": False,
+                    "commercial_context_used": True,
+                    "tenant_found": bool(tenant_settings),
+                    "client_facts": client_facts,
+                    "dialog_state": dialog_state,
                     "server_history_used": bool(logged_history),
                     "logged_history_messages": len(logged_history),
                     "payload_history_messages": len(payload.chat_history),
@@ -733,54 +919,18 @@ async def chat(
                 chat_id=payload.chat_id,
             )
 
-        routes = await gemini.classify_routes(
-            payload.message,
-            effective_history,
-            system_prompt=tenant_settings.get("router_system_prompt", ""),
+        stage_transition = _infer_sales_stage_transition_local(
+            message=payload.message,
+            chat_history=effective_history,
             client_facts=client_facts,
+            dialog_state=dialog_state,
         )
-        if (
-            Route.roleplay in routes
-            and not roleplay_demo.get("active")
-            and not roleplay_demo.get("exit")
-        ):
-            topic = _extract_roleplay_demo_topic(payload.message)
-            roleplay_demo = {
-                "active": True,
-                "topic": topic,
-                "new_request": True,
-                "router_entry": True,
-            }
-            dialog_state["roleplay_demo_active"] = True
-            if topic:
-                dialog_state["roleplay_demo_topic"] = topic
-            session_metadata[DIALOG_STATE_KEY] = dialog_state
-            roleplay_gate_response = await _handle_roleplay_context_gate(
-                gemini=gemini,
-                supabase=supabase,
-                payload=payload,
-                effective_history=effective_history,
-                session_metadata=session_metadata,
-                dialog_state=dialog_state,
-                roleplay_demo=roleplay_demo,
-            )
-            if roleplay_gate_response is not None:
-                return roleplay_gate_response
-
-        stage_transition = await gemini.classify_sales_stage_transition(
-            payload.message,
-            effective_history,
-            client_facts=client_facts,
-        )
-        content_followup = await gemini.classify_content_followup(
-            payload.message,
-            effective_history,
-            client_facts=client_facts,
+        content_followup = _infer_content_followup_local(
+            message=payload.message,
+            chat_history=effective_history,
         )
         sales_stage = str(stage_transition.get("stage") or "none")
-        router_requested_roleplay_exit = Route.exit_roleplay in routes and bool(
-            roleplay_demo.get("active") or dialog_state.get("roleplay_demo_active")
-        )
+        router_requested_roleplay_exit = bool(roleplay_demo.get("exit"))
         if router_requested_roleplay_exit:
             roleplay_demo = {"active": False, "exit": True, "router_exit": True}
             _clear_roleplay_state(dialog_state)
@@ -793,19 +943,12 @@ async def chat(
             )
 
         roleplay_demo_active = bool(roleplay_demo.get("active"))
-        routes = [
-            route
-            for route in routes
-            if route not in {Route.exit_roleplay, Route.roleplay}
-        ]
+        routes = [Route.rag_required]
         if roleplay_demo_active:
             routes = [Route.general]
             stage_transition = {"stage": "none", "commercial_intent": False, "checkout_intent": False}
             content_followup = "none"
             sales_stage = "none"
-        elif roleplay_demo.get("exit") and Route.rag_required not in routes:
-            routes = [route for route in routes if route != Route.general]
-            routes.append(Route.rag_required)
         if content_followup != "none":
             sales_stage = "none"
         sales_stage = _apply_dialog_state_stage_override(
@@ -869,6 +1012,8 @@ async def chat(
         rag_context = ""
         rewritten_query = ""
         commercial_context = ""
+        combined_predicted_route: Route | None = None
+        combined_json_valid: bool | None = None
         response_instruction = _join_non_empty(
             _format_buying_readiness_instruction(dialog_state),
             _format_content_followup_instruction(content_followup),
@@ -935,31 +1080,116 @@ async def chat(
             selected_product = _with_checkout_product_image(selected_product)
 
         if roleplay_demo_active:
-            answer = await gemini.answer_roleplay_with_demo_context(
+            combined_answer = await gemini.answer_roleplay_with_demo_context_json(
                 message=payload.message,
                 chat_history=effective_history,
                 topic=str(dialog_state.get("roleplay_demo_topic") or ""),
                 demo_context=str(dialog_state.get(ROLEPLAY_CONTEXT_SUMMARY_KEY) or ""),
                 no_file_fallback=bool(dialog_state.get(ROLEPLAY_NO_FILE_FALLBACK_KEY)),
             )
+            combined_predicted_route = combined_answer.get("predicted_route")
+            combined_json_valid = bool(combined_answer.get("json_valid"))
+            answer = str(combined_answer.get("text_response") or "").strip()
+            if not combined_json_valid or not answer:
+                answer = await gemini.answer_roleplay_with_demo_context(
+                    message=payload.message,
+                    chat_history=effective_history,
+                    topic=str(dialog_state.get("roleplay_demo_topic") or ""),
+                    demo_context=str(dialog_state.get(ROLEPLAY_CONTEXT_SUMMARY_KEY) or ""),
+                    no_file_fallback=bool(dialog_state.get(ROLEPLAY_NO_FILE_FALLBACK_KEY)),
+                )
+            elif combined_predicted_route == Route.exit_roleplay:
+                router_requested_roleplay_exit = True
+                roleplay_demo = {"active": False, "exit": True, "router_exit": True}
+                _clear_roleplay_state(dialog_state)
+                session_metadata[DIALOG_STATE_KEY] = dialog_state
+                roleplay_demo_active = False
+                routes = [Route.rag_required]
+                answer = (
+                    "Маску снял, вернулся в режим архитектора Plum Dev. "
+                    "Теперь можем посчитать, как собрать такого ИИ-продавца под ваш продукт: "
+                    "какие 2-3 действия он должен делать вместо менеджера?"
+                )
         elif force_checkout_from_last_price and selected_product:
             answer = _build_create_cart_answer(selected_product)
         else:
-            answer = await _answer_with_rag_retry(
-                gemini=gemini,
+            combined_answer = await gemini.answer_with_route_json(
                 message=payload.message,
-                effective_history=effective_history,
+                chat_history=effective_history,
                 rag_context=rag_context,
                 commercial_context=commercial_context,
                 memory_context=memory_context,
                 response_instruction=response_instruction,
                 system_prompt_addon=tenant_settings.get("system_prompt_addon", ""),
                 final_system_prompt=tenant_settings.get("final_system_prompt", ""),
+                router_system_prompt=tenant_settings.get("router_system_prompt", ""),
                 client_facts=client_facts,
             )
+            combined_predicted_route = combined_answer.get("predicted_route")
+            combined_json_valid = bool(combined_answer.get("json_valid"))
+            answer = str(combined_answer.get("text_response") or "").strip()
+            if not combined_json_valid or not answer:
+                answer = await _answer_with_rag_retry(
+                    gemini=gemini,
+                    message=payload.message,
+                    effective_history=effective_history,
+                    rag_context=rag_context,
+                    commercial_context=commercial_context,
+                    memory_context=memory_context,
+                    response_instruction=response_instruction,
+                    system_prompt_addon=tenant_settings.get("system_prompt_addon", ""),
+                    final_system_prompt=tenant_settings.get("final_system_prompt", ""),
+                    client_facts=client_facts,
+                )
+            elif (
+                combined_predicted_route == Route.roleplay
+                and not roleplay_demo.get("active")
+                and _is_explicit_roleplay_command(payload.message)
+            ):
+                topic = _extract_roleplay_demo_topic(payload.message)
+                roleplay_demo = {
+                    "active": True,
+                    "topic": topic,
+                    "new_request": True,
+                    "router_entry": True,
+                }
+                dialog_state["roleplay_demo_active"] = True
+                if topic:
+                    dialog_state["roleplay_demo_topic"] = topic
+                session_metadata[DIALOG_STATE_KEY] = dialog_state
+                roleplay_gate_response = await _handle_roleplay_context_gate(
+                    gemini=gemini,
+                    supabase=supabase,
+                    payload=payload,
+                    effective_history=effective_history,
+                    session_metadata=session_metadata,
+                    dialog_state=dialog_state,
+                    roleplay_demo=roleplay_demo,
+                )
+                if roleplay_gate_response is not None:
+                    return roleplay_gate_response
+            elif combined_predicted_route == Route.exit_roleplay and (
+                roleplay_demo.get("active") or dialog_state.get("roleplay_demo_active")
+            ):
+                router_requested_roleplay_exit = True
+                roleplay_demo = {"active": False, "exit": True, "router_exit": True}
+                _clear_roleplay_state(dialog_state)
+                session_metadata[DIALOG_STATE_KEY] = dialog_state
+                roleplay_demo_active = False
+                routes = [Route.rag_required]
+        roleplay_output_active = _is_roleplay_output_context(
+            answer=answer,
+            roleplay_demo_active=roleplay_demo_active,
+            dialog_state=dialog_state,
+        )
+        # Skip all B2B commercial post-processors when in roleplay OR on the exact turn
+        # roleplay exits. The exit turn's answer is already a bridge phrase back to Plum Dev;
+        # running qualification/CTA appenders on it would corrupt it with $300 tags and
+        # "В проект добавим: [user objection]" artifacts.
+        skip_b2b_postprocessing = roleplay_output_active or router_requested_roleplay_exit
         contact_guard_answer = (
             None
-            if roleplay_demo_active
+            if skip_b2b_postprocessing
             else _checkout_contact_guard_answer(
                 message=payload.message,
                 chat_history=effective_history,
@@ -972,9 +1202,9 @@ async def chat(
             answer = contact_guard_answer or answer
             has_checkout_close_intent = False
             selected_product = None
-        if _is_which_option_better_question(payload.message) and not roleplay_demo_active:
+        if _is_which_option_better_question(payload.message) and not skip_b2b_postprocessing:
             answer = _repair_which_option_better_answer(answer, client_facts)
-        if sales_stage == "stage_3_price":
+        if sales_stage == "stage_3_price" and not skip_b2b_postprocessing:
             answer = _repair_stage_3_price_answer(answer, dialog_state)
         if _should_collapse_acknowledgement_after_answer(
             message=payload.message,
@@ -983,16 +1213,49 @@ async def chat(
             sales_stage=sales_stage,
             content_followup=content_followup,
             has_explicit_commercial_intent=has_explicit_commercial_intent,
-        ) and not roleplay_demo_active:
+        ) and not skip_b2b_postprocessing:
             answer = _build_acknowledgement_continuation_answer(
                 client_facts=client_facts,
                 dialog_state=dialog_state,
             )
-        if not roleplay_demo_active:
+        if roleplay_output_active:
+            answer = _sanitize_roleplay_output(answer)
+        elif not router_requested_roleplay_exit:
+            # B2B post-processors only run when fully outside roleplay context
+            answer = _cleanup_plum_cta_from_roleplay_answer(answer)
             answer = _remove_forbidden_traffic_question_after_milestone(
                 answer,
                 dialog_state,
             )
+            answer = _repair_completed_function_qualification_answer(
+                answer=answer,
+                user_message=payload.message,
+                dialog_state=dialog_state,
+            )
+            answer = _repair_forbidden_roleplay_gate_answer(
+                answer,
+                payload.message,
+            )
+            answer = _cleanup_contact_cta_after_phone_collected(
+                answer=answer,
+                user_message=payload.message,
+                dialog_state=dialog_state,
+                client_facts=client_facts,
+            )
+        answer = _sanitize_prompt_leakage_answer(answer)
+        if not skip_b2b_postprocessing:
+            answer = _ensure_sales_initiative_answer(
+                answer=answer,
+                user_message=payload.message,
+                dialog_state=dialog_state,
+            )
+        if not skip_b2b_postprocessing and _phone_already_collected(
+            payload.message,
+            dialog_state,
+            client_facts,
+        ):
+            answer = _final_contact_confirmation_answer()
+        answer = _format_messenger_answer(answer)
         dialog_state = _update_dialog_state_after_answer(
             dialog_state=dialog_state,
             user_message=payload.message,
@@ -1046,6 +1309,12 @@ async def chat(
                 "roleplay_awaiting_context_file": bool(dialog_state.get(ROLEPLAY_AWAITING_CONTEXT_KEY)),
                 "roleplay_context_source": dialog_state.get(ROLEPLAY_CONTEXT_SOURCE_KEY),
                 "roleplay_no_file_fallback": bool(dialog_state.get(ROLEPLAY_NO_FILE_FALLBACK_KEY)),
+                "combined_json_valid": combined_json_valid,
+                "combined_predicted_route": (
+                    combined_predicted_route.value
+                    if isinstance(combined_predicted_route, Route)
+                    else None
+                ),
                 "checkout_contact_guard": contact_guard_triggered,
                 "checkout_products": [
                     product.model_dump(exclude_none=True)
@@ -1092,7 +1361,7 @@ async def chat(
                 return ChatResponse(
                     route=Route.general,
                     routes=[Route.general],
-                    answer=_build_generation_error_answer(exc),
+                    answer=_format_messenger_answer(_build_generation_error_answer(exc)),
                     metadata={
                         "provider_quota_limited": True,
                         "fallback_answer": False,
@@ -1104,7 +1373,7 @@ async def chat(
             return ChatResponse(
                 route=Route.general,
                 routes=[Route.general],
-                answer=_build_generation_fallback_answer(payload),
+                answer=_format_messenger_answer(_build_generation_fallback_answer(payload)),
                 metadata={
                     "provider_quota_limited": True,
                     "fallback_answer": True,
@@ -1117,7 +1386,7 @@ async def chat(
             return ChatResponse(
                 route=Route.general,
                 routes=[Route.general],
-                answer=_build_generation_error_answer(exc),
+                answer=_format_messenger_answer(_build_generation_error_answer(exc)),
                 metadata={
                     "generation_failed": True,
                     "fallback_answer": False,
@@ -1128,7 +1397,7 @@ async def chat(
         return ChatResponse(
             route=Route.general,
             routes=[Route.general],
-            answer=_build_generation_fallback_answer(payload),
+            answer=_format_messenger_answer(_build_generation_fallback_answer(payload)),
             metadata={
                 "generation_failed": True,
                 "fallback_answer": True,
@@ -1228,10 +1497,10 @@ def _build_generation_error_answer(exc: Exception) -> str:
     text = _exception_chain_text(exc).lower()
     if "429" in text or "quota" in text or "resource_exhausted" in text:
         return (
-            "Gemini сейчас не ответил: Google вернул лимит/квоту по API-ключу. "
+            "ИИ сейчас не ответил: Google вернул лимит/квоту по API-ключу. "
             "Проверьте billing/quota для проекта этого GEMINI_API_KEY."
         )
-    return "Gemini сейчас не ответил. Подробная причина записана в логах микросервиса."
+    return "ИИ сейчас не ответил. Подробная причина записана в логах микросервиса."
 
 
 def _build_generation_fallback_answer(payload: ChatRequest) -> str:
@@ -1322,6 +1591,81 @@ def _is_ai_project_timeline_question(message: str, full_context: str) -> bool:
     return asks_timing and project_context
 
 
+def _infer_sales_stage_transition_local(
+    *,
+    message: str,
+    chat_history: list[ChatHistoryMessage],
+    client_facts: dict[str, object],
+    dialog_state: dict[str, object],
+) -> dict[str, object]:
+    normalized = message.casefold().replace("ё", "е")
+    last_assistant = _last_assistant_message(chat_history).casefold().replace("ё", "е")
+    stage = "none"
+    commercial_intent = False
+    checkout_intent = False
+
+    if _is_explicit_plum_price_request(message):
+        stage = "stage_3_price"
+        commercial_intent = True
+    elif _contains_close_consent_signal(message) or (
+        _is_affirmative_short_reply(normalized)
+        and re.search(r"посчитать|расчет|рассчитать|собрать\s+спецификац|начнем\s+с", last_assistant)
+    ):
+        stage = "stage_3_price"
+        commercial_intent = True
+    elif _has_explicit_commercial_intent(message, None):
+        stage = "stage_3_price"
+        commercial_intent = True
+    elif _is_affirmative_short_reply(normalized) and re.search(
+        r"вариант|пакет|сравн|показать|объяснить|разложить",
+        last_assistant,
+    ):
+        stage = "stage_2_comparison"
+        commercial_intent = True
+
+    if (
+        _is_affirmative_short_reply(normalized)
+        and dialog_state.get("price_exposed")
+        and re.search(r"оформ|заявк|перейти|запуск|беру|подходит", normalized)
+    ):
+        stage = "stage_4_checkout"
+        commercial_intent = True
+        checkout_intent = True
+
+    return {
+        "stage": stage,
+        "commercial_intent": commercial_intent,
+        "checkout_intent": checkout_intent,
+    }
+
+
+def _infer_content_followup_local(
+    *,
+    message: str,
+    chat_history: list[ChatHistoryMessage],
+) -> str:
+    previous_assistant = _last_assistant_message(chat_history)
+    if "?" not in previous_assistant:
+        return "none"
+
+    full_context = f"{previous_assistant}\n{message}".casefold().replace("ё", "е")
+    normalized = message.casefold().replace("ё", "е")
+    if _is_ai_agent_mechanism_question(message, full_context) or (
+        _is_affirmative_short_reply(normalized)
+        and re.search(r"как\s+(?:это|он|агент|бот)\s+работ|механизм|за\s+счет\s+чего", previous_assistant.casefold().replace("ё", "е"))
+    ):
+        return "mechanism_detail"
+    if (
+        re.search(r"безопасн|надежн|качество|ошиб|контрол|доступ\s+к\s+данным", normalized)
+        or (
+            _is_affirmative_short_reply(normalized)
+            and re.search(r"безопасн|надежн|качество|ошиб|контрол", previous_assistant.casefold().replace("ё", "е"))
+        )
+    ):
+        return "safety_quality_detail"
+    return "none"
+
+
 def _is_affirmative_after_fallback_offer(
     message: str,
     chat_history: list[ChatHistoryMessage],
@@ -1395,6 +1739,69 @@ def _is_affirmative_short_reply(normalized_message: str) -> bool:
         "ok",
     }
     return normalized in affirmative_phrases
+
+
+def _is_all_functions_answer(message: str) -> bool:
+    normalized = re.sub(r"[^\w\sа-яА-ЯёЁ-]", " ", message.casefold().replace("ё", "е"))
+    normalized = " ".join(normalized.split())
+    exact_match = normalized in {
+        "все",
+        "все вместе",
+        "все функции",
+        "все задачи",
+        "сразу все",
+        "хочу все",
+        "хочу все вместе",
+        "хочу сразу все",
+        "нужно все",
+        "нужно все вместе",
+        "каждая",
+        "каждую",
+        "каждое",
+        "каждый",
+        "любые",
+        "любая",
+        "любой",
+        "любую",
+        "полностью",
+        "под ключ",
+    }
+    if exact_match:
+        return True
+    return bool(
+        re.search(r"\b(?:хочу|нужно|надо|сделать|автоматизировать|внедрить)?\s*(?:сразу\s+)?все\s+(?:вместе|функц|задач|процесс|под\s+ключ)\b", normalized)
+        or re.search(r"\b(?:комплексн\w+|под\s+ключ|полная\s+автоматизац|автоматизировать\s+все)\b", normalized)
+    )
+
+
+def _is_nonempty_qualification_answer(message: str) -> bool:
+    normalized = re.sub(r"[^\w\sа-яА-ЯёЁ-]", " ", message.casefold().replace("ё", "е"))
+    normalized = " ".join(normalized.split())
+    return bool(normalized)
+
+
+def _latest_assistant_asked_agent_tasks(chat_history: list[ChatHistoryMessage]) -> bool:
+    previous = _last_assistant_message(chat_history).casefold().replace("ё", "е")
+    return bool(
+        re.search(r"какие\s+.*(?:задач|функц|действ)", previous)
+        or re.search(r"что\s+из\s+этого\s+.*(?:важн|главн)", previous)
+        or re.search(r"какие\s+2-3\s+действ", previous)
+        or re.search(r"что\s+(?:вы\s+)?хотите\s+автоматиз", previous)
+        or re.search(r"(?:задач|функц|действ).{0,80}(?:ии-?агент|бот|ассистент)", previous)
+    )
+
+
+def _is_explicit_plum_price_request(message: str) -> bool:
+    normalized = message.casefold().replace("ё", "е")
+    price_marker = bool(
+        re.search(r"\bсколько\s+(?:будет\s+)?(?:стоить|стоит|имплементир|внедр|сделать|собрать)", normalized)
+        or re.search(r"\b(?:цена|стоимость|прайс|бюджет|смета)\b", normalized)
+        or re.search(r"\bкакой\s+бюджет\b", normalized)
+    )
+    project_marker = bool(
+        re.search(r"ии|ai|агент|бот|автоматизац|имплемент|внедр|сделать|собрать|все\s+вместе|под\s+ключ", normalized)
+    )
+    return price_marker and project_marker
 
 
 def _strip_generation_fallback_history(
@@ -1551,9 +1958,25 @@ def _format_dialog_state_instruction(
     instructions: list[str] = []
     business_sphere = str(client_facts.get("business_sphere") or "").strip()
     lead_channel = str(client_facts.get("lead_channel") or "").strip()
-    automation_goal = str(client_facts.get("automation_goal") or "").strip()
+    automation_goal = str(client_facts.get("automation_goal") or dialog_state.get("automation_goal") or "").strip()
+    automation_goal_text = str(dialog_state.get("automation_goal_text") or "").strip()
 
     last_offer_type = str(dialog_state.get("last_offer_type") or "")
+    if dialog_state.get("all_agent_functions_selected") or automation_goal == "all_sales_agent_functions":
+        instructions.append(
+            "Dialog state: the user answered broadly ('все/каждая/любые') to the agent task selection question. "
+            "Accept it as a valid final answer: all agent functions are selected. "
+            "It is strictly forbidden to ask again which tasks/functions are most important. "
+            "Say: 'Отличный подход, комплексная автоматизация дает максимальный эффект.' "
+            "Move forward to project specification calculation, price orientation, or the next concrete implementation step."
+        )
+    elif dialog_state.get("qualification_tasks_completed") or automation_goal == "custom_agent_functions":
+        instructions.append(
+            "Dialog state: the user already answered the bot/AI-agent function qualification question. "
+            f"Captured task wording: {automation_goal_text or 'the user gave a free-form/vague answer'}. "
+            "Treat this qualification step as completed. It is strictly forbidden to ask again what the bot should automate, which 2-3 actions it should do, or what is most important. "
+            "Confirm the captured task and move forward to project specification calculation or price orientation in the same message."
+        )
     if (
         business_sphere
         and lead_channel
@@ -1630,6 +2053,23 @@ def _build_dialog_state_for_request(
     current_focus = _extract_service_focus(message)
     if current_focus:
         state["current_product_focus"] = current_focus
+    if _latest_assistant_asked_agent_tasks(chat_history) and _is_nonempty_qualification_answer(message):
+        if _is_all_functions_answer(message):
+            state["automation_goal"] = "all_sales_agent_functions"
+            state["all_agent_functions_selected"] = True
+            state["price_exposed"] = True
+            state["close_consented"] = True
+        else:
+            state["automation_goal"] = "custom_agent_functions"
+            state["automation_goal_text"] = message.strip()[:240]
+        state["qualification_tasks_completed"] = True
+        state["last_offer_type"] = "price_calculation"
+        state["last_offer_product"] = "agent"
+    phone = _extract_phone_digits(message) or str(client_facts.get("contact_phone") or "").strip()
+    if phone:
+        state["contact_phone"] = phone
+        state["contact_phone_collected"] = True
+        state["close_consented"] = True
 
     recommended = _recommended_service_from_facts(client_facts)
     if recommended:
@@ -1717,6 +2157,8 @@ def _normalize_dialog_state(state: dict[str, object]) -> dict[str, object]:
             "price_agent_presented",
             "last_assistant_had_question",
             "roleplay_demo_active",
+            "all_agent_functions_selected",
+            "qualification_tasks_completed",
             ROLEPLAY_AWAITING_CONTEXT_KEY,
             ROLEPLAY_NO_FILE_FALLBACK_KEY,
             *BUYING_MILESTONE_KEYS,
@@ -1742,10 +2184,10 @@ def _normalize_dialog_state(state: dict[str, object]) -> dict[str, object]:
             if isinstance(value, list):
                 normalized[key] = [str(item)[:80] for item in value if str(item).strip()][-12:]
             continue
-        if key in {"last_offer_type", "last_offer_basis"}:
+        if key in {"last_offer_type", "last_offer_basis", "automation_goal", "automation_goal_text"}:
             text = str(value).strip()
             if text:
-                normalized[key] = text[:80]
+                normalized[key] = text[:240 if key == "automation_goal_text" else 80]
     return normalized
 
 
@@ -1824,7 +2266,7 @@ def _should_block_commercial_until_goal(
         return False
     business_sphere = str(client_facts.get("business_sphere") or "").strip()
     lead_channel = str(client_facts.get("lead_channel") or "").strip()
-    automation_goal = str(client_facts.get("automation_goal") or "").strip()
+    automation_goal = str(client_facts.get("automation_goal") or dialog_state.get("automation_goal") or "").strip()
     return bool(business_sphere and lead_channel and not automation_goal)
 
 
@@ -1838,6 +2280,11 @@ def _update_dialog_state_after_answer(
     selected_product: ProductCard | None,
 ) -> dict[str, object]:
     state = dict(dialog_state)
+    phone = _extract_phone_digits(user_message)
+    if phone:
+        state["contact_phone"] = phone
+        state["contact_phone_collected"] = True
+        state["close_consented"] = True
     user_focus = _extract_service_focus(user_message)
     answer_focus = _extract_service_focus(answer)
     if user_focus:
@@ -1944,6 +2391,8 @@ def _assistant_offered_both_options(normalized_text: str) -> bool:
 def _contains_price_signal(normalized_text: str) -> bool:
     return bool(
         re.search(r"(?:\$|₸|тг|тенге|usd|kzt)", normalized_text)
+        or re.search(r"сколько\s+(?:будет\s+)?(?:стоить|стоит|имплементир|внедр|сделать|собрать)", normalized_text)
+        or re.search(r"\b(?:цена|стоимость|прайс|бюджет|смета)\b", normalized_text)
         or re.search(r"(?:цена|стоимост|прайс|смет|бюджет).{0,40}\d", normalized_text)
         or re.search(r"\d[\d\s]{2,}.{0,20}(?:тенге|тг|₸|usd|доллар)", normalized_text)
     )
@@ -2127,6 +2576,378 @@ def _remove_forbidden_traffic_question_after_milestone(
     if close_question.casefold() in repaired.casefold():
         return repaired
     return _join_non_empty(repaired, close_question)
+
+
+def _repair_forbidden_roleplay_gate_answer(answer: str, message: str) -> str:
+    if _is_explicit_roleplay_command(message):
+        return answer
+    normalized_answer = (answer or "").casefold().replace("ё", "е")
+    if not (
+        "переключаюсь в режим тест-драйва" in normalized_answer
+        or "жду ваш файл или текст" in normalized_answer
+        or "прикрепить pdf-каталог" in normalized_answer
+    ):
+        return answer
+    return (
+        "Тест-драйв запускается только по явной команде на ролевую игру, чтобы я случайно не смешал его с обычным расчетом проекта.\n\n"
+        "А по текущему вопросу можем идти дальше к спецификации: какие 2-3 действия бот должен делать вместо менеджера?"
+    )
+
+
+def _repair_completed_function_qualification_answer(
+    *,
+    answer: str,
+    user_message: str,
+    dialog_state: dict[str, object],
+) -> str:
+    if not (
+        dialog_state.get("qualification_tasks_completed")
+        or dialog_state.get("all_agent_functions_selected")
+        or str(dialog_state.get("automation_goal") or "") in {"all_sales_agent_functions", "custom_agent_functions"}
+    ):
+        return answer
+
+    normalized_answer = (answer or "").casefold().replace("ё", "е")
+    repeated_question = bool(
+        re.search(r"какие\s+(?:именно\s+)?(?:2-3\s+)?(?:задач|функц|действ)", normalized_answer)
+        or re.search(r"что\s+из\s+этого\s+.*(?:важн|приоритет|главн)", normalized_answer)
+        or re.search(r"что\s+(?:вы\s+)?хотите\s+автоматиз", normalized_answer)
+        or re.search(r"(?:задач|функц|действ).{0,90}(?:наиболее|самое|приоритет)", normalized_answer)
+    )
+    stale_technical_question = bool(
+        re.search(r"(?:какой|какая|какую|чем).{0,80}(?:crm|срм|таблиц|сайт|интеграц|канал|трафик|источник).*\?", normalized_answer)
+    )
+
+    if dialog_state.get("all_agent_functions_selected") or _is_all_functions_answer(user_message):
+        intro = "Отличный подход, комплексная автоматизация дает максимальный эффект."
+        captured = "В расчет включаем весь блок: база знаний, квалификация, сбор контактов и передача горячего лида менеджеру."
+    else:
+        goal_text = str(dialog_state.get("automation_goal_text") or user_message or "").strip()
+        intro = "Да, это понятный scope для старта."
+        captured = (
+            f"В проект добавим: {goal_text[:180]}."
+            if goal_text
+            else "В проект добавим ответы клиентам, прогрев и передачу заявки менеджеру."
+        )
+
+    forced_forward = (
+        f"{intro}\n\n"
+        f"{captured}\n\n"
+        "Базовое внедрение Plum Dev стартует от $300. Чтобы посчитать точную стоимость под ваш бюджет, давайте сделаем финальный расчет — на какой номер в WhatsApp удобнее отправить спецификацию?"
+    )
+    if repeated_question or (
+        dialog_state.get("all_agent_functions_selected") and stale_technical_question
+    ):
+        return forced_forward
+
+    has_forward_step = bool(
+        re.search(r"спецификац|финальн\w*\s+расчет|расч[её]т|whatsapp|ватсап|\$300|300", normalized_answer)
+    )
+    if has_forward_step:
+        return answer
+
+    return _join_non_empty(answer, forced_forward)
+
+
+def _sanitize_prompt_leakage_answer(answer: str) -> str:
+    normalized = (answer or "").strip()
+    if not normalized:
+        return answer
+
+    forbidden_line_patterns = (
+        r"^\s*сбор\s+всех\s+данных\s+о\s+клиенте\s*$",
+        r"^\s*квалификац(?:ия|ия\s+клиента)?\s*$",
+        r"^\s*следующий\s+шаг\s*$",
+        r"^\s*задача\s+ясна\.?\s*$",
+        r"^\s*понял\s+задач[уы]\.?\s*$",
+        r"^\s*в\s+расчет\s+бер[уе].*$",
+        r"^\s*фиксируем\s+в\s+спецификац.*$",
+        r"^\s*response\s+instruction\s*:?\s*$",
+        r"^\s*prompt\s*:?\s*$",
+        r"^\s*system\s*:?\s*$",
+    )
+    forbidden_inline_patterns = (
+        r"что\s+обычно\s+спрашивают\s+клиенты\s+перед\s+тем,\s+как\s+замолчать\??",
+        r"системн(?:ый|ого)\s+промпт",
+        r"техническ(?:ие|их)\s+инструкц",
+        r"переменн(?:ые|ая)\s+из\s+.*промпт",
+        r"задача\s+ясна\.?",
+        r"понял\s+задач[уы]\.?",
+        r"в\s+расчет\s+бер[уе][^.!?\n]*[.!?]?",
+        r"фиксируем\s+в\s+спецификац[^.!?\n]*[.!?]?",
+    )
+
+    kept_lines: list[str] = []
+    removed = False
+    for line in normalized.splitlines():
+        compact = line.strip()
+        lowered = compact.casefold().replace("ё", "е")
+        if any(re.search(pattern, lowered) for pattern in forbidden_line_patterns):
+            removed = True
+            continue
+        cleaned = compact
+        for pattern in forbidden_inline_patterns:
+            new_cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip()
+            if new_cleaned != cleaned:
+                removed = True
+                cleaned = new_cleaned
+        if cleaned:
+            kept_lines.append(cleaned)
+
+    repaired = "\n".join(kept_lines).strip()
+    repaired = re.sub(r"\n{3,}", "\n\n", repaired).strip()
+    if repaired:
+        return repaired
+    if removed:
+        return "Продолжим без внутренней кухни.\n\nКакой вопрос сейчас важнее разобрать?"
+    return answer
+
+
+def _is_roleplay_output_context(
+    *,
+    answer: str,
+    roleplay_demo_active: bool,
+    dialog_state: dict[str, object],
+) -> bool:
+    return bool(
+        roleplay_demo_active
+        or dialog_state.get("roleplay_demo_active")
+        or dialog_state.get(ROLEPLAY_CONTEXT_SUMMARY_KEY)
+        or _looks_like_roleplay_acceptance_answer(answer)
+    )
+
+
+def _sanitize_roleplay_output(answer: str) -> str:
+    normalized = (answer or "").strip()
+    if not normalized:
+        return answer
+
+    forbidden_line_patterns = (
+        r"задача\s+ясна\.?",
+        r"понял\s+задач[уы]\.?",
+        r"в\s+расчет\s+бер[уе][^.!?\n]*[.!?]?",
+        r"фиксируем\s+в\s+спецификац[^.!?\n]*[.!?]?",
+        r"закладываем\s+в\s+спецификац[^.!?\n]*[.!?]?",
+        r"базовое\s+внедрение\s+plum\s+dev[^.!?\n]*[.!?]?",
+        r"plum\s+dev[^.!?\n]*(?:спецификац|whatsapp|ватсап|\$300|300)[^.!?\n]*[.!?]?",
+        r"[^.!?\n]*(?:на\s+какой\s+номер|whatsapp|ватсап)[^.!?\n]*(?:спецификац|расчет|расч[её]т|plum|номер)[^.!?\n]*[?!.]?",
+        r"[^.!?\n]*(?:ии-?агент|ai-?агент|бот)[^.!?\n]*(?:спецификац|расчет|расч[её]т|\$300|300)[^.!?\n]*[?!.]?",
+    )
+    repaired = normalized
+    for pattern in forbidden_line_patterns:
+        repaired = re.sub(pattern, "", repaired, flags=re.IGNORECASE)
+    repaired = re.sub(r"[ \t]+\n", "\n", repaired)
+    repaired = re.sub(r"\n{3,}", "\n\n", repaired).strip()
+    repaired = _sanitize_prompt_leakage_answer(repaired)
+    if repaired:
+        return _format_roleplay_b2c_answer(repaired)
+    return "Продолжим в роли.\n\nКакое возражение клиента отрабатываем?"
+
+
+def _format_roleplay_b2c_answer(answer: str) -> str:
+    normalized = (answer or "").strip()
+    if not normalized:
+        return answer
+
+    compact = " ".join(line.strip() for line in normalized.splitlines() if line.strip())
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", compact)
+        if sentence.strip()
+    ]
+    if not sentences:
+        return compact
+
+    question = next((sentence for sentence in sentences if "?" in sentence), "")
+    argument = next((sentence for sentence in sentences if "?" not in sentence), "")
+    selected = [item for item in (argument, question) if item] or sentences[:2]
+
+    words: list[str] = []
+    for sentence in selected:
+        remaining = 50 - len(words)
+        if remaining <= 0:
+            break
+        words.extend(sentence.split()[:remaining])
+
+    shortened = " ".join(words).strip()
+    if question and "?" not in shortened:
+        shortened = _join_non_empty(shortened.rstrip(".!"), question)
+
+    lines = [
+        line.strip()
+        for line in re.split(r"(?<=[.!?])\s+", shortened)
+        if line.strip()
+    ][:4]
+    return "\n\n".join(lines).strip()
+
+
+def _cleanup_plum_cta_from_roleplay_answer(answer: str) -> str:
+    normalized = (answer or "").strip()
+    if not normalized or not _looks_like_roleplay_acceptance_answer(normalized):
+        return answer
+
+    plum_cta_pattern = re.compile(
+        r"(?:^|[\n.!?]\s*)"
+        r"[^.!?\n]*(?:"
+        r"plum\s*dev|плам|ии-?агент|ai-?агент|спецификац|расчет|расч[её]т|\$300|300|whatsapp|ватсап"
+        r")[^.!?\n]*(?:номер|спецификац|расчет|расч[её]т|стоимост|проект|бот|агент)[^.!?\n]*[?!.]?",
+        re.IGNORECASE,
+    )
+    repaired = plum_cta_pattern.sub("", normalized).strip()
+    repaired = re.sub(r"\n{3,}", "\n\n", repaired).strip()
+    return repaired or normalized
+
+
+def _looks_like_roleplay_acceptance_answer(answer: str) -> bool:
+    normalized = (answer or "").casefold().replace("ё", "е")
+    return bool(
+        re.search(r"\bпринято[,! ]+\s*погнали\b", normalized)
+        or re.search(r"\bпредстав(?:ьте|ь),?\s+что\s+я\b", normalized)
+        or re.search(r"\b(?:включаю|запускаю|переключаюсь)\s+(?:режим\s+)?(?:продавц|менеджер|консультант|ролев|тест-драйв)", normalized)
+        or re.search(r"\b(?:я\s+[-—]\s+)?(?:ваш|твой)\s+(?:продавец|менеджер|консультант)\b", normalized)
+        or re.search(r"\bнапишите\s+(?:ваше\s+)?(?:сомнение|возражение|главный\s+вопрос)\b", normalized)
+    )
+
+
+def _ensure_sales_initiative_answer(
+    *,
+    answer: str,
+    user_message: str,
+    dialog_state: dict[str, object],
+) -> str:
+    normalized = (answer or "").strip()
+    if not normalized:
+        return answer
+    if _looks_like_roleplay_acceptance_answer(normalized) or _is_explicit_roleplay_command(user_message):
+        return _cleanup_plum_cta_from_roleplay_answer(normalized)
+    if _phone_already_collected(user_message, dialog_state):
+        return _final_contact_confirmation_answer()
+    if _answer_has_live_ending(normalized):
+        return answer
+
+    if _is_all_functions_answer(user_message) or dialog_state.get("all_agent_functions_selected"):
+        cta = (
+            "Комплексный scope фиксируем от $300 на старте.\n\n"
+            "На какой номер в WhatsApp отправить короткую спецификацию и расчет?"
+        )
+    elif dialog_state.get("price_exposed") or dialog_state.get("close_consented"):
+        cta = "Давайте доведем это до расчета: на какой номер в WhatsApp отправить спецификацию?"
+    elif _is_counter_question_to_ai_value(user_message):
+        cta = "Если хотите, сразу разложу это на ваш бизнес: что сейчас сильнее всего тормозит продажи?"
+    elif dialog_state.get("demo_activated"):
+        cta = "Давайте посчитаем такого же ИИ-продавца под ваш продукт?"
+    else:
+        cta = "Давайте сделаем следующий шаг: зафиксируем, что именно должен автоматизировать бот?"
+
+    return _join_non_empty(normalized, cta)
+
+
+def _cleanup_contact_cta_after_phone_collected(
+    *,
+    answer: str,
+    user_message: str,
+    dialog_state: dict[str, object],
+    client_facts: dict[str, object],
+) -> str:
+    if not _phone_already_collected(user_message, dialog_state, client_facts):
+        return answer
+    return _final_contact_confirmation_answer()
+
+
+def _phone_already_collected(
+    user_message: str,
+    dialog_state: dict[str, object],
+    client_facts: dict[str, object] | None = None,
+) -> bool:
+    facts = client_facts or {}
+    return bool(
+        _extract_phone_digits(user_message)
+        or dialog_state.get("contact_phone_collected")
+        or str(dialog_state.get("contact_phone") or "").strip()
+        or str(facts.get("contact_phone") or "").strip()
+    )
+
+
+def _final_contact_confirmation_answer() -> str:
+    return (
+        "Отлично, номер записал!\n\n"
+        "Передаю спецификацию менеджеру, он свяжется с вами в WhatsApp в течение 10 минут.\n\n"
+        "На связи!"
+    )
+
+
+def _looks_like_final_contact_confirmation(answer: str) -> bool:
+    normalized = (answer or "").casefold().replace("ё", "е")
+    return bool(
+        re.search(r"(номер|телефон).{0,50}(запис|зафикс|получ)", normalized)
+        and re.search(r"(переда|свяж|менедж|whatsapp|ватсап)", normalized)
+    )
+
+
+def _answer_has_live_ending(answer: str) -> bool:
+    compact = answer.strip()
+    if not compact:
+        return False
+    last_block = compact.split("\n\n")[-1].strip().casefold().replace("ё", "е")
+    if "?" in last_block:
+        return True
+    return bool(
+        re.search(
+            r"(?:/roleplay|whatsapp|ватсап|напишите|пришлите|отправьте|оставьте|скиньте|введите|давайте|зафиксируем|перейдем|рассчитаем|соберем|переходим)",
+            last_block,
+        )
+        and not last_block.endswith(".")
+    )
+
+
+def _is_counter_question_to_ai_value(message: str) -> bool:
+    normalized = message.casefold().replace("ё", "е")
+    return bool(
+        "?" in message
+        and re.search(r"\b(?:зачем|почему|что|как|какую|какой)\b", normalized)
+        and re.search(r"\b(?:ии|ai|бот|агент|автоматиз|нейросет|робот)\b", normalized)
+    )
+
+
+def _format_messenger_answer(answer: str) -> str:
+    normalized = (answer or "").strip()
+    if not normalized:
+        return answer
+
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    raw_paragraphs = [
+        paragraph.strip()
+        for paragraph in re.split(r"\n\s*\n+", normalized)
+        if paragraph.strip()
+    ]
+    formatted: list[str] = []
+    for paragraph in raw_paragraphs:
+        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+        if _looks_like_list_block(lines):
+            formatted.append("\n".join(lines))
+            continue
+
+        compact = " ".join(lines)
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", compact)
+            if sentence.strip()
+        ]
+        if len(sentences) <= 2:
+            formatted.append(compact)
+            continue
+
+        for index in range(0, len(sentences), 2):
+            formatted.append(" ".join(sentences[index : index + 2]).strip())
+
+    return "\n\n".join(part for part in formatted if part).strip()
+
+
+def _looks_like_list_block(lines: list[str]) -> bool:
+    if len(lines) < 2:
+        return False
+    list_marker = re.compile(r"^\s*(?:[•*\-]|\d+[.)]|[^\w\s])")
+    return any(list_marker.search(line) for line in lines)
 
 
 def _repair_stage_3_price_answer(answer: str, dialog_state: dict[str, object]) -> str:
@@ -2382,15 +3203,103 @@ def _message_has_phone_and_project_detail(message: str) -> bool:
     if not normalized:
         return False
 
-    phone_match = PHONE_PATTERN.search(normalized)
-    if not phone_match:
-        return False
-
-    digits = re.sub(r"\D", "", phone_match.group(0))
-    if len(digits) < 7:
+    digits = _extract_phone_digits(normalized)
+    if not digits:
         return False
 
     return bool(PROJECT_DETAIL_PATTERN.search(normalized))
+
+
+def _ru_words_to_int(word_tokens: list[str]) -> int | None:
+    """Parse a short list of Russian number words (up to 3 tokens) into an integer.
+
+    Handles patterns like ["девятьсот", "девяносто", "девять"] → 999.
+    Returns None if any token is unrecognised.
+    """
+    total = 0
+    for w in word_tokens:
+        if w in _RU_HUNDREDS:
+            total += _RU_HUNDREDS[w]
+        elif w in _RU_TENS:
+            total += _RU_TENS[w]
+        elif w in _RU_ONES_MAP:
+            total += _RU_ONES_MAP[w]
+        else:
+            return None
+    return total
+
+
+def _extract_phone_from_words(text: str) -> str:
+    """Extract a phone number written as Russian words.
+
+    Handles patterns like "плюс семь девятьсот девяносто девять сто двадцать три..."
+    Returns a raw digit string (no spaces/dashes) or "" if nothing phone-like found.
+    """
+    normalized = text.lower()
+    # Tokenise: keep Cyrillic words and literal '+'
+    tokens = re.findall(r"[а-яё]+|[+]", normalized)
+
+    # Replace 'плюс' with a sentinel so we can detect it without special-casing later
+    tokens = ["+" if t == "плюс" else t for t in tokens]
+
+    has_plus = False
+    number_groups: list[int] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "+":
+            has_plus = True
+            i += 1
+            continue
+        if tok in _RU_HUNDREDS:
+            val = _RU_HUNDREDS[tok]
+            i += 1
+            if i < len(tokens) and tokens[i] in _RU_TENS:
+                val += _RU_TENS[tokens[i]]
+                i += 1
+            if i < len(tokens) and tokens[i] in _RU_ONES_MAP:
+                ones_val = _RU_ONES_MAP[tokens[i]]
+                if ones_val < 20:  # guard: not a second hundred-block sneaking in
+                    val += ones_val
+                    i += 1
+            number_groups.append(val)
+        elif tok in _RU_TENS:
+            val = _RU_TENS[tok]
+            i += 1
+            if i < len(tokens) and tokens[i] in _RU_ONES_MAP:
+                ones_val = _RU_ONES_MAP[tokens[i]]
+                if ones_val < 20:
+                    val += ones_val
+                    i += 1
+            number_groups.append(val)
+        elif tok in _RU_ONES_MAP:
+            number_groups.append(_RU_ONES_MAP[tok])
+            i += 1
+        else:
+            # Non-number word: break if we already have enough digits, otherwise reset
+            digit_so_far = "".join(str(g) for g in number_groups)
+            if len(digit_so_far) >= 7:
+                break
+            number_groups = []
+            has_plus = False
+            i += 1
+
+    digit_str = "".join(str(g) for g in number_groups)
+    if len(digit_str) < 7:
+        return ""
+    if has_plus and not digit_str.startswith("7"):
+        digit_str = "7" + digit_str
+    return digit_str
+
+
+def _extract_phone_digits(text: str) -> str:
+    match = PHONE_PATTERN.search(text or "")
+    if match:
+        digits = re.sub(r"\D", "", match.group(0))
+        if len(digits) >= 7:
+            return digits
+    # Fallback: phone written as Russian words
+    return _extract_phone_from_words(text or "")
 
 
 def _extract_client_name(
@@ -2441,6 +3350,9 @@ def _merge_client_facts_for_request(
         current_message=message,
         existing_facts=stored_facts,
     )
+    phone = _extract_phone_digits(message)
+    if phone:
+        facts["contact_phone"] = phone
     return _normalize_client_facts(facts)
 
 
@@ -2456,6 +3368,7 @@ def _normalize_client_facts(facts: dict[str, object]) -> dict[str, object]:
         "name",
         "first_name",
         "client_name",
+        "contact_phone",
     }
 
     for key in text_fields:

@@ -27,7 +27,7 @@ class ChatAttachment(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    channel: Literal["telegram", "whatsapp", "web_site"]
+    channel: Literal["telegram", "whatsapp", "instagram", "web_site"]
     chat_id: str = Field(..., min_length=1)
     instance_id: str = Field(..., min_length=1)
     message: str = ""
