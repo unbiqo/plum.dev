@@ -510,12 +510,18 @@ class SupabaseService:
             "chat_id": chat_id,
         }
         for table_name in ("chat_logs", "user_memories", "chat_sessions"):
+            if table_name == "chat_sessions" and self._chat_sessions_available is False:
+                continue
             try:
                 query = self.client.table(table_name).delete()
                 for column, value in filters.items():
                     query = query.eq(column, value)
                 query.execute()
-            except Exception:
+            except Exception as exc:
+                if table_name == "chat_sessions" and self._is_missing_table_error(exc):
+                    self._chat_sessions_available = False
+                    logger.warning("chat_sessions unavailable; skipped session state clear")
+                    continue
                 logger.exception("Failed to clear %s for reset_context", table_name)
 
     def _get_user_memory_sync(self, instance_id: str, channel: str, chat_id: str) -> str:
@@ -555,9 +561,13 @@ class SupabaseService:
                 .limit(1)
                 .execute()
             )
-        except Exception:
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._chat_sessions_available = False
+                logger.warning("chat_sessions unavailable; using chat_logs fact scan fallback")
+                return {}
             self._chat_sessions_available = False
-            logger.warning("chat_sessions unavailable; using chat_logs fact scan fallback")
+            logger.exception("Failed to fetch chat session metadata")
             return {}
 
         self._chat_sessions_available = True
@@ -589,9 +599,13 @@ class SupabaseService:
                 },
                 on_conflict="instance_id,channel,chat_id",
             ).execute()
-        except Exception:
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._chat_sessions_available = False
+                logger.warning("chat_sessions unavailable; skipped session metadata upsert")
+                return
             self._chat_sessions_available = False
-            logger.warning("chat_sessions unavailable; skipped session metadata upsert")
+            logger.exception("Failed to upsert chat session metadata")
 
     def _fetch_recent_chat_history_sync(
         self,
@@ -749,3 +763,12 @@ class SupabaseService:
             return parsed.replace(tzinfo=timezone.utc)
 
         return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _is_missing_table_error(exc: Exception) -> bool:
+        text = str(exc)
+        return (
+            "PGRST205" in text
+            or "Could not find the table" in text
+            or "schema cache" in text and "chat_sessions" in text
+        )

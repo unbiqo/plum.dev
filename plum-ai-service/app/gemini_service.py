@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import difflib
 import json
 import logging
 import re
 from threading import Lock
+from urllib import request as urllib_request
+from urllib.parse import urlparse
 
 from google import genai
 from google.genai import errors, types
@@ -25,13 +29,14 @@ from .gemini_quota import (
     estimate_tokens,
     normalize_model_name,
 )
-from .schemas import ChatHistoryMessage, Route
+from .schemas import ChatAttachment, ChatHistoryMessage, Route
 
 
 logger = logging.getLogger(__name__)
 
 ECONOMY_MAX_OUTPUT_TOKENS = 384
 COMPLETION_RETRY_MAX_OUTPUT_TOKENS = 512
+MAX_MULTIMODAL_ATTACHMENT_BYTES = 6 * 1024 * 1024
 BASE_ASSISTANT_OFFER_NAME = "Базовый ИИ-ассистент"
 AUTO_CART_OFFER_NAME = "Авто-корзина под ключ"
 AI_AGENT_IMPLEMENTATION_OFFER_NAME = "ИИ-агент под ключ"
@@ -40,18 +45,29 @@ ROUTER_SYSTEM_PROMPT = """You are a strict multi-label router for an AI developm
 
 Analyze the user's message and select ALL applicable categories from the list:
 GENERAL - greetings, small talk, unrelated messages, or simple non-technical questions.
+ROLEPLAY - the user asks to demonstrate, simulate, roleplay, act as a seller/manager/consultant in a niche, or show how the AI would sell a product/service in a pretend conversation.
 RAG_REQUIRED - AI agents, knowledge bases, integrations, CRM, funnel automation, smart carts, implementation details, cases, portfolio, or any question requiring exact knowledge-base facts.
 CHECKOUT - the user wants pricing, a project estimate, to buy a ready solution, book a call, start implementation, create a cart/deal, or proceed with purchase.
+EXIT_ROLEPLAY - the conversation is currently in a roleplay/demo/simulation and the user wants to stop acting, remove the role mask, return to the real AI-agent/Plum Dev discussion, get back to business, or asks how much it costs to build a bot like the demonstrated roleplay.
 
 Do not infer CHECKOUT from a generic confirmation alone. Contextual stage transitions are handled by the dedicated sales-stage router.
+If EXIT_ROLEPLAY applies, include EXIT_ROLEPLAY together with RAG_REQUIRED when the user asks about AI agents, bot cost, automation, or implementing a similar bot.
+If ROLEPLAY applies, return ROLEPLAY. Do not also return RAG_REQUIRED unless the user is asking about Plum Dev implementation facts.
 
 Your response must be a valid JSON array of strings.
 Examples:
 ["GENERAL"]
+["ROLEPLAY"]
 ["RAG_REQUIRED"]
 ["RAG_REQUIRED", "CHECKOUT"]
+["EXIT_ROLEPLAY", "RAG_REQUIRED"]
 
 Do not explain. Do not wrap the JSON in markdown."""
+
+EXIT_ROLEPLAY_ROUTER_RULE = """Additional route:
+ROLEPLAY - use when the user asks to demonstrate, simulate, roleplay, or act as a seller/manager/consultant in a niche.
+EXIT_ROLEPLAY - use when the recent conversation is a roleplay/demo/simulation and the user semantically asks to stop it or return to the real AI-agent/Plum Dev business discussion. This includes indirect wording such as "хватит", "завязывай", "давай к делу", "сними маску", "выйди из роли", "вернись к ИИ", "я про ИИ агента", or "сколько стоит сделать такого бота".
+If EXIT_ROLEPLAY applies and the user asks about building, pricing, automation, or AI agents, return both EXIT_ROLEPLAY and RAG_REQUIRED."""
 
 SALES_STAGE_ROUTER_PROMPT = """You classify the next sales-dialog stage for an AI development and automation consultant.
 
@@ -192,7 +208,7 @@ STYLE_GUARD_PROMPT = """Style guardrail:
 - Any follow-up question to the client must be separated from the main answer by a blank line (`\n\n`).
 - Ideal style pattern:
   Client: "Что такое ИИ-агент?"
-  Bot: "Это сотрудник в чате, который отвечает клиентам, квалифицирует заявки и передает горячих в CRM. Подскажите, где сейчас теряются заявки: сайт, Instagram, WhatsApp или менеджеры?"
+  Bot: "Это сотрудник в чате, который отвечает клиентам, квалифицирует заявки и передает горячих в CRM.\n\nПодскажите, основной поток клиентов сейчас идет из Instagram или сразу в WhatsApp?"
 """
 
 CONTEXT_RELEVANCE_GUARD_PROMPT = """Context relevance guardrail:
@@ -353,6 +369,18 @@ Rules:
 Good target style: short exact answer plus one adaptive next move when useful.
 """
 
+ROLEPLAY_DEMO_SYSTEM_PROMPT = """You are running a live sales roleplay demo for the user's requested niche.
+
+This mode is isolated from Plum Dev sales.
+Do not sell AI agents, automation, audits, checkout products, CRM handoff, implementation packages, or Plum Dev services.
+Do not use RAG, tenant commercial context, previous AI-service offers, or AI-agent prices.
+Stay inside the requested seller role until the user clearly exits the demo.
+If a demo file/context is provided, use only facts from that file/context for concrete prices, terms, product specs, availability, delivery, guarantees, and conditions. Do not invent missing facts.
+If no demo file/context is provided, you may improvise from general knowledge, but be transparent that a file or catalog would make the demo more exact.
+If the user switches niche with a short phrase such as "а теперь продавца пептидов", treat it as a new roleplay request.
+If the requested niche involves health, supplements, peptides, medication, or weight loss, keep claims cautious: do not promise treatment, guaranteed weight loss, diagnosis, dosage, or medical safety. Suggest checking contraindications with a doctor when relevant.
+Answer in Russian, briefly, as the seller in that niche."""
+
 
 CRITICAL_COMMERCIAL_TRIGGER_RULE = (
     "КРИТИЧЕСКОЕ ПРАВИЛО: веди диалог как живой опытный B2B-продавец, а не как анкета. "
@@ -426,12 +454,14 @@ class GeminiService:
                 model=self.settings.router_model,
                 model_pool=self.settings.router_model_pool,
                 prompt=prompt,
-                system_instruction=self._resolve_system_prompt(
-                    system_prompt,
-                    ROUTER_SYSTEM_PROMPT,
+                system_instruction=self._ensure_exit_roleplay_router_rule(
+                    self._resolve_system_prompt(
+                        system_prompt,
+                        ROUTER_SYSTEM_PROMPT,
+                    )
                 ),
                 temperature=0,
-                max_output_tokens=32,
+                max_output_tokens=64,
             )
         except Exception as exc:
             if self._is_quota_or_rate_limit_error(exc):
@@ -442,7 +472,7 @@ class GeminiService:
                 logger.exception("Gemini router failed; falling back to heuristic routes")
             return self._heuristic_routes(message)
 
-        return self._parse_routes(text)
+        return self._parse_routes(text, fallback_routes=heuristic_routes)
 
     async def classify_route(
         self,
@@ -600,6 +630,7 @@ class GeminiService:
         final_system_prompt: str = "",
         client_facts: dict[str, object] | None = None,
     ) -> str:
+        roleplay_mode = self._is_roleplay_demo_instruction(response_instruction)
         prompt = "\n\n".join(
             [
                 self._format_chat_prompt(message, chat_history, client_facts),
@@ -619,6 +650,24 @@ class GeminiService:
                 "Answer in Russian using only the relevant context above.",
             ]
         )
+        if roleplay_mode:
+            system_instruction = "\n\n".join(
+                [
+                    ROLEPLAY_DEMO_SYSTEM_PROMPT,
+                    response_instruction,
+                ]
+            )
+            return (
+                await self._generate_text(
+                    model=self.settings.general_model,
+                    model_pool=self.settings.general_model_pool,
+                    prompt=prompt,
+                    system_instruction=system_instruction,
+                    temperature=0.2,
+                    max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
+                )
+            ).strip()
+
         base_system_prompt = self._resolve_system_prompt(
             final_system_prompt,
             FINAL_SYSTEM_PROMPT,
@@ -679,6 +728,7 @@ class GeminiService:
             rag_context=rag_context,
             commercial_context=commercial_context,
             response_instruction=response_instruction,
+            final_system_prompt=final_system_prompt,
             client_facts=client_facts,
         )
         final_answer = await self._avoid_repeated_answer(
@@ -695,7 +745,80 @@ class GeminiService:
             final_answer,
             chat_history,
         )
+        final_answer = self._remove_stale_or_repeated_question(
+            final_answer,
+            chat_history,
+            client_facts,
+        )
+        final_answer = self._soften_absolute_sales_guarantees(final_answer)
         return self._ensure_followup_question_spacing(final_answer)
+
+    async def extract_roleplay_context_from_attachment(
+        self,
+        *,
+        message: str,
+        topic: str,
+        attachments: list[ChatAttachment],
+    ) -> str:
+        prompt = "\n\n".join(
+            [
+                "Analyze the attached demo file for a sales roleplay.",
+                f"Requested roleplay niche/product: {topic or 'infer from file and user message'}",
+                f"User message/caption: {message or 'No caption provided.'}",
+                (
+                    "Extract only concrete facts visible in the file: products, prices, packages, specs, terms, "
+                    "delivery/payment conditions, objections that can be answered, and claims that are safe to use. "
+                    "Do not invent missing facts. If the file is an image, read visible text and infer only obvious table/catalog structure. "
+                    "Return a compact Russian fact sheet for a seller roleplay. No markdown table is needed."
+                ),
+            ]
+        )
+        return await self._generate_multimodal_text(
+            model=self.settings.general_model,
+            model_pool=self.settings.general_model_pool,
+            prompt=prompt,
+            system_instruction=(
+                "You extract temporary sales-demo context from user-provided files. "
+                "The extracted facts are session-local and must not be treated as tenant knowledge base."
+            ),
+            attachments=attachments,
+            temperature=0,
+            max_output_tokens=768,
+        )
+
+    async def answer_roleplay_with_demo_context(
+        self,
+        *,
+        message: str,
+        chat_history: list[ChatHistoryMessage],
+        topic: str,
+        demo_context: str,
+        no_file_fallback: bool = False,
+    ) -> str:
+        fallback_note = (
+            "No file was provided. Start the demo anyway, but briefly say that with a price/catalog file the answer would be more exact."
+            if no_file_fallback
+            else "Use the demo file context as the source of concrete facts."
+        )
+        prompt = "\n\n".join(
+            [
+                self._format_chat_prompt(message, chat_history),
+                f"Current demo niche/product: {topic or 'infer from recent messages'}.",
+                "Temporary demo file/context:",
+                demo_context or "No file context was provided.",
+                fallback_note,
+                "Start or continue the roleplay as the seller in this niche. Answer the user's latest message inside the role.",
+            ]
+        )
+        answer = await self._generate_text(
+            model=self.settings.general_model,
+            model_pool=self.settings.general_model_pool,
+            prompt=prompt,
+            system_instruction=ROLEPLAY_DEMO_SYSTEM_PROMPT,
+            temperature=0.2,
+            max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
+        )
+        return self._ensure_followup_question_spacing(answer.strip())
 
     async def _rewrite_sales_answer(
         self,
@@ -706,8 +829,12 @@ class GeminiService:
         rag_context: str,
         commercial_context: str,
         response_instruction: str = "",
+        final_system_prompt: str = "",
         client_facts: dict[str, object] | None = None,
     ) -> str:
+        if self._is_roleplay_demo_instruction(response_instruction):
+            return draft_answer
+
         prompt = "\n\n".join(
             [
                 "Conversation state:",
@@ -733,6 +860,10 @@ class GeminiService:
             ]
         )
         try:
+            base_system_prompt = self._resolve_system_prompt(
+                final_system_prompt,
+                FINAL_SYSTEM_PROMPT,
+            )
             rewritten = await self._generate_text(
                 model=self.settings.general_model,
                 model_pool=self.settings.general_model_pool,
@@ -742,6 +873,7 @@ class GeminiService:
                         self._ensure_critical_commercial_trigger_rule(
                             SALES_REWRITE_SYSTEM_PROMPT
                         ),
+                        base_system_prompt,
                         STYLE_GUARD_PROMPT,
                         CONTEXT_RELEVANCE_GUARD_PROMPT,
                         FLOW_FLEXIBILITY_GUARD_PROMPT,
@@ -923,6 +1055,12 @@ class GeminiService:
         return normalized_candidate or fallback
 
     @staticmethod
+    def _ensure_exit_roleplay_router_rule(system_prompt: str) -> str:
+        if "EXIT_ROLEPLAY" in (system_prompt or ""):
+            return system_prompt
+        return "\n\n".join([system_prompt.rstrip(), EXIT_ROLEPLAY_ROUTER_RULE])
+
+    @staticmethod
     def _sanitize_prompt_flow_rules(prompt: str) -> str:
         normalized_prompt = (prompt or "").strip()
         if not normalized_prompt:
@@ -997,6 +1135,10 @@ class GeminiService:
                 *rules,
             ]
         )
+
+    @staticmethod
+    def _is_roleplay_demo_instruction(response_instruction: str) -> bool:
+        return "ROLEPLAY DEMO MODE IS ACTIVE" in (response_instruction or "")
 
     async def _avoid_repeated_answer(
         self,
@@ -1146,6 +1288,83 @@ class GeminiService:
         separator = "\n\n" if "\n\n" not in prefix[-4:] else "\n"
         return f"{prefix}{separator}{replacement}"
 
+    @classmethod
+    def _remove_stale_or_repeated_question(
+        cls,
+        answer: str,
+        chat_history: list[ChatHistoryMessage],
+        client_facts: dict[str, object] | None = None,
+    ) -> str:
+        stripped = answer.rstrip()
+        match = re.search(r"(?P<prefix>.*?)(?P<question>[^.!?\n]*\?)\s*$", stripped, re.DOTALL)
+        if not match:
+            return answer
+
+        closing_question = match.group("question").strip()
+        if not closing_question:
+            return answer
+
+        normalized_question = closing_question.casefold().replace("ё", "е")
+        facts = client_facts or {}
+        lead_channel_known = bool(str(facts.get("lead_channel") or "").strip())
+        if lead_channel_known and (
+            re.search(r"где.{0,40}теря.{0,40}заяв", normalized_question)
+            or re.search(r"канал.{0,40}(заяв|клиент|привлеч)", normalized_question)
+        ):
+            return match.group("prefix").rstrip()
+
+        recent_questions: list[str] = []
+        for item in chat_history[-8:]:
+            if item.role != "assistant":
+                continue
+            recent_questions.extend(
+                question.strip()
+                for question in re.findall(r"[^.!?\n]*\?", item.content)
+                if question.strip()
+            )
+
+        normalized_closing = cls._normalize_for_repeat_check(closing_question)
+        for previous_question in recent_questions:
+            normalized_previous = cls._normalize_for_repeat_check(previous_question)
+            if not normalized_previous:
+                continue
+            if normalized_previous == normalized_closing:
+                return match.group("prefix").rstrip()
+            if (
+                min(len(normalized_previous), len(normalized_closing)) >= 35
+                and difflib.SequenceMatcher(
+                    None,
+                    normalized_previous,
+                    normalized_closing,
+                ).ratio()
+                >= 0.82
+            ):
+                return match.group("prefix").rstrip()
+
+        return answer
+
+    @staticmethod
+    def _soften_absolute_sales_guarantees(answer: str) -> str:
+        softened = re.sub(
+            r"так что\s+ни\s+одна\s+заявка\s+не\s+потеряется",
+            "это снижает риск потерянных заявок",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        softened = re.sub(
+            r"гарантирует,\s+что\s+ни\s+од(?:ин|на)\s+(?:клиент|заявка)[^.?!]*(?:не\s+будет\s+упущен[а]?|не\s+потеряется)",
+            "помогает снизить риск пропущенных обращений",
+            softened,
+            flags=re.IGNORECASE,
+        )
+        softened = re.sub(
+            r"\bни\s+од(?:ин|на)\s+(?:клиент|заявка)\s+не\s+(?:будет\s+)?(?:упущен[а]?|потеряется)",
+            "меньше обращений будет теряться",
+            softened,
+            flags=re.IGNORECASE,
+        )
+        return softened
+
     @staticmethod
     def _has_commercial_cta_marker(text: str) -> bool:
         normalized = text.casefold()
@@ -1169,8 +1388,8 @@ class GeminiService:
     def _select_neutral_followup(recent_assistant: list[str]) -> str:
         used_text = " ".join(recent_assistant).casefold()
         alternatives = (
-            "Какая у вас цель по весу?",
-            "Рассказать подробнее, как работает препарат?",
+            "Что обычно спрашивают клиенты перед тем, как замолчать?",
+            "Вы условия текстом скидываете или голосом?",
         )
         return next(
             (
@@ -1374,6 +1593,167 @@ class GeminiService:
 
         return await asyncio.to_thread(call_model)
 
+    @retry(
+        retry=retry_if_exception(is_retryable_gemini_unavailable),
+        wait=wait_fixed(2),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    async def _generate_multimodal_text(
+        self,
+        *,
+        model: str,
+        model_pool: tuple[str, ...] | None = None,
+        prompt: str,
+        system_instruction: str,
+        attachments: list[ChatAttachment],
+        temperature: float,
+        max_output_tokens: int | None = None,
+    ) -> str:
+        parts = self._attachment_parts(attachments)
+        if not parts:
+            raise RuntimeError("Cannot run multimodal generation without readable attachments")
+
+        def call_model() -> str:
+            output_token_budget = max_output_tokens or ECONOMY_MAX_OUTPUT_TOKENS
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=temperature,
+                max_output_tokens=output_token_budget,
+            )
+            candidates = model_pool or (model,)
+            last_exc: BaseException | None = None
+            local_limit_errors: list[BaseException] = []
+            estimated_tokens = estimate_tokens(
+                prompt,
+                system_instruction,
+                max_output_tokens=output_token_budget,
+            )
+
+            for candidate_model in candidates:
+                key_order = self._ordered_api_keys()
+                for api_key in key_order:
+                    lease: GeminiQuotaLease | None = None
+                    try:
+                        lease = self.quota.reserve_for_key(
+                            key_name=api_key.name,
+                            model=candidate_model,
+                            estimated_tokens=estimated_tokens,
+                        )
+                    except GeminiQuotaExhausted as exc:
+                        local_limit_errors.append(exc)
+                        self._advance_active_key(api_key.name)
+                        continue
+
+                    try:
+                        response = self.clients[api_key.name].models.generate_content(
+                            model=candidate_model,
+                            contents=[prompt, *parts],
+                            config=config,
+                        )
+                    except Exception as exc:
+                        last_exc = exc
+                        self.quota.refund(lease)
+                        if self._is_quota_or_rate_limit_error(exc):
+                            self.quota.cool_down(lease, exc)
+                            self._advance_active_key(api_key.name)
+                            continue
+                        logger.warning(
+                            "Gemini multimodal generation failed for model=%s key=%s; trying next key/model: %s",
+                            candidate_model,
+                            api_key.name,
+                            exc,
+                        )
+                        continue
+
+                    if not response.text:
+                        last_exc = RuntimeError(
+                            f"Gemini model {lease.model} returned an empty multimodal response"
+                        )
+                        self.quota.complete(lease, self._response_token_count(response))
+                        continue
+
+                    text = response.text.strip()
+                    self.quota.complete(
+                        lease,
+                        self._response_token_count(response)
+                        or estimate_tokens(
+                            prompt,
+                            system_instruction,
+                            text,
+                            max_output_tokens=0,
+                        ),
+                    )
+                    self._set_active_key(api_key.name)
+                    return text
+
+            if last_exc is None and local_limit_errors:
+                last_exc = local_limit_errors[-1]
+            raise RuntimeError(
+                f"Gemini multimodal API error for model pool {candidates}: {last_exc}"
+            ) from last_exc
+
+        return await asyncio.to_thread(call_model)
+
+    @staticmethod
+    def _attachment_parts(attachments: list[ChatAttachment]) -> list[types.Part]:
+        parts: list[types.Part] = []
+        for attachment in attachments[:3]:
+            data = GeminiService._attachment_bytes(attachment)
+            if not data:
+                continue
+            parts.append(types.Part.from_bytes(data=data, mime_type=attachment.mime_type))
+        return parts
+
+    @staticmethod
+    def _attachment_bytes(attachment: ChatAttachment) -> bytes:
+        if attachment.base64_data:
+            try:
+                data = base64.b64decode(attachment.base64_data, validate=True)
+            except (binascii.Error, ValueError):
+                logger.warning(
+                    "Skipped attachment %s because base64_data is invalid",
+                    attachment.filename or "<unnamed>",
+                )
+                return b""
+            return GeminiService._validate_attachment_size(attachment, data)
+
+        if attachment.url:
+            parsed = urlparse(attachment.url)
+            if parsed.scheme not in {"http", "https"}:
+                logger.warning(
+                    "Skipped attachment %s because url scheme is unsupported: %s",
+                    attachment.filename or "<unnamed>",
+                    parsed.scheme,
+                )
+                return b""
+            try:
+                with urllib_request.urlopen(attachment.url, timeout=15) as response:
+                    data = response.read(MAX_MULTIMODAL_ATTACHMENT_BYTES + 1)
+            except Exception as exc:
+                logger.warning(
+                    "Skipped attachment %s because url download failed: %s",
+                    attachment.filename or "<unnamed>",
+                    exc,
+                )
+                return b""
+            return GeminiService._validate_attachment_size(attachment, data)
+
+        return b""
+
+    @staticmethod
+    def _validate_attachment_size(attachment: ChatAttachment, data: bytes) -> bytes:
+        if not data:
+            return b""
+        if len(data) > MAX_MULTIMODAL_ATTACHMENT_BYTES:
+            logger.warning(
+                "Skipped attachment %s because it is too large: %s bytes",
+                attachment.filename or "<unnamed>",
+                len(data),
+            )
+            return b""
+        return data
+
     def _ordered_api_keys(self) -> list:
         if not self.api_keys:
             return []
@@ -1429,7 +1809,13 @@ class GeminiService:
         name = getattr(reason, "name", "")
         return str(name or reason or "").upper()
 
-    def _parse_routes(self, text: str) -> list[Route]:
+    def _parse_routes(
+        self,
+        text: str,
+        *,
+        fallback_routes: list[Route] | None = None,
+    ) -> list[Route]:
+        fallback = list(fallback_routes or [Route.general])
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
@@ -1437,17 +1823,17 @@ class GeminiService:
             end = text.rfind("]")
             if start == -1 or end == -1 or end <= start:
                 logger.warning("Gemini router returned non-JSON routes: %r", text)
-                return [Route.rag_required]
+                return fallback
 
             try:
                 parsed = json.loads(text[start : end + 1])
             except json.JSONDecodeError:
                 logger.warning("Gemini router returned invalid JSON routes: %r", text)
-                return [Route.rag_required]
+                return fallback
 
         if not isinstance(parsed, list):
             logger.warning("Gemini router returned non-list routes: %r", text)
-            return [Route.rag_required]
+            return fallback
 
         routes: list[Route] = []
         for item in parsed:
@@ -1459,7 +1845,7 @@ class GeminiService:
 
         if not routes:
             logger.warning("Gemini router returned empty routes: %r", text)
-            return [Route.rag_required]
+            return fallback
 
         if Route.general in routes and len(routes) > 1:
             routes = [route for route in routes if route != Route.general]
@@ -1546,6 +1932,42 @@ class GeminiService:
 
     def _heuristic_routes(self, message: str) -> list[Route]:
         normalized = message.lower()
+        exit_roleplay_keywords = (
+            "выйти из роли",
+            "выйди из роли",
+            "выходи из роли",
+            "сними маску",
+            "хватит играть",
+            "хватит роль",
+            "завязывай",
+            "давай к делу",
+            "вернись к ии",
+            "вернись к ai",
+            "я про ии агента",
+            "сколько стоит сделать такого бота",
+            "сколько будет стоить сделать такого бота",
+        )
+        if any(keyword in normalized for keyword in exit_roleplay_keywords):
+            routes = [Route.exit_roleplay]
+            if re.search(r"ии|ai|агент|бот|автоматизац|стоимост|цен|сколько", normalized):
+                routes.append(Route.rag_required)
+            return routes
+
+        roleplay_keywords = (
+            "сыграй роль",
+            "сымитир",
+            "симулир",
+            "продай мне",
+            "покажи как",
+            "будь продав",
+            "будь менеджер",
+            "веди диалог будто",
+            "а теперь продавца",
+            "теперь продавца",
+        )
+        if any(keyword in normalized for keyword in roleplay_keywords):
+            return [Route.roleplay]
+
         checkout_keywords = (
             "купить",
             "заказать",
@@ -1858,6 +2280,8 @@ class GeminiService:
                 current_message,
             ]
         ).casefold().replace("ё", "е")
+        previous_assistant = cls._last_assistant_message(chat_history).casefold().replace("ё", "е")
+        current_normalized = current_message.casefold().replace("ё", "е").strip()
 
         if match := re.search(r"https?://\S+|(?:instagram\.com|t\.me|wa\.me)/\S+|@\w{3,}", user_text):
             facts["website_or_social"] = match.group(0).strip(".,;)")
@@ -1880,9 +2304,16 @@ class GeminiService:
             if re.search(pattern, user_text):
                 facts["lead_channel"] = channel
                 break
+        if (
+            "lead_channel" not in facts
+            and re.fullmatch(r"(везде|со\s+всех|все\s+каналы|по\s+всем\s+каналам)", current_normalized)
+            and re.search(r"где|канал|заяв|клиент|теря", previous_assistant)
+        ):
+            facts["lead_channel"] = "all_channels"
+            facts.setdefault("automation_goal", "lead_qualification")
 
         stack_patterns = (
-            ("amoCRM", r"amo\s?crm|амосрм|амо"),
+            ("amoCRM", r"\bamo\s?crm\b|\bамосрм\b|\bамо(?:crm|срм)?\b"),
             ("Bitrix24", r"bitrix|битрикс"),
             ("HubSpot", r"hubspot"),
             ("Google Sheets", r"google sheets|гугл\s+таблиц|таблиц"),

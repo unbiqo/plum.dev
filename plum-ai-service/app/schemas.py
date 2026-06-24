@@ -10,6 +10,8 @@ class Route(str, Enum):
     general = "GENERAL"
     rag_required = "RAG_REQUIRED"
     checkout = "CHECKOUT"
+    roleplay = "ROLEPLAY"
+    exit_roleplay = "EXIT_ROLEPLAY"
 
 
 class ChatHistoryMessage(BaseModel):
@@ -17,13 +19,21 @@ class ChatHistoryMessage(BaseModel):
     content: str = Field(..., min_length=1)
 
 
+class ChatAttachment(BaseModel):
+    filename: str | None = None
+    mime_type: str = Field(..., min_length=1)
+    base64_data: str | None = None
+    url: str | None = None
+
+
 class ChatRequest(BaseModel):
     channel: Literal["telegram", "whatsapp", "web_site"]
     chat_id: str = Field(..., min_length=1)
     instance_id: str = Field(..., min_length=1)
-    message: str = Field(..., min_length=1)
+    message: str = ""
     chat_history: list[ChatHistoryMessage] = Field(default_factory=list)
     reset_context: bool = False
+    attachments: list[ChatAttachment] = Field(default_factory=list)
 
 
 class ProductCard(BaseModel):
