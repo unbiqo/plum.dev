@@ -1,0 +1,59 @@
+# Paraphrase variants of high-value cases — smoke-test robustness to wording.
+cases:
+  - id: ps_01_price_first_v2
+    title: Price-first, alternate phrasing
+    reset_before: true
+    messages:
+      - "Почём у вас всё это? Сразу скажите цену."
+    expected:
+      must_include_any: ["зависит", "ориентир", "вилк", "сценари"]
+      max_questions_per_answer: 1
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      no_prompt_leakage: true
+      expected_mode: simple_explainer
+      notes: "Different price wording must still yield an orientation, not a checkout card."
+
+  - id: ps_02_price_first_v3
+    title: Price-first, slang phrasing
+    reset_before: true
+    messages:
+      - "Сколько ценник выйдет?"
+    expected:
+      must_include_any: ["зависит", "ориентир", "вилк", "сценари"]
+      max_questions_per_answer: 1
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      no_prompt_leakage: true
+      notes: "Slangy price phrasing still triggers price-orientation behavior."
+
+  - id: ps_03_microbusiness_pain_v2
+    title: Microbusiness pain, alternate phrasing
+    reset_before: true
+    messages:
+      - "Один не вывожу переписки с клиентами, всё на мне."
+    expected:
+      must_include_any: ["врем", "успе", "клиент", "помож", "подхват"]
+      max_questions_per_answer: 1
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      no_prompt_leakage: true
+      expected_mode: microbusiness_helper
+      microbusiness_no_enterprise_pressure: true
+      notes: "Owner-overload paraphrase still routes to microbusiness_helper."
+
+  - id: ps_04_low_fit_v2
+    title: Low-fit, alternate phrasing
+    reset_before: true
+    messages:
+      - "Бизнеса у меня нет, просто интересно поиграться с ИИ."
+    expected:
+      no_checkout_card: true
+      no_prompt_leakage: true
+      price_safe: true
+      roi_safe: true
+      expected_mode: low_fit_nurture
+      notes: "No-business paraphrase still routes to low_fit_nurture, no hard close."

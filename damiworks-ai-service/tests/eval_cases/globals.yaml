@@ -1,0 +1,23 @@
+# Global eval configuration. Source of truth for always-on checks and default limits.
+# Merged by tests/eval_runner.py with every case file in this directory.
+# (Python carries the same values as a fallback only if no globals block is found.)
+globals:
+  # Applied to every case, every bot answer. Any occurrence => FAIL.
+  # These are internal/scaffolding strings that must never reach the user.
+  forbidden_phrases_all:
+    - "ИИ сейчас не ответил"
+    - "Подробная причина записана в логах"
+    - "your-portfolio.dev"
+    - "В проект добавим:"
+    - "[РЕЖИМ"
+    - "[КОММЕРЧЕСКАЯ ПОЛИТИКА"
+    - "shadow_"
+    - "conversation_mode"
+    - "predicted_route"
+    - "text_response"
+    - "system prompt"
+    - "$300"
+    - "$600"
+  # Default question-budget ceilings when a case does not override them.
+  default_max_questions_per_answer: 2
+  default_max_total_questions: 6

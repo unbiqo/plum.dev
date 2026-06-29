@@ -1,852 +1,1528 @@
-# Plum Dev AI Agent — Мастер-спецификация проекта
+# Dami Works AI Agent — Мастер-спецификация проекта
 
-> Версия: 1.1 · Дата: 2026-06-24 · Статус: живой документ
+> Версия: 1.2 · Дата: 2026-06-25 · Статус: целевая архитектура / replacement spec  
+> Этот документ заменяет `project_specs.md` v1.1 как основной источник контекста для Opus.  
+> Главная цель версии 1.2: перестроить Dami Works из roleplay-first бота в Adaptive Sales Intelligence систему, которая сама выбирает правильную глубину общения, wow-механизм и next best action под конкретного клиента.
+
+> **Статус реализации (Phases 1–9 завершены):** слой `sales_intelligence` реализован и подключён
+> в `api.py`. Актуальное состояние кода (pipeline, output-filter audit, что enabled/legacy)
+> задокументировано в [`docs/adaptive_sales_intelligence_v2.md`](docs/adaptive_sales_intelligence_v2.md).
+> Этот файл остаётся целевой спецификацией (intent); doc — снимок реализации. Не сделано:
+> LLM-extractor (canon Phase 3), prompt-режим `roleplay_demo` (намеренно legacy).
 
 ---
 
 ## Содержание
 
 1. [Product Vision & Business Context](#1-product-vision--business-context)
-2. [Обзор архитектуры системы](#2-обзор-архитектуры-системы)
-3. [Request Pipeline — детальный разбор](#3-request-pipeline)
-4. [Система роутинга](#4-система-роутинга)
-5. [Стейт-машина диалога](#5-стейт-машина-диалога)
-6. [Roleplay Demo Module](#6-roleplay-demo-module)
-7. [Технические требования: Cost / Efficiency](#7-технические-требования-cost--efficiency)
-8. [Омниканальность: текущее и роадмап](#8-омниканальность)
-9. [Слой данных (Supabase)](#9-слой-данных-supabase)
-10. [LLM Generation Pipeline](#10-llm-generation-pipeline)
-11. [SaaS / Multi-tenant контракт](#11-saas--multi-tenant-контракт)
-12. [Окружение и деплой](#12-окружение-и-деплой)
-13. [Известные пробелы и роадмап](#13-известные-пробелы-и-роадмап)
+2. [Ключевой архитектурный сдвиг v1.2](#2-ключевой-архитектурный-сдвиг-v12)
+3. [Conversation Modes](#3-conversation-modes)
+4. [Wow Mechanism Router](#4-wow-mechanism-router)
+5. [Целевая архитектура системы](#5-целевая-архитектура-системы)
+6. [Целевая структура проекта](#6-целевая-структура-проекта)
+7. [Request Pipeline v1.2](#7-request-pipeline-v12)
+8. [Session Metadata v1.2](#8-session-metadata-v12)
+9. [Sales Intelligence Layer](#9-sales-intelligence-layer)
+10. [Structured Extraction](#10-structured-extraction)
+11. [Conversation Strategy Engine](#11-conversation-strategy-engine)
+12. [ROI Engine](#12-roi-engine)
+13. [Roleplay Demo Module](#13-roleplay-demo-module)
+14. [Routing System](#14-routing-system)
+15. [Prompt Composer & LLM Generation](#15-prompt-composer--llm-generation)
+16. [Commercial / Price Handling Policy](#16-commercial--price-handling-policy)
+17. [Data Layer / Supabase](#17-data-layer--supabase)
+18. [Cost / Efficiency Requirements](#18-cost--efficiency-requirements)
+19. [Testing Requirements](#19-testing-requirements)
+20. [Migration Plan](#20-migration-plan)
+21. [Implementation Rules for Opus](#21-implementation-rules-for-opus)
 
 ---
 
 ## 1. Product Vision & Business Context
 
-### 1.1 Цель продукта и "Вау-эффект"
+### 1.1 Суть Dami Works
 
-Plum Dev AI Agent — это **флагманский продукт, живое портфолио и главный лидген-инструмент** компании Plum Dev одновременно.
+Dami Works продает не обычных чат-ботов и не кнопочные автоответчики. Dami Works создает AI-сотрудников нового поколения: AI-агентов, которые заменяют или усиливают продажи, поддержку, квалификацию лидов, follow-up и операционные процессы бизнеса.
 
-Бот продаёт ИИ-разработку самим фактом своего существования. Каждый контакт с потенциальным клиентом (предпринимателем) — это живая демонстрация уровня разработки:
+Главная задача Dami Works AI Agent — быть одновременно:
 
-- **Идеальное удержание контекста** — бот помнит всё сказанное клиентом с первого сообщения, продолжает переговоры с нужной точки даже после длинных пауз
-- **Скорость ответов** — мгновенный typing indicator, ответ в секунды, без "подождите пока посчитаю"
-- **Экспертная отработка возражений** — "дорого", "подумаю", "нам это не нужно" — обрабатываются как опытный B2B-продавец, не как FAQ-бот
-- **Живой персонаж** — бот звучит как опытный AI-архитектор, говорит на языке бизнес-результатов, не технического жаргона
+1. лидген-инструментом Dami Works;
+2. живым портфолио качества разработки;
+3. AI-продавцом, который квалифицирует клиентов;
+4. демонстрацией того, что такой же AI-сотрудник может работать в бизнесе клиента.
 
-**Метрика успеха вау-эффекта:** лид после ролевой игры сам говорит "как сделать такого же для меня?" — это момент конверсии.
+### 1.2 Главный принцип продаж
 
-### 1.2 Целевая аудитория
+Бот не должен продавать через анкету. Бот должен продавать через уместный wow-эффект.
 
-**Первичная:** предприниматели малого и среднего бизнеса (SMB), которые:
-- Продают через Instagram DM, WhatsApp, Telegram или собственный сайт
-- Теряют лиды из-за медленных ответов менеджеров или отсутствия дожима
-- Слышали про ИИ, но не понимают, как это работает на практике именно для их бизнеса
+Для разных клиентов wow-эффект разный:
 
-**Вторичная:** маркетологи и операционные директора компаний, ищущие инструменты автоматизации воронки продаж.
+- микробизнесу важно увидеть простоту, заботу, экономию времени и отсутствие потерянных диалогов;
+- зрелому SMB важно увидеть цифры, ROI, контроль воронки и потери из-за человеческого фактора;
+- integration-heavy клиенту важно увидеть, что Dami Works умеет связывать AI с CRM, складом, таблицами, календарем, оплатой и внутренними процессами;
+- cold lead нужно сначала простое объяснение, а не вопросы про маржу и CRM;
+- low-fit клиенту нельзя выдумывать окупаемость — его нужно мягко прогреть или честно объяснить, когда AI станет актуален.
 
-**Анти-профиль (не наш клиент):** технари, ищущие open-source решения; компании с бюджетом ниже $300 на первый проект.
+### 1.3 Целевая аудитория
 
-### 1.3 Целевые платформы (Omnichannel)
+**Primary ICP:** предприниматели и SMB, которые:
 
-| Платформа | Статус | Компонент |
-|---|---|---|
-| **Telegram** | ✅ Live | `plum_tg_bot/bot.py` |
-| **Instagram** | 🔜 Roadmap | Webhook adapter (не реализован) |
-| **WhatsApp** | 🔜 Roadmap | Webhook adapter (не реализован) |
-| **Web-виджет** | 🔜 Roadmap | REST/WebSocket endpoint (не реализован) |
+- получают входящие заявки через WhatsApp, Instagram DM, Telegram, сайт, формы, маркетплейсы или CRM;
+- теряют лиды из-за медленных ответов, отсутствия 24/7, забытых follow-up или слабой квалификации;
+- используют менеджеров, владельца или хаотичные процессы для обработки заявок;
+- хотят увеличить конверсию, снять рутину или связать AI с внутренними системами.
 
-**Архитектурный принцип:** ядро FastAPI (`plum-ai-service`) — **channel-agnostic**. Оно не знает, откуда пришёл пользователь. Вся платформо-специфичная логика остаётся в тонком адаптере (бот, webhook), который строит стандартный `ChatRequest` и получает `ChatResponse`. Стейт-машина диалога работает одинаково на всех каналах.
+**Secondary ICP:** маркетологи, операционные директора, руководители продаж и владельцы с более зрелой инфраструктурой.
 
-### 1.4 Главный конверсионный флоу
+**Anti-profile:**
 
-```
-Лид заходит в бот (Telegram / Instagram / WhatsApp / Web)
-         │
-         ▼
-[QUALIFICATION] Бот задаёт 1-2 точных вопроса про боль:
-  "откуда идут клиенты", "где теряются заявки", "есть ли менеджеры"
-         │
-         ▼
-[DEMO TRIGGER] Бот предлагает /roleplay — тест-драйв прямо сейчас
-  "Давай я прямо сейчас покажу, как ИИ будет общаться с твоими клиентами"
-         │
-         ▼
-[CONTEXT GATE] Бот просит контекст бизнеса лида:
-  PDF-каталог, скриншот прайса или текстовое описание (60+ слов)
-         │
-         ▼
-[ROLEPLAY ACTIVE] Бот перевоплощается в идеального продавца бизнеса лида.
-  Лид тестирует возражения, цены, ситуации — бот отвечает экспертно
-         │
-         ▼
-[WOW момент] Лид убеждается: "это реально работает"
-  Бот ведёт себя лучше, чем живой менеджер лида
-         │
-         ▼
-[EXIT ROLEPLAY] Лид сам спрашивает: "Сколько стоит сделать такого?"
-  Бот снимает маску: "Маску снял, вернулся в режим архитектора Plum Dev"
-         │
-         ▼
-[CLOSE] Бот закрывает на спецификацию и контакт:
-  WhatsApp-номер или Telegram username → менеджер пишет в течение часа
-  Точная спецификация проекта → от $300
-```
+- нет входящих заявок;
+- нет повторяющихся диалогов;
+- нет бизнес-боли;
+- бюджет ниже минимально разумного уровня;
+- запрос “просто поиграться с AI” без бизнес-задачи;
+- технари, ищущие open-source DIY вместо внедрения под ключ.
+
+### 1.4 Главные конверсионные механизмы
+
+В v1.1 основной wow-механизм был roleplay demo: лид тестирует AI-продавца и сам спрашивает “как сделать такого же?”. В v1.2 roleplay остается важным, но становится одним из механизмов, а не единственным флоу.
+
+Новые ключевые механизмы:
+
+1. Simple Explanation — простое объяснение ценности AI-агента.
+2. Microbusiness Assistant Pitch — AI как ассистент владельца.
+3. Roleplay Demo — тест-драйв “такого же AI для вашего бизнеса”.
+4. Light ROI Audit — быстрый расчет зоны потерь диапазоном.
+5. Full ROI Audit — полноценный расчет окупаемости по метрикам.
+6. Integration Architecture Map — демонстрация системного подхода к CRM/складу/таблицам/календарю/API.
+7. Checkout / Call Close — перевод в спецификацию, контакт, созвон.
+8. Low-fit Nurture — мягкое объяснение, когда решение станет актуально.
 
 ---
 
-## 2. Обзор архитектуры системы
+## 2. Ключевой архитектурный сдвиг v1.2
 
-### 2.1 Топология сервисов
+### 2.1 Было в v1.1
 
-```
-┌─────────────────────────────────────────┐
-│            Клиентские каналы            │
-│  Telegram │ Instagram │ WhatsApp │ Web  │
-└─────┬─────┴─────┬─────┴────┬─────┴──┬──┘
-      │           │          │        │
-      ▼           ▼          ▼        ▼
-┌──────────┐ ┌─────────┐ ┌───────┐ ┌──────┐
-│ TG Bot   │ │ IG Hook │ │ WA    │ │ Web  │   ← Тонкие адаптеры
-│ bot.py   │ │(roadmap)│ │ Hook  │ │ API  │     (только транспорт)
-└────┬─────┘ └────┬────┘ │(rdmp) │ │(rdmp)│
-     └────────────┴──────┴───────┴──┘
-                       │
-                       │  POST /api/v1/chat
-                       │  ChatRequest (channel, chat_id, instance_id, message, attachments)
-                       ▼
-         ┌─────────────────────────┐
-         │   plum-ai-service       │
-         │   FastAPI :8010         │
-         │                         │
-         │  api.py  ─►  GeminiSvc  │
-         │           ─►  SupabaseSvc│
-         └────────────┬────────────┘
-                      │
-              ┌───────┴────────┐
-              │                │
-              ▼                ▼
-         ┌─────────┐    ┌────────────┐
-         │ Supabase │    │ Google     │
-         │ (state,  │    │ Gemini API │
-         │  RAG,    │    │ (LLM)      │
-         │  logs)   │    └────────────┘
-         └─────────┘
+Упрощенно текущая логика:
+
+```text
+message
+→ load state/history
+→ extract client_facts
+→ build dialog_state
+→ roleplay detection/context gate
+→ deterministic early exits
+→ sales stage inference
+→ route assembly
+→ RAG/checkout if needed
+→ LLM generation
+→ filters
+→ persist/log
 ```
 
-### 2.2 Multi-tenant / SaaS
+Эта логика хороша как route-driven архитектура, но недостаточна для Adaptive Sales Intelligence.
 
-Каждый клиентский проект — отдельный **tenant** с уникальным `instance_id`. Один деплой AI-сервиса обслуживает неограниченное количество тенантов. Конфигурация каждого (системный промпт, коммерческий контекст, список продуктов, база знаний) хранится в Supabase и загружается на лету по `instance_id`.
+### 2.2 Нужно в v1.2
 
-Собственный Plum Dev бот использует `instance_id = "plum_dev"` (конфигурируется в `plum_tg_bot/.env`).
+Новая логика:
 
-### 2.3 Channel-agnostic принцип
+```text
+message
+→ load session context
+→ protect roleplay isolation
+→ update real B2B business profile
+→ score client fit, pain, data readiness, friction, buying intent
+→ choose conversation mode
+→ choose wow mechanism
+→ choose next best action
+→ maybe calculate ROI in Python
+→ compose prompt from strategy_result and roi_result
+→ generate one natural answer
+→ persist state/logs
+```
 
-Стейт-машина, роутинг, диалоговое состояние — всё это работает независимо от канала. Сессия хранится по ключу `(instance_id, channel, chat_id)`. Switching между платформами для одного клиента — отдельные сессии, но `user_memories` могут использоваться кросс-чанально при наличии единого user_id.
+### 2.3 Главное правило
+
+ROI не является Route.
+
+Route — технический путь обработки сообщения: GENERAL, RAG_REQUIRED, CHECKOUT, ROLEPLAY, EXIT_ROLEPLAY.
+
+ROI — бизнес-стратегия и расчетный контекст, который может быть использован внутри GENERAL/CHECKOUT/RAG ответа. Поэтому ROI должен жить в Sales Intelligence Layer, а не в routing enum.
+
+### 2.4 Новый доменный слой
+
+В проект добавляется отдельный слой:
+
+```text
+Sales Intelligence Layer
+```
+
+Он отвечает за:
+
+- business_profile;
+- structured extraction;
+- profile merge;
+- conversation behavior signals;
+- scoring;
+- conversation mode;
+- question budget;
+- next best action;
+- wow mechanism;
+- ROI readiness;
+- ROI calculation;
+- bot guidance for prompt composer.
+
+Основной LLM-продавец не должен сам решать стратегию с нуля. Он должен получать `strategy_result` и следовать ему.
 
 ---
 
-## 3. Request Pipeline
+## 3. Conversation Modes
 
-Полная последовательность шагов для одного входящего сообщения (`POST /api/v1/chat` в `plum-ai-service/app/api.py`):
+Система поддерживает 6 режимов общения.
 
-```
- 1. Rate-limit check
-    └─ Динамический лимит по режиму (sliding window на (channel, chat_id)):
-       • B2B-режим (roleplay_demo_active=False): 10 запросов/мин — нормальный темп квалификации
-       • Roleplay-режим (roleplay_demo_active=True): 20 запросов/мин — предприниматель активно тестирует
-         бота короткими репликами и возражениями, жёсткий лимит убивает вау-эффект
-    └─ Переключение происходит в момент установки roleplay_demo_active=True в dialog_state
-    └─ Exceeds → HTTP 429 с user-friendly сообщением (не техническим)
+### 3.1 `simple_explainer`
 
- 2. Typing indicator
-    └─ Async fire-and-forget: send_platform_typing_indicator(platform, user_id)
-    └─ Telegram: sendChatAction "typing"
-    └─ Instagram: Graph API "typing_on"
-    └─ WhatsApp: configurable endpoint
+Для кого:
 
- 3. Load tenant settings
-    └─ supabase.get_tenant_settings(instance_id)
-    └─ Содержит: system_prompt_addon, final_system_prompt, router_system_prompt,
-                 hyde_system_prompt, memory_summary_system_prompt, commercial_context
+- клиент только разбирается, что такое AI-агенты;
+- не описал бизнес;
+- задает общие вопросы;
+- нет признаков зрелого бизнеса или явной боли.
 
- 4. Session reset / expiry
-    └─ reset_context=True → clear_conversation_state() (явный сброс)
-    └─ Двухуровневая модель таймаутов (целевая архитектура):
-       • Roleplay context (roleplay_demo_context_summary и все ROLEPLAY_* ключи):
-         сбрасывается при неактивности ≥6 часов — симуляция потеряла актуальность
-       • B2B dialog_state (pain_expressed, price_exposed, close_consented, contact_phone_collected):
-         живёт 48–72 часа или до явного закрытия сделки — предприниматель может вернуться
-         через 8-10 часов, бот обязан помнить прогресс квалификации и не гнать Stage 1 заново
-       • Текущее состояние: единый 6-часовой таймаут для всего (SESSION_TIMEOUT в api.py) —
-         это технический долг, подлежащий разделению в рамках roadmap
+Стиль:
 
- 5. Fetch & merge chat history
-    └─ supabase.fetch_recent_chat_history() → logged_history
-    └─ Merge с payload.chat_history (клиент может прислать свою историю)
-    └─ _strip_generation_fallback_history() убирает деградировавшие ответы
+- простой, человеческий;
+- без слов “маржа”, “конверсия”, “воронка”, если клиент сам их не использует;
+- максимум один легкий вопрос.
 
- 6. client_facts extraction
-    └─ Из session_metadata.client_facts (кеш) или scan до 200 сообщений истории
-    └─ Факты: business_niche, crm, lead_volume, target_solution
-    └─ Обновляется в session_metadata и сохраняется в Supabase
+Цель:
 
- 7. dialog_state build
-    └─ Из session_metadata[DIALOG_STATE_KEY]
-    └─ Содержит флаги воронки: pain_expressed, demo_activated, price_exposed,
-       close_consented, contact_phone_collected, roleplay_demo_active, ...
+- объяснить ценность;
+- найти первый контекст бизнеса;
+- не пугать глубокой квалификацией.
 
- 8. Roleplay detection
-    └─ _detect_roleplay_demo_context(message, chat_history, dialog_state)
-    └─ Возвращает: {active, exit, new_request, topic}
+### 3.2 `microbusiness_helper`
 
- 9. Roleplay context gate (may return early)
-    └─ _handle_roleplay_context_gate()
-    └─ Если активируется roleplay и нет сохранённого контекста → ждём файл/текст
-    └─ Подробнее: раздел 6
+Для кого:
 
-10. Deterministic early-exit gates (без LLM)
-    └─ /start + reset_context → START_GREETING_ANSWER (hardcoded, no LLM)
-    └─ Запрос портфолио/кейсов → DOCUMENTS_SITE_ANSWER (hardcoded, no LLM)
-    └─ Явный запрос цены Plum Dev → _build_price_override_answer() (hardcoded)
+- владелец сам отвечает клиентам;
+- 0–1 менеджер;
+- нет CRM или все в мессенджерах/таблицах;
+- мало или средне заявок;
+- боль: “не успеваю”, “забываю”, “все пишут мне”, “хаос в чатах”.
 
-11. Sales stage inference (local heuristic)
-    └─ _infer_sales_stage_transition_local() → stage: none/stage_2/stage_3/stage_4
-    └─ _infer_content_followup_local() → mechanism_detail / safety_quality_detail / none
+Стиль:
 
-12. Route assembly
-    └─ Формируем список routes[] на основе stage + roleplay state + intent flags
-    └─ roleplay_demo_active → routes = [GENERAL] (блокирует RAG/CHECKOUT)
+- поддерживающий;
+- без корпоративной анкеты;
+- главный угол: снять рутину, отвечать быстрее, не терять диалоги.
 
-13. RAG vector search
-    └─ Только если RAG_REQUIRED в routes
-    └─ HyDE rewrite (опционально): gemini.rewrite_query_hyde() → улучшенный запрос
-    └─ get_embedding(query) → supabase.search_knowledge_base(embedding, threshold=0.3)
+Что не спрашивать сразу:
 
-14. Commercial context load
-    └─ Только если CHECKOUT в routes И has_explicit_commercial_intent
-    └─ supabase.get_checkout_products() → список ProductCard
-    └─ _select_checkout_product() определяет наиболее подходящий продукт
+- маржинальность;
+- точную конверсию;
+- стоимость лида;
+- сложный ROI.
 
-15. LLM generation
-    └─ Roleplay path: gemini.answer_roleplay_with_demo_context_json() → {predicted_route, text_response}
-    └─ Default path: gemini.answer_with_route_json() → {predicted_route, text_response}
-    └─ Fallback на _answer_with_rag_retry() если JSON невалиден или пустой ответ
-    └─ Один проход — финальный ответ сразу, без rewrite pass
+### 3.3 `light_roi_diagnostic`
 
-16. Output filter pipeline (только если NOT roleplay_output_active)
-    └─ Подробнее: раздел 7.3
+Для кого:
 
-17. Format & spacing
-    └─ _format_messenger_answer() — нормализует пробелы и переносы для мессенджеров
+- есть регулярные заявки;
+- есть средний чек или его можно мягко узнать;
+- есть боль в скорости ответа, хаосе, follow-up или потерях;
+- клиент готов ответить на 3–5 простых вопросов, но не на полный аудит.
 
-18. Persist session state
-    └─ _update_dialog_state_after_answer() — обновляем флаги воронки по ответу
-    └─ supabase.upsert_chat_session_metadata()
+Цель:
 
-19. Log to chat_logs
-    └─ supabase.log_chat(channel, chat_id, instance_id, message, ai_response, routes, metadata)
+- дать быстрый расчет диапазоном;
+- показать порядок возможных потерь;
+- аккуратно предложить углубиться или перейти к созвону.
 
-20. Async memory refresh (background task)
-    └─ Если условие refresh: обновляем user_memories через gemini
-    └─ Не блокирует ответ клиенту
-```
+### 3.4 `full_roi_audit`
+
+Для кого:
+
+- высокий поток лидов;
+- высокий чек;
+- есть менеджеры;
+- есть CRM/таблицы;
+- есть платный трафик;
+- клиент дает цифры;
+- friction низкий;
+- клиент похож на ЛПР или сильного инициатора.
+
+Цель:
+
+- собрать метрики;
+- посчитать ROI в Python;
+- показать conservative/realistic/aggressive сценарии;
+- закрыть на спецификацию/созвон.
+
+### 3.5 `integration_discovery`
+
+Для кого:
+
+- клиент говорит про CRM, склад, наличие, таблицы, календарь, оплату, API, телефонию, несколько отделов;
+- важна не только переписка, но и связь AI с внутренними процессами.
+
+Цель:
+
+- показать архитектурную зрелость Dami Works;
+- собрать процессную схему;
+- вести к технической спецификации.
+
+ROI может быть вторичным. Главный wow — “они понимают, как это встроить в бизнес”.
+
+### 3.6 `low_fit_nurture`
+
+Для кого:
+
+- нет заявок;
+- нет повторяющихся диалогов;
+- нет понятной бизнес-боли;
+- бюджет ниже минимума;
+- клиент пока просто интересуется.
+
+Цель:
+
+- не выдумывать ROI;
+- не давить;
+- объяснить, когда AI-агент станет актуален;
+- возможно предложить простой стартовый сценарий.
 
 ---
 
-## 4. Система роутинга
+## 4. Wow Mechanism Router
 
-### 4.1 Пять маршрутов
+`wow_router` выбирает механизм, который в текущем turn создаст наибольший эффект без ощущения допроса.
 
-| Route | Когда применяется | Что происходит |
-|---|---|---|
-| `GENERAL` | Приветствия, small talk, простые вопросы | Короткий ответ без RAG |
-| `RAG_REQUIRED` | Вопросы про AI-агентов, кейсы, интеграции, внедрение | Vector search + LLM answer |
-| `CHECKOUT` | Явный запрос цены, покупка, оформление заявки | Загрузка продуктов + коммерческий ответ |
-| `ROLEPLAY` | Явный запрос тест-драйва: /roleplay, "отыграй роль продавца" | Roleplay context gate → B2C simulation |
-| `EXIT_ROLEPLAY` | Явный выход из ролевой игры | Очистка roleplay state, возврат в B2B режим |
+### 4.1 Supported wow mechanisms
 
-### 4.2 Heuristic-first подход
+```text
+simple_explanation
+roleplay_demo
+microbusiness_assistant_pitch
+light_roi_audit
+full_roi_audit
+integration_architecture_map
+checkout_or_call
+nurture
+```
 
-`_heuristic_routes()` в `gemini_service.py` выполняется первым — чистый Python, без LLM-вызова:
+### 4.2 Выбор механизма
 
-- Соответствие паттернам `/roleplay`, выход из ролевой игры → сразу нужный Route
-- Коммерческие паттерны (цена, купить, заказать) → CHECKOUT
-- Технические паттерны (агент, CRM, интеграция, воронка) → RAG_REQUIRED
-- Всё остальное → GENERAL
+Примеры:
 
-**LLM-роутер** включается только когда heuristic вернул чистый `[GENERAL]` — неоднозначные сообщения.
+```text
+business_profile почти пустой
+→ simple_explanation
 
-### 4.3 Combined JSON response
+owner_involved=true, operators_count<=1, pain=not_enough_time
+→ microbusiness_assistant_pitch или roleplay_demo
 
-Ключевой паттерн экономии токенов: один LLM-вызов возвращает и маршрут, и ответ:
+lead_volume known, average_check known, pain known, data_readiness medium
+→ light_roi_audit
+
+lead_volume high, CRM/team/paid traffic/high check, friction low
+→ full_roi_audit
+
+integration_needs non-empty
+→ integration_architecture_map
+
+client asks price and buying_readiness high
+→ checkout_or_call
+
+low ICP fit
+→ nurture
+```
+
+### 4.3 Не все клиенты должны видеть ROI
+
+ROI показывается только если:
+
+- он уместен для conversation_mode;
+- есть хотя бы минимальные данные;
+- расчет не будет ложной точностью;
+- клиент не раздражен вопросами;
+- ROI поможет продвинуть диалог, а не перегрузит его.
+
+---
+
+## 5. Целевая архитектура системы
+
+### 5.1 Service topology
+
+```text
+Client channels: Telegram / Instagram / WhatsApp / Web
+        ↓
+Thin adapters
+        ↓
+POST /api/v1/chat
+        ↓
+FastAPI endpoint
+        ↓
+Conversation Orchestrator
+        ↓
+Session Context Manager
+        ↓
+Mode Guard / Roleplay Isolation
+        ↓
+B2B Sales Intelligence Layer
+        ↓
+Route Engine / RAG / Commercial Context
+        ↓
+Prompt Composer
+        ↓
+Gemini generation
+        ↓
+Output filters
+        ↓
+Persist session + logs
+```
+
+### 5.2 Architectural principles
+
+1. `api.py` должен быть тонким endpoint layer.
+2. Pipeline-level логика должна жить в `core/conversation_orchestrator.py`.
+3. Sales logic не должна разрастаться внутри `gemini_service.py`.
+4. ROI считается только в Python.
+5. LLM извлекает и формулирует, но не считает бизнес-математику.
+6. Roleplay state изолирован от B2B business_profile.
+7. Route не должен подменять conversation strategy.
+8. Основной бот получает готовый `strategy_result` и `roi_result`.
+9. Один ответ — максимум один главный вопрос.
+10. Question budget контролирует, когда бот задает вопрос, а когда обязан дать ценность.
+
+---
+
+## 6. Целевая структура проекта
+
+Целевая структура:
+
+```text
+damiworks-ai-service/
+  app/
+    api.py
+    main.py
+    schemas.py
+    settings.py
+
+    core/
+      conversation_orchestrator.py
+      session_context.py
+      tenant_context.py
+      mode_guard.py
+      logging_context.py
+
+    routing/
+      route_engine.py
+      route_schemas.py
+      route_heuristics.py
+
+    sales_intelligence/
+      schemas.py
+      extractor.py
+      profile_merger.py
+      signal_analyzer.py
+      scoring.py
+      strategy_engine.py
+      question_budget.py
+      wow_router.py
+      roi_readiness.py
+      roi_engine.py
+      defaults.py
+
+    prompts/
+      b2b_sales_prompt.py
+      roleplay_prompt.py
+      extraction_prompt.py
+      prompt_composer.py
+
+    roleplay/
+      roleplay_detector.py
+      roleplay_context_gate.py
+      roleplay_state.py
+      roleplay_generation.py
+
+    services/
+      gemini_service.py
+      supabase_service.py
+      rag_service.py
+      checkout_service.py
+
+    filters/
+      output_filters.py
+      commercial_filters.py
+      roleplay_filters.py
+
+    tests/
+      test_extractor.py
+      test_profile_merger.py
+      test_strategy_engine.py
+      test_roi_engine.py
+      test_wow_router.py
+      test_orchestrator_e2e.py
+```
+
+### 6.1 Module responsibilities
+
+`core/conversation_orchestrator.py`:
+
+- управляет request pipeline;
+- вызывает session loading, intelligence, routing, generation, filters, persistence;
+- не содержит бизнес-формул и prompt-тексты.
+
+`core/session_context.py`:
+
+- единый объект контекста на turn;
+- хранит request, tenant, metadata, history, dialog_state, roleplay_state, business_profile, strategy_result, roi_result, routes, logs.
+
+`sales_intelligence/*`:
+
+- вся предметная логика квалификации, ROI и стратегии общения.
+
+`prompts/prompt_composer.py`:
+
+- собирает системные инструкции для LLM;
+- инжектирует strategy_result, roi_result, route context;
+- запрещает показывать внутренние JSON/score клиенту.
+
+`roleplay/*`:
+
+- изоляция roleplay;
+- activation/context gate/exit;
+- generation в B2C simulation mode.
+
+`routing/*`:
+
+- технические маршруты;
+- не хранит ROI/qualification business logic.
+
+---
+
+## 7. Request Pipeline v1.2
+
+Полный целевой pipeline для `POST /api/v1/chat`:
+
+```text
+1. Receive ChatRequest
+2. Rate-limit check
+3. Typing indicator fire-and-forget
+4. Load tenant settings
+5. Load session metadata
+6. Fetch and merge recent chat history
+7. Build SessionContext
+8. Session timeout handling
+   - roleplay context timeout: 6h
+   - B2B qualification/dialog state timeout: 48–72h
+9. Mode Guard
+   - detect roleplay active
+   - detect roleplay exit/commercial intent
+   - prevent B2B extraction from roleplay messages
+10. Roleplay detection and context gate
+   - may early return if waiting for context
+11. B2B Intelligence Update if allowed
+   - Structured Extractor
+   - Profile Merger
+   - Signal Analyzer
+   - Scoring
+   - Strategy Engine
+   - Wow Router
+   - ROI readiness
+   - ROI Engine maybe_calculate
+12. Deterministic gates with strategy awareness
+   - /start
+   - portfolio/cases
+   - price request through Commercial Policy, not blind hardcoded answer
+13. Route assembly
+   - GENERAL / RAG_REQUIRED / CHECKOUT / ROLEPLAY / EXIT_ROLEPLAY
+14. RAG vector search if needed
+15. Commercial context load if needed
+16. Prompt Composer
+   - compose B2B or roleplay prompt
+   - inject strategy_result and roi_result safely
+17. LLM generation
+   - one pass preferred
+18. Output filters
+   - disabled for roleplay output
+19. Format for messenger
+20. Persist session metadata
+21. Log chat with intelligence metadata
+22. Async memory refresh if needed
+```
+
+### 7.1 Critical roleplay isolation rule
+
+If `roleplay_demo_active=true` and user message is not a roleplay exit or commercial intent, do not update real `business_profile` from that message.
+
+Reason: inside roleplay the user may pretend to be a customer of a fictional or demo business. These statements are not facts about the actual lead.
+
+---
+
+## 8. Session Metadata v1.2
+
+`chat_sessions.metadata` must remain JSONB-friendly and backward-compatible.
+
+### 8.1 Top-level schema
 
 ```json
 {
-  "predicted_route": "GENERAL | ROLEPLAY | EXIT_ROLEPLAY",
-  "text_response": "Финальный ответ клиенту на русском"
+  "dialog_state": {},
+  "business_profile": {},
+  "qualification_state": {},
+  "roi_state": {},
+  "conversation_behavior": {},
+  "roleplay_state": {},
+  "client_facts": {},
+  "migration": {}
 }
 ```
 
-Structured output через Gemini `response_mime_type="application/json"` + `response_schema`. Это исключает отдельный classify-вызов для большинства запросов.
+`client_facts` may remain for backward compatibility, but new code should prefer `business_profile`.
 
-### 4.4 Routing contract (обязателен к соблюдению)
+### 8.2 Field value wrapper
 
-Добавление нового Route требует обновления **всех трёх** мест:
-1. `Route` enum в `schemas.py`
-2. `_heuristic_routes()` в `gemini_service.py`
-3. `_parse_routes()` в `gemini_service.py`
-4. `ROUTER_SYSTEM_PROMPT` в `gemini_service.py`
-
----
-
-## 5. Стейт-машина диалога
-
-### 5.1 Схема dialog_state
-
-`dialog_state` — словарь, хранящийся как JSONB в `chat_sessions.metadata[dialog_state]`. Обновляется при каждом запросе.
-
-**Флаги воронки (BUYING_MILESTONE_KEYS):**
-
-| Ключ | Тип | Значение |
-|---|---|---|
-| `pain_expressed` | bool | Лид выразил боль в продажах |
-| `demo_activated` | bool | Тест-драйв (/roleplay) запущен |
-| `price_exposed` | bool | Цена Plum Dev уже показана |
-| `close_consented` | bool | Лид согласился на расчёт/оформление |
-| `contact_phone_collected` | bool | Телефон/контакт получен и верифицирован |
-
-**Roleplay флаги:**
-
-| Ключ | Тип | Значение |
-|---|---|---|
-| `roleplay_demo_active` | bool | Roleplay сейчас активен |
-| `roleplay_demo_topic` | str | Тема/ниша текущей симуляции |
-| `roleplay_demo_awaiting_context` | bool | Ждём файл/текст от лида |
-| `roleplay_demo_context_summary` | str | Извлечённый текст из файла (≤5000 chars) |
-| `roleplay_demo_context_source` | str | Источник: "text_description" / filename |
-| `roleplay_demo_context_wait_count` | int | Сколько раз просили файл (авто-старт при ≥2) |
-| `roleplay_demo_no_file_fallback` | bool | Старт без файла (общие знания) |
-
-**Коммерческие флаги:**
-
-| Ключ | Тип | Значение |
-|---|---|---|
-| `automation_goal` | str | Что хочет автоматизировать клиент |
-| `service_focus` | str | base / cart / agent |
-| `selected_product_id` | str | ID выбранного продукта из `products` |
-
-### 5.2 Продажные стадии (Sales Stages)
-
-```
-Stage 1 — Qualification
-  ├── Узнаём: нишу, канал заявок, CRM/сайт, узкое место
-  ├── Разрешено: любые консультативные вопросы
-  └── Запрещено: называть цены, показывать продуктовые карточки
-
-Stage 2 — Consultation & Comparison (trigger: pain_expressed + согласие смотреть варианты)
-  ├── Сравниваем: Базовый ИИ-ассистент / Авто-корзина / ИИ-агент под ключ
-  ├── Разрешено: описание пакетов, бизнес-ценность
-  └── Запрещено: конкретные цены, product card, checkout
-
-Stage 3 — Price Presentation (trigger: согласие после Stage 2)
-  ├── Называем цены из dynamic product context
-  ├── Разрешено: ценовые ориентиры, scope of work
-  └── Запрещено: CREATE_CART, product card
-
-Stage 4 — Checkout (trigger: явное согласие после Stage 3)
-  ├── Backend генерирует product card / cart / handoff
-  ├── Разрешено: всё коммерческое закрытие
-  └── Принцип: один аффирмативный ответ = одна стадия вперёд
-```
-
-### 5.3 Override-инструкции по стадии
-
-`_format_buying_readiness_instruction(dialog_state)` возвращает текстовую инструкцию, которая инжектируется в `response_instruction` перед системным промптом. Например, если `close_consented=True`, инструкция запрещает спрашивать про источник трафика и форсирует закрытие на спецификацию.
-
----
-
-## 6. Roleplay Demo Module
-
-### 6.1 Триггеры активации
-
-Явные команды (`_is_explicit_roleplay_command()`):
-- `/roleplay` (команда Telegram)
-- "отыграй роль продавца", "сыграй роль", "будь продавцом"
-- "представь, что ты менеджер", "включи режим продавца"
-- "я твой клиент... погнали / поехали / начинаем"
-- "в роли клиента", "пишу как клиент"
-
-Имплицитные (через LLM-роутер → ROLEPLAY route) — неоднозначные запросы на симуляцию.
-
-### 6.2 Context Gate — три режима
-
-После активации бот переходит в режим ожидания вводных (`roleplay_demo_awaiting_context=True`):
-
-```
-Context Gate
-     │
-     ├── [File mode] Пришёл PDF/image/doc?
-     │      └─ extract_roleplay_context_from_attachment()
-     │         → multimodal LLM разбирает файл
-     │         → строковый summary ≤5000 chars → session_metadata
-     │         → roleplay_demo_active=True, далее работаем со строкой
-     │
-     ├── [Text mode] Сообщение ≥60 chars с бизнес-терминами?
-     │      └─ extract_roleplay_context_from_text()
-     │         → LLM структурирует описание в fact-sheet
-     │         → строковый summary → session_metadata
-     │
-     ├── [No-file fallback] "без файла" / wait_count ≥ 2?
-     │      └─ roleplay_demo_active=True, context_summary=""
-     │         Демо на общих знаниях, бот предупреждает о приблизительности
-     │
-     └── [Wait] Иначе → wait_count++, повторный запрос файла/текста
-```
-
-### 6.3 Однократный парсинг медиафайлов (токен-эффективность)
-
-**Правило:** файл отправляется в Gemini **один раз** при загрузке.
-
-Результат сохраняется как `roleplay_demo_context_summary` (plain text, ≤5000 символов) в `chat_sessions.metadata`. Все последующие сообщения внутри ролевой игры используют только **строковый контекст** — бинарный файл не переотправляется.
-
-Это критично для экономии: мультимодальные токены (PDF/image) в несколько раз дороже текстовых. Без этого механизма ролевая игра из 10 сообщений = 10 мультимодальных вызовов.
-
-### 6.4 Изоляция B2B / B2C контекстов
-
-**Жёсткое разделение:**
-
-| Аспект | B2B режим (Plum Dev) | B2C roleplay (симуляция) |
-|---|---|---|
-| Системный промпт | 13-слойный guard stack | Только `ROLEPLAY_DEMO_SYSTEM_PROMPT` |
-| RAG | Supabase knowledge_base | Запрещён |
-| Коммерческий контекст | Plum Dev products | Запрещён |
-| Цены | Из products table | Только из demo_context |
-| CTA | WhatsApp, спецификация, $300 | Вопрос-хук продавца в нише |
-| Output filters | Все активны | Все отключены (`roleplay_output_active=True`) |
-
-**Гарантия изоляции:** `demo_context` передаётся как временная инструкция в промпте, явно помеченная "session-local". Она никогда не пишется в `knowledge_base` или `tenants`. При вызове `_clear_roleplay_state()` все ROLEPLAY_* ключи удаляются из dialog_state.
-
-**Запрет утечки Plum Dev данных в roleplay** (ROLEPLAY_DEMO_SYSTEM_PROMPT):
-- `$300`, "проект", "спецификация", "WhatsApp", "Plum Dev" — запрещены в ответе
-- "Задача ясна", "Фиксируем в спецификации" — запрещены (prompt leakage)
-- Заключительный вопрос принадлежит только симулируемому бизнесу
-
-**Запрет утечки roleplay данных в B2B** (Output filters):
-- `_cleanup_plum_cta_from_roleplay_answer()` — убирает Plum Dev CTA если они просочились
-- `_repair_forbidden_roleplay_gate_answer()` — убирает служебные фразы context gate
-
-### 6.5 Выход из ролевой игры
-
-Триггеры выхода (`_is_roleplay_demo_exit_request()`):
-- "выйди из роли", "сними маску", "хватит играть"
-- "вернись к Plum Dev", "я про ИИ-агента"
-- "сколько стоит сделать такого бота" (коммерческий intent во время roleplay)
-
-При выходе:
-1. `_clear_roleplay_state()` — удаляет все ROLEPLAY_* ключи
-2. Bridge instruction: `"Маску снял, вернулся в режим архитектора Plum Dev."`
-3. Бот использует roleplay как живой пример при расчёте стоимости ("такой бот для вашего бизнеса")
-
----
-
-## 7. Технические требования: Cost / Efficiency
-
-### 7.1 Изоляция контекстов (hard requirement)
-
-- `roleplay_demo_context_summary` — session-scoped, максимум 5000 символов
-- Никогда не пишется в `knowledge_base`, `tenants`, `user_memories`
-- `_format_roleplay_file_context_instruction()` явно помечает контекст как "session-local"
-- Все данные симуляции (цены детейлинга, состав пиццы и т.д.) уничтожаются при EXIT_ROLEPLAY
-- Механизм заморозки: `_clear_roleplay_state()` делает `pop()` на все ROLEPLAY_* ключи
-
-### 7.2 Экономия токенов
-
-**Однократный парсинг медиа** (см. раздел 6.3):
-- Файл → multimodal LLM → строка → Supabase session
-- Стоимость последующих roleplay-сообщений = только текстовые токены
-
-**Combined JSON response** (раздел 4.3):
-- Один LLM-вызов = маршрут + ответ
-- Экономия: устраняет отдельный classify-вызов
-
-**Ограничение output:**
-- `ECONOMY_MAX_OUTPUT_TOKENS = 384` для большинства ответов — достаточно для B2B режима
-- Roleplay: разный лимит по сложности запроса:
-  - Стандартный roleplay (одно возражение / один вопрос) → 40-50 слов, B2C Instagram формат
-  - Сложный контекст (комплексный вопрос с несколькими позициями, расчётом и датами) → до
-    100-120 слов, бюджет в 384 токена это покрывает
-  - Искусственное жёсткое ограничение длины в системном промпте ролевки ("max 40-50 words")
-    нужно смягчить: модель сама выберет нужную длину исходя из задачи, инструкция задаёт стиль
-    (кратко, живо, один аргумент + вопрос), а не жёсткий счётчик слов
-
-**Детерминированные early exits** (раздел 3, шаг 10):
-- Приветствие, портфолио-запрос, явная цена Plum Dev → ответ без LLM
-- Экономия: ~15-20% запросов обрабатываются без обращения к Gemini
-
-**Heuristic-first роутинг:**
-- Большинство роутинг-решений — чистый Python regex
-- LLM-роутер вызывается только для неоднозначных сообщений
-
-### 7.3 Output Filter Pipeline
-
-Применяются **только** когда `not roleplay_output_active` (вне ролевой игры).
-
-Порядок применения в `api.py`:
-
-| Функция | Назначение |
-|---|---|
-| `_checkout_contact_guard_answer()` | Блокирует "заявка принята" без реального телефона в сообщении |
-| `_repair_which_option_better_answer()` | Исправляет ответы на "какой вариант лучше?" |
-| `_repair_stage_3_price_answer()` | Контролирует корректность ценового этапа |
-| `_build_acknowledgement_continuation_answer()` | Обрабатывает однословные подтверждения |
-| `_sanitize_roleplay_output()` | Применяется при roleplay_output_active — убирает спецсимволы |
-| `_cleanup_plum_cta_from_roleplay_answer()` | Убирает Plum Dev CTA просочившиеся из roleplay |
-| `_remove_forbidden_traffic_question_after_milestone()` | Запрет спрашивать про трафик после milestone |
-| `_repair_completed_function_qualification_answer()` | Убирает преждевременные "задача выполнена" |
-| `_repair_forbidden_roleplay_gate_answer()` | Убирает служебные фразы context gate |
-| `_cleanup_contact_cta_after_phone_collected()` | Запрет просить телефон повторно |
-| `_sanitize_prompt_leakage_answer()` | Убирает prompt artifacts (глобально) |
-| `_ensure_sales_initiative_answer()` | Бот не заканчивает тупиком |
-| `_final_contact_confirmation_answer()` | Финальное подтверждение если телефон уже есть |
-
-**Ключевое правило:** ни один фильтр не имеет права модифицировать ответ если `roleplay_output_active=True`. Проверка выполняется на уровне `api.py` до вызова каждого фильтра.
-
-### 7.4 Интеллектуальный захват контактов (model-native)
-
-**Текущая проблема:** Python-хэурестики с regex и словарями числительных (`_RU_HUNDREDS`, `_RU_TENS`, etc.) хрупкие и не покрывают все языковые варианты ("семьсот два ноль", "семьсот двадцать...", смешанный формат с тире и пробелами).
-
-**Целевая архитектура:**
-
-Распознавание телефона делегируется модели через **structured JSON output**:
+For extracted business data use this structure:
 
 ```json
 {
-  "predicted_route": "GENERAL",
-  "text_response": "Отлично, номер записал. Менеджер напишет вам в WhatsApp...",
-  "contact_detected": {
-    "phone": "+79201234567",
-    "confidence": "high"
-  }
+  "value": null,
+  "confidence": 0.0,
+  "source_text": null,
+  "extraction_type": "unknown",
+  "last_updated_at": null,
+  "conflict": false,
+  "conflict_notes": []
 }
 ```
 
-Или через **function calling / tool use**:
+Allowed `extraction_type`:
 
-```python
-# Tool definition
-extract_contact_tool = {
-    "name": "extract_contact",
-    "description": "Extract phone number from user message, including text-written numbers",
-    "parameters": {
-        "phone_normalized": "string",  # E.164 format or null
-        "source_text": "string"         # original fragment
-    }
-}
+```text
+explicit | inferred | default | unknown
 ```
 
-**Логика бэкенда:**
-1. Если в ответе модели `contact_detected.phone` не null → `contact_phone_collected=True`
-2. Сохраняем нормализованный номер в `client_facts.phone`
-3. Вызываем `_final_contact_confirmation_answer()`
-4. Больше не спрашиваем контакт (`_cleanup_contact_cta_after_phone_collected()` пока нужен как fallback)
+### 8.3 `dialog_state`
 
-**Преимущества:** покрывает "плюс семь девятьсот...", "+7 (920) 123-45-67", "89201234567", смешанные форматы без поддержки отдельного парсера.
-
----
-
-## 8. Омниканальность
-
-### 8.1 Текущее состояние
-
-`ChatRequest.channel` — Literal enum: `"telegram" | "whatsapp" | "instagram" | "web_site"`
-
-API-ядро уже channel-agnostic. Вся дифференциация — в адаптерах.
-
-### 8.2 Typing indicators (реализованы для всех каналов)
-
-`send_platform_typing_indicator()` в `api.py` — async, fire-and-forget:
-
-| Платформа | Механизм | Env var |
-|---|---|---|
-| Telegram | `sendChatAction` (form-urlencoded) | `TELEGRAM_BOT_TOKEN` / `BOT_TOKEN` |
-| Instagram | Meta Graph API `typing_on` (JSON) | `META_PAGE_ACCESS_TOKEN` |
-| WhatsApp | Configurable provider endpoint (JSON) | `WHATSAPP_TYPING_ENDPOINT` + `WHATSAPP_ACCESS_TOKEN` |
-
-### 8.3 Roadmap адаптеры
-
-Каждый новый канал — отдельный тонкий сервис, который:
-1. Принимает входящее событие (webhook / long-poll)
-2. Скачивает вложения, конвертирует в base64
-3. Строит стандартный `ChatRequest`
-4. POSTит на `/api/v1/chat`
-5. Отправляет `ChatResponse.answer` обратно в канал
-
-**Instagram adapter:** Meta Webhooks, верификация `X-Hub-Signature-256`, `messages` event type
-
-**WhatsApp adapter:** Meta Business API webhooks или 360dialog / WATI — зависит от провайдера
-
-**Web widget:** WebSocket или SSE endpoint, фронтенд на React/Vue, режим `channel="web_site"`
-
-### 8.4 Session isolation по каналу
-
-Сессии изолированы по ключу `(instance_id, channel, chat_id)`. Клиент, написавший в Telegram и Instagram — две разные сессии с независимым dialog_state. Это предотвращает утечку контекста между каналами.
-
----
-
-## 9. Слой данных (Supabase)
-
-### 9.1 Таблицы
-
-| Таблица | Назначение | Ключевые поля |
-|---|---|---|
-| `tenants` | Конфиг инстанса: промпты, настройки | `instance_id`, `final_system_prompt`, `system_prompt_addon`, `router_system_prompt`, `hyde_system_prompt`, `memory_summary_system_prompt`, `commercial_context` |
-| `knowledge_base` | RAG-чанки (vector-indexed) | `instance_id`, `content`, `embedding` (pgvector), `metadata` |
-| `chat_logs` | История сообщений | `instance_id`, `channel`, `chat_id`, `role`, `content`, `routes`, `metadata`, `created_at` |
-| `chat_sessions` | Session metadata + dialog_state | `instance_id`, `channel`, `chat_id`, `metadata` (JSONB) |
-| `user_memories` | Long-term B2B memory summaries | `instance_id`, `channel`, `chat_id`, `memory_text`, `updated_at` |
-| `products` | Каталог продуктов для checkout | `product_id`, `title`, `price_tenge`, `currency`, `image_url`, `instance_id` |
-
-### 9.2 Схема dialog_state (JSONB в chat_sessions.metadata)
+Only milestone/funnel flags:
 
 ```json
 {
-  "dialog_state": {
-    "pain_expressed": false,
-    "demo_activated": false,
-    "price_exposed": false,
-    "close_consented": false,
-    "contact_phone_collected": false,
-    "automation_goal": null,
-    "service_focus": null,
-    "selected_product_id": null,
-    "roleplay_demo_active": false,
-    "roleplay_demo_topic": null,
-    "roleplay_demo_awaiting_context": false,
-    "roleplay_demo_context_summary": null,
-    "roleplay_demo_context_source": null,
-    "roleplay_demo_context_wait_count": 0,
-    "roleplay_demo_no_file_fallback": false
+  "pain_expressed": false,
+  "demo_activated": false,
+  "price_exposed": false,
+  "close_consented": false,
+  "contact_phone_collected": false,
+  "automation_goal": null,
+  "service_focus": null,
+  "selected_product_id": null
+}
+```
+
+### 8.4 `business_profile`
+
+```json
+{
+  "business_niche": null,
+  "offer_type": null,
+  "geography_or_timezone": null,
+  "lead_channels": [],
+  "lead_volume_count": null,
+  "lead_volume_period": null,
+  "average_check": null,
+  "currency": null,
+  "conversion_rate": null,
+  "gross_margin": null,
+  "operators_count": null,
+  "owner_involved": null,
+  "crm_or_tracking_tool": null,
+  "response_time": null,
+  "working_hours_coverage": null,
+  "after_hours_leads": null,
+  "main_pains": [],
+  "missed_leads_estimate": null,
+  "lost_reasons": [],
+  "integration_needs": [],
+  "repetitive_questions_share": null,
+  "qualification_needed": null,
+  "capacity_constraint": null,
+  "data_sources_available": [],
+  "decision_maker_role": null,
+  "urgency": null,
+  "budget_sensitivity": null
+}
+```
+
+Each scalar field should be stored as a wrapped extracted value where feasible. Lists may store items with confidence/source metadata if practical.
+
+### 8.5 `qualification_state`
+
+```json
+{
+  "conversation_mode": "simple_explainer",
+  "wow_mechanism": "simple_explanation",
+  "scores": {
+    "icp_fit_score": 0,
+    "roi_potential_score": 0,
+    "operational_pain_score": 0,
+    "data_readiness_score": 0,
+    "conversation_friction_score": 0,
+    "buying_readiness_score": 0,
+    "ai_fit_score": 0,
+    "integration_complexity_score": 0
   },
-  "client_facts": {
-    "business_niche": null,
-    "crm": null,
-    "lead_volume": null,
-    "target_solution": null,
-    "phone": null
-  }
+  "question_budget": {
+    "max_questions_before_value": 1,
+    "questions_asked_since_last_value": 0,
+    "remaining_questions_before_value": 1
+  },
+  "last_value_given_at": null,
+  "last_question_target_field": null,
+  "last_next_best_action": null,
+  "logging_reasons": []
 }
 ```
 
-### 9.3 RAG vector search
+### 8.6 `roi_state`
 
-Функция `vector_search` в Supabase (PostgreSQL RPC, определена в `plum-ai-service/sql/vector_search.sql`):
-- Принимает: embedding vector, instance_id, threshold, match_count
-- Возвращает: отранжированные чанки knowledge_base
+```json
+{
+  "roi_depth": "none",
+  "last_roi_result": null,
+  "last_shown_to_user_at": null,
+  "assumptions": [],
+  "missing_fields": [],
+  "calculation_confidence": "low"
+}
+```
 
-Embeddings генерируются через `gemini.get_embedding()` → `text-embedding-004` (или аналог).
+Allowed `roi_depth`:
+
+```text
+none | rough_estimate | light_roi | full_roi
+```
+
+### 8.7 `conversation_behavior`
+
+```json
+{
+  "friction_signals": [],
+  "engagement_level": "unknown",
+  "user_answer_style": "unknown",
+  "asked_price": false,
+  "asked_how_it_works": false,
+  "asked_for_demo": false,
+  "explicit_commercial_intent": false,
+  "irritated_by_questions": false
+}
+```
+
+### 8.8 `roleplay_state`
+
+Roleplay state should be isolated here, even if compatibility with old `dialog_state` keys is temporarily maintained:
+
+```json
+{
+  "roleplay_demo_active": false,
+  "roleplay_demo_topic": null,
+  "roleplay_demo_awaiting_context": false,
+  "roleplay_demo_context_summary": null,
+  "roleplay_demo_context_source": null,
+  "roleplay_demo_context_wait_count": 0,
+  "roleplay_demo_no_file_fallback": false,
+  "roleplay_started_at": null,
+  "roleplay_last_active_at": null
+}
+```
 
 ---
 
-## 10. LLM Generation Pipeline
+## 9. Sales Intelligence Layer
 
-### 10.1 Гибкая маршрутизация моделей
+### 9.1 Components
 
-Все назначения моделей — через `Settings` (конфигурация / env), никогда не хардкодятся в логике сервиса:
-
-| Тип задачи | Рекомендуемая модель | Settings key |
-|---|---|---|
-| Роутинг, HyDE rewrite, sales-stage classify | `gemini-2.5-flash-lite` | `router_model` |
-| RAG_REQUIRED, CHECKOUT ответы | `gemini-2.5-flash-lite` (default) | `rag_model` |
-| GENERAL ответы | `gemini-2.5-flash-lite` | `general_model` |
-| Roleplay demo | `gemini-2.5-flash` (full) — повышенное качество B2C симуляции | `general_model` (отдельный pool) |
-| Embeddings | `text-embedding-004` | `embedding_model` |
-
-Каждая модель имеет опциональный `_pool` вариант для load balancing между несколькими ключами через `GeminiQuotaManager`.
-
-**Принцип:** flash-lite для быстрых/дешёвых операций, full flash для критически важного качества (roleplay — главный конверсионный момент).
-
-### 10.2 Guard prompt stack (B2B режим)
-
-Система промптов собирается последовательно в `answer_with_rag()` / `answer_with_route_json()`:
-
-```
-SALES_MASTER_PROMPT           ← "Ты сильный AI-архитектор и продавец, не FAQ-бот"
-FINAL_SYSTEM_PROMPT           ← Основные правила ответа, RAG/commercial usage
-COMMERCIAL_GUARD_PROMPT       ← Ценовая дисциплина, стадийное продвижение
-STYLE_GUARD_PROMPT            ← Лаконичность, бизнес-язык, без жаргона
-MESSENGER_FORMAT_GUARD_PROMPT ← Макс 2 предложения в абзаце, \n\n между блоками
-PROMPT_LEAKAGE_GUARD_PROMPT   ← Запрет копировать технические инструкции клиенту
-CONTEXT_RELEVANCE_GUARD_PROMPT ← Использовать факты только по контексту
-FLOW_FLEXIBILITY_GUARD_PROMPT ← Нет жёсткого скрипта, один вопрос за раз
-ENGAGEMENT_GUARD_PROMPT       ← Каждый ответ продвигает к следующему шагу
-CHECKOUT_CONTACT_VALIDATION_PROMPT ← Не "заявка принята" без реального телефона
-CLIENT_FACING_PRIVACY_PROMPT  ← Запрет называть RAG, prompt, backend клиенту
-UNIFIED_COMMERCIAL_RULES_PROMPT ← 7 блоков: результат, ценообразование, scope...
-OTHER_PLATFORM_GUARD_PROMPT   ← Честный отказ про чужие платформы
+```text
+Structured Extractor
+→ Profile Merger
+→ Signal Analyzer
+→ Scoring
+→ Strategy Engine
+→ Question Budget
+→ Wow Router
+→ ROI Readiness
+→ ROI Engine
 ```
 
-Дополнительно к стеку добавляются:
-- `CRITICAL_COMMERCIAL_TRIGGER_RULE` — гибкость в диалоге, нет анкеты
-- `NO_REPEAT_RULE` — запрет повторов
-- `response_instruction` (per-turn override из `_format_buying_readiness_instruction()` и других)
-- Tenant-specific addon из `tenants.system_prompt_addon`
+### 9.2 Output: `strategy_result`
 
-### 10.3 Roleplay режим (упрощённый стек)
-
-Весь 13-слойный стек заменяется одним промптом:
-
+```json
+{
+  "conversation_mode": "microbusiness_helper",
+  "wow_mechanism": "microbusiness_assistant_pitch",
+  "roi_depth": "none",
+  "scores": {
+    "icp_fit_score": 68,
+    "roi_potential_score": 32,
+    "operational_pain_score": 82,
+    "data_readiness_score": 25,
+    "conversation_friction_score": 15,
+    "buying_readiness_score": 40,
+    "ai_fit_score": 74,
+    "integration_complexity_score": 10
+  },
+  "question_budget": {
+    "max_questions_before_value": 2,
+    "questions_asked_since_last_value": 1,
+    "remaining_questions_before_value": 1
+  },
+  "next_best_action": {
+    "type": "give_value_then_ask_one_question",
+    "value_message": "Клиент сам отвечает и не успевает. Уместнее продавать AI как ассистента владельца, а не как сложный ROI-калькулятор.",
+    "question": "А клиенты чаще пишут вам в WhatsApp/Instagram или еще откуда-то?",
+    "target_field": "lead_channels",
+    "should_ask_now": true
+  },
+  "bot_guidance": {
+    "tone": "simple_supportive",
+    "avoid_topics": ["маржа", "конверсия", "сложный ROI"],
+    "recommended_angle": "снять рутину с владельца и не терять диалоги",
+    "should_offer_roi_audit": false,
+    "should_offer_roleplay": true,
+    "should_offer_call": false,
+    "should_simplify": false,
+    "should_stop_questioning": false
+  },
+  "logging_reasons": []
+}
 ```
-ROLEPLAY_DEMO_SYSTEM_PROMPT   ← B2C продавец, изоляция, финансовая дисциплина,
-                                 messenger формат (40-50 слов), запрет Plum Dev
-+ demo_context (plain text, session-local)
-+ response_instruction (roleplay topic + инструкция)
-```
-
-### 10.4 Однопроходная генерация (cost target)
-
-**Принцип:** один LLM-вызов → финальный клиентский ответ.
-
-Текущий `_rewrite_sales_answer()` (второй проход) подлежит **упразднению**. Его правила переносятся в усиленный первичный системный промпт:
-- Запрет техжаргона → уже в STYLE_GUARD + SALES_MASTER_PROMPT
-- Humanize dry RAG language → SALES_REWRITE rules интегрируются в FINAL_SYSTEM_PROMPT
-- Destroy repetitive scripts → уже в NO_REPEAT_RULE + ENGAGEMENT_GUARD
-
-**Постобработка остаётся** (pure string manipulation, без LLM):
-- `_avoid_repeated_closing_phrase()` — дедупликация закрывающих вопросов
-- `_remove_repeated_commercial_closing_question()` — убирает повторяющиеся коммерческие вопросы
-- `_soften_absolute_sales_guarantees()` — "гарантированно" → "как правило"
-- `_ensure_followup_question_spacing()` — \n\n перед вопросом
-
-**Экономия:** устранение rewrite pass = -50% LLM-вызовов на RAG/CHECKOUT путях.
-
-### 10.5 Retry логика
-
-```
-Attempt 1: normal history + full RAG context
-Attempt 2: cleaned history (без fallback-ответов) + full RAG context
-Attempt 3: cleaned history + пустой RAG/memory context
-```
-
-На каждом уровне: tenacity retry для 503/UNAVAILABLE ошибок Gemini.
-
-### 10.6 GeminiQuotaManager
-
-- Отслеживает RPM/TPM/RPD по каждому API ключу
-- При исчерпании ключа — ротация на следующий
-- При исчерпании всех ключей → `GeminiQuotaExhausted` → fallback answer или error response
-- `estimate_tokens()` для предварительной оценки стоимости запроса
 
 ---
 
-## 11. SaaS / Multi-tenant контракт
+## 10. Structured Extraction
 
-**Это жёсткое архитектурное правило, нарушение которого ломает масштабирование:**
+### 10.1 Model requirement
 
-| Что нужно изменить | Правильное место | Запрещённое место |
-|---|---|---|
-| Текст ответов бота | `tenants.final_system_prompt` в Supabase | Python-код |
-| Цены и продукты | `products` таблица в Supabase | Python-код |
-| База знаний / факты | `knowledge_base` чанки в Supabase | Python-код |
-| Скрипты продаж | `tenants.system_prompt_addon` | Python-код |
-| Добавить нового клиента | Новая строка в `tenants` + populate `knowledge_base` + `products` | Fork сервиса |
+Use `gemini-2.5-flash-lite` with Structured Outputs / strict JSON schema.
 
-**Исключения (допустимо в коде):**
-- Детерминированные hardcoded ответы (greeting, portfolio redirect) — они одинаковы для всех тенантов
-- Системные сообщения об ошибках (rate limit, service unavailable)
+LLM extraction is allowed to:
+
+- extract business facts;
+- classify intent/friction;
+- infer soft signals with confidence;
+- produce source_text for audit.
+
+LLM extraction is not allowed to:
+
+- calculate ROI;
+- fabricate unknown values;
+- overwrite high-confidence explicit facts with weak inference.
+
+### 10.2 Fields to extract
+
+Extractor should cover:
+
+```text
+business_niche
+offer_type
+lead_channels
+lead_volume_count
+lead_volume_period
+average_check
+currency
+conversion_rate
+gross_margin
+operators_count
+owner_involved
+crm_or_tracking_tool
+response_time
+working_hours_coverage
+after_hours_leads
+main_pains
+missed_leads_estimate
+lost_reasons
+integration_needs
+repetitive_questions_share
+qualification_needed
+capacity_constraint
+data_sources_available
+urgency
+decision_maker_role
+budget_sensitivity
+price_request
+demo_interest
+conversation_friction_signals
+explicit_commercial_intent
+```
+
+### 10.3 Merge rules
+
+1. Explicit high-confidence value may replace older value.
+2. Inferred value must not overwrite explicit value unless confidence is clearly higher and conflict is logged.
+3. Null/unknown never overwrites existing value.
+4. Contradictions set `conflict=true` and append conflict notes.
+5. Defaults are allowed only inside ROI assumptions, not as real extracted facts.
+6. Roleplay messages must not update B2B business_profile unless message is a roleplay exit/commercial intent.
 
 ---
 
-## 12. Окружение и деплой
+## 11. Conversation Strategy Engine
 
-### 12.1 Переменные окружения
+### 11.1 Scores
 
-**`plum-ai-service/.env`:**
-```
-GEMINI_API_KEY=...                    # Primary key (обязателен)
-GEMINI_API_KEY_2=...                  # Дополнительные ключи для rotation (опционально)
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-TELEGRAM_BOT_TOKEN=...                # Для typing indicator из AI service (опционально)
-META_PAGE_ACCESS_TOKEN=...            # Instagram typing indicator (опционально)
-INSTAGRAM_MESSAGES_ENDPOINT=...      # Default: https://graph.facebook.com/v19.0/me/messages
-WHATSAPP_TYPING_ENDPOINT=...         # WhatsApp typing indicator endpoint (опционально)
-WHATSAPP_ACCESS_TOKEN=...            # WhatsApp auth (опционально)
-ENABLE_GENERATION_FALLBACK=false     # Включить детерминированные fallback-ответы при ошибке LLM
-```
+The system computes these scores on 0–100 scale:
 
-**`plum_tg_bot/.env`:**
-```
-BOT_TOKEN=...
-AI_SERVICE_URL=http://127.0.0.1:8010/api/v1/chat
-INSTANCE_ID=plum_dev
+```text
+icp_fit_score
+roi_potential_score
+operational_pain_score
+data_readiness_score
+conversation_friction_score
+buying_readiness_score
+ai_fit_score
+integration_complexity_score
 ```
 
-### 12.2 Локальный запуск
+### 11.2 Score semantics
 
-**AI service (port 8010):**
-```powershell
-cd plum-ai-service
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload
+`icp_fit_score` increases when:
+
+- real business exists;
+- lead flow exists;
+- repeated conversations exist;
+- digital channels exist;
+- AI can handle repetitive or qualification tasks.
+
+`roi_potential_score` increases when:
+
+- lead volume is medium/high;
+- average check is meaningful;
+- paid traffic exists;
+- lost leads are likely;
+- conversion/margin data exists.
+
+`operational_pain_score` increases when:
+
+- owner is overloaded;
+- response is slow;
+- no 24/7 coverage;
+- managers forget follow-ups;
+- CRM is absent or chaotic;
+- missed leads are frequent.
+
+`data_readiness_score` increases when:
+
+- lead volume known;
+- average check known;
+- conversion known;
+- margin known;
+- CRM/table/history exists.
+
+`conversation_friction_score` increases when:
+
+- client gives short/irritated answers;
+- client asks “why so many questions?”;
+- client refuses metrics;
+- client only asks price and avoids context.
+
+`buying_readiness_score` increases when:
+
+- asks price;
+- asks implementation timeline;
+- wants demo;
+- gives contact;
+- describes urgent pain;
+- is owner/decision maker.
+
+`ai_fit_score` increases when:
+
+- many repetitive questions;
+- qualification needed;
+- handoff to human needed;
+- CRM/stock/calendar/payment integration useful;
+- high chat volume.
+
+`integration_complexity_score` increases when:
+
+- CRM, warehouse, tables, calendar, payment, telephony, API or multi-step workflows are mentioned.
+
+### 11.3 Question budget
+
+```text
+simple_explainer: max 1 question before value
+microbusiness_helper: max 2 questions before value
+light_roi_diagnostic: max 3 questions before insight/rough calculation
+full_roi_audit: max 5 questions before intermediate insight
+integration_discovery: max 3 questions before architecture insight
+low_fit_nurture: max 0–1 question
 ```
 
-**Telegram bot:**
-```powershell
-cd plum_tg_bot
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe bot.py
+If budget is exhausted, bot should give value before asking another question.
+
+### 11.4 Next best action types
+
+```text
+answer_only
+give_value_then_ask_one_question
+ask_simple_context_question
+ask_metric_for_roi
+offer_roleplay_demo
+offer_light_roi_audit
+offer_full_roi_audit
+offer_integration_discovery
+offer_call_or_specification
+simplify_and_stop_questioning
+nurture
 ```
 
-**Синтаксическая проверка после правок:**
-```powershell
-python -m py_compile plum-ai-service/app/gemini_service.py
-python -m py_compile plum-ai-service/app/api.py
-```
+### 11.5 Mandatory UX rules
 
-### 12.3 Утилиты
-
-| Скрипт | Назначение |
-|---|---|
-| `plum-ai-service/scripts/load_rag_documents.py` | Bulk-загрузка RAG чанков в Supabase |
-| `plum-ai-service/scripts/index_vector_knowledge_base.py` | Генерация embeddings и индексация |
-| `plum-ai-service/scripts/update_final_system_prompt.py` | Обновление системного промпта тенанта |
-| `plum-ai-service/sql/vector_search.sql` | SQL для RPC функции поиска (применять в Supabase SQL editor) |
+1. Answer the user’s question first.
+2. Ask at most one main question in one response.
+3. If friction is high, reduce depth and simplify.
+4. If user asks price, do not dodge with a long questionnaire.
+5. Microbusiness should not be asked about margin/conversion unless they consent to a quick estimate.
+6. Mature SMB should not receive overly primitive “bot answers messages” explanation.
+7. ROI with weak data must be shown only as a range and preliminary estimate.
+8. No fake certainty.
 
 ---
 
-## 13. Известные пробелы и роадмап
+## 12. ROI Engine
 
-### Критические (блокируют omnichannel)
+### 12.1 Hard rule
 
-- [ ] **Instagram webhook adapter** — приём DM через Meta Webhooks, отправка ответов
-- [ ] **WhatsApp webhook adapter** — Meta Business API или 360dialog/WATI провайдер
-- [ ] **Web widget** — React/Vue компонент + WebSocket/SSE endpoint в FastAPI
+All ROI math happens in Python. Never via LLM.
 
-### Высокий приоритет (улучшение качества)
+LLM may only:
 
-- [ ] **Model-native phone extraction** — замена regex/словарей на structured JSON output (раздел 7.4)
-- [ ] **Single-pass generation** — устранение `_rewrite_sales_answer()`, интеграция правил в primary prompt (раздел 10.4)
-- [ ] **Roleplay model upgrade** — выделенная конфигурация для `general_model` в roleplay с полным flash (раздел 10.1)
-- [ ] **Двухуровневые таймауты сессии** — разделить `SESSION_TIMEOUT`: roleplay context 6h, B2B dialog_state 48-72h; рефакторинг `_is_new_session()` и `get_chat_session_metadata()` (раздел 3, пункт 4)
-- [ ] **Динамический rate-limit** — проверять `dialog_state.roleplay_demo_active` перед rate-limit check, переключать bucket с 10 на 20 req/min (раздел 3, пункт 1)
-- [ ] **Roleplay output length** — убрать жёсткий "max 40-50 words" из `ROLEPLAY_DEMO_SYSTEM_PROMPT`, заменить на принцип "кратко исходя из сложности" (раздел 7.2)
+- extract fields;
+- explain already-computed numbers;
+- phrase assumptions safely.
 
-### Средний приоритет (операционная зрелость)
+### 12.2 ROI levels
 
-- [ ] **Admin панель** — управление knowledge_base чанками без SQL Editor
-- [ ] **Analytics dashboard** — конверсия по стадиям воронки, время до конверсии, топ болей
-- [ ] **A/B тестирование промптов** — версионирование `final_system_prompt` с метриками
-- [ ] **Cross-channel memory** — объединение `user_memories` для одного клиента с разных каналов
+```text
+none
+rough_estimate
+light_roi
+full_roi
+```
 
-### Низкий приоритет (nice to have)
+### 12.3 `none`
 
-- [ ] **Голосовые сообщения** — STT → text → стандартный pipeline
-- [ ] **Inline кнопки** — Telegram InlineKeyboard для выбора пакета/стадии
-- [ ] **Webhook retry queue** — надёжная очередь для нестабильных WhatsApp/Instagram соединений
-- [ ] **Monitoring / alerting** — Sentry + Grafana для quota exhaustion, error rate, latency
+Use when:
+
+- business context unknown;
+- no lead volume/check/pain;
+- low-fit;
+- conversation friction high;
+- ROI would be fake.
+
+Return qualitative insight only.
+
+### 12.4 `rough_estimate`
+
+Minimum data:
+
+- lead volume;
+- average check or approximate check;
+- main pain/lost reason.
+
+Output:
+
+- rough lost revenue range;
+- low confidence;
+- clear assumptions.
+
+### 12.5 `light_roi`
+
+Minimum data:
+
+- lead volume;
+- average check;
+- approximate conversion or conservative default;
+- pain/lost reason;
+- approximate leakage.
+
+Output:
+
+- lost revenue;
+- optional margin estimate if margin exists;
+- conservative/realistic ranges.
+
+### 12.6 `full_roi`
+
+Preferred data:
+
+- leads per month;
+- average check;
+- conversion rate;
+- gross margin;
+- leakage rate;
+- recoverability rate;
+- AI monthly cost/setup cost config;
+- optional time savings value.
+
+Output:
+
+- lost revenue;
+- lost margin profit;
+- recoverable revenue;
+- recoverable margin profit;
+- time savings value;
+- monthly net effect;
+- payback period;
+- ROI percentage.
+
+### 12.7 Formulas
+
+```text
+lost_revenue = leads_per_month * leakage_rate * conversion_rate * average_check
+
+lost_margin_profit = leads_per_month * leakage_rate * conversion_rate * average_check * gross_margin
+
+recoverable_margin_profit = lost_margin_profit * recoverability_rate
+
+monthly_net_effect = recoverable_margin_profit + time_savings_value - monthly_ai_cost
+
+payback_period_months = setup_cost / monthly_net_effect
+
+roi_percentage = monthly_net_effect / monthly_ai_cost * 100
+```
+
+### 12.8 Scenarios
+
+Every non-none calculation should support:
+
+```text
+conservative
+realistic
+aggressive
+```
+
+### 12.9 Safe phrasing rules
+
+Allowed:
+
+- “грубая прикидка”;
+- “порядок цифр”;
+- “если предположить”;
+- “зона потерь может быть”;
+- “точнее можно подтвердить по CRM/перепискам”.
+
+Forbidden unless high-confidence data:
+
+- “вы точно теряете X”;
+- “вы гарантированно окупитесь за Y”;
+- “мы вернем все потерянные лиды”.
+
+### 12.10 `roi_result`
+
+```json
+{
+  "roi_depth": "light_roi",
+  "can_show_to_user": true,
+  "calculation_confidence": "medium",
+  "confidence_reasons": [],
+  "scenarios": {
+    "conservative": {},
+    "realistic": {},
+    "aggressive": {}
+  },
+  "assumptions": [],
+  "missing_fields": [],
+  "warnings": [],
+  "user_safe_summary": "",
+  "next_field_for_better_accuracy": null
+}
+```
 
 ---
 
-*Документ отражает состояние кодовой базы на 2026-06-24. При изменении архитектуры обновлять синхронно с кодом.*
+## 13. Roleplay Demo Module
+
+Roleplay remains a critical wow mechanism.
+
+### 13.1 Roleplay activation
+
+Triggers include:
+
+- `/roleplay`;
+- “отыграй роль продавца”;
+- “будь менеджером моего бизнеса”;
+- “давай я буду клиентом”;
+- explicit demo interest from strategy.
+
+### 13.2 Context gate
+
+Roleplay can use:
+
+- file mode: PDF/image/doc;
+- text mode: business description;
+- no-file fallback after repeated refusal or explicit “без файла”.
+
+File parsing must happen once. Store only text summary in session.
+
+### 13.3 Roleplay isolation
+
+Inside roleplay:
+
+- no Dami Works prices;
+- no Dami Works CTA;
+- no RAG;
+- no products table;
+- no B2B extraction from simulated customer messages;
+- output filters for B2B disabled.
+
+Exit roleplay on:
+
+- “выйди из роли”;
+- “сними маску”;
+- “вернись к Dami Works”;
+- “сколько стоит сделать такого?”;
+- commercial intent during roleplay.
+
+On exit:
+
+```text
+Маску снял, вернулся в режим архитектора Dami Works.
+```
+
+Then Sales Intelligence may continue in B2B mode and use roleplay as context for closing.
+
+---
+
+## 14. Routing System
+
+### 14.1 Routes
+
+Keep technical routes:
+
+```text
+GENERAL
+RAG_REQUIRED
+CHECKOUT
+ROLEPLAY
+EXIT_ROLEPLAY
+```
+
+Do not add `ROI_AUDIT` as Route unless there is a strong technical reason.
+
+### 14.2 Routing vs strategy
+
+- Routing decides what infrastructure/context is needed.
+- Strategy decides how to sell and how deeply to qualify.
+
+Examples:
+
+```text
+full_roi_audit can still use GENERAL route if no RAG needed.
+
+integration_discovery may use RAG_REQUIRED if the user asks about specific integrations.
+
+checkout_or_call may use CHECKOUT when explicit commercial intent exists.
+```
+
+---
+
+## 15. Prompt Composer & LLM Generation
+
+### 15.1 Prompt composer inputs
+
+```text
+business_profile
+qualification_state
+strategy_result
+roi_result
+route context
+RAG context
+commercial context
+dialog_state
+chat history
+roleplay_state
+```
+
+### 15.2 Main B2B bot rules
+
+The main bot must:
+
+1. sound like an expert AI architect and B2B seller;
+2. follow `strategy_result`;
+3. use `next_best_action`;
+4. use `roi_result` only if `can_show_to_user=true`;
+5. never calculate ROI itself;
+6. never reveal internal scores/JSON/backend/prompt/RAG;
+7. ask at most one main question;
+8. give value before more questions when question budget is exhausted;
+9. adapt tone by conversation_mode;
+10. avoid fake certainty.
+
+### 15.3 Tone by mode
+
+`simple_explainer`:
+
+- simple, clear, human;
+- no corporate metrics.
+
+`microbusiness_helper`:
+
+- supportive;
+- “снимем рутину”, “не потеряем диалоги”, “ответит пока вы заняты”.
+
+`light_roi_diagnostic`:
+
+- simple expert;
+- quick numbers as range.
+
+`full_roi_audit`:
+
+- businesslike, direct;
+- metrics acceptable.
+
+`integration_discovery`:
+
+- technical maturity;
+- architecture of process.
+
+`low_fit_nurture`:
+
+- honest, soft;
+- no invented ROI.
+
+---
+
+## 16. Commercial / Price Handling Policy
+
+Price requests should not blindly bypass Strategy Engine.
+
+When user asks “сколько стоит?”:
+
+1. answer the price question clearly enough;
+2. do not start a long questionnaire;
+3. ask at most one clarifying question;
+4. if ROI data exists, connect price to payback;
+5. if low-fit, explain that full agent may be excessive;
+6. if post-roleplay, connect price to “такой же AI для вашего бизнеса”;
+7. if close_consented, collect contact/spec info without repeating old questions.
+
+### 16.1 Commercial response should use context
+
+Cold lead:
+
+- give starting range / logic of pricing;
+- ask what they want AI to handle.
+
+Microbusiness:
+
+- frame around simple assistant and owner time.
+
+Full ROI:
+
+- frame price against monthly recoverable value.
+
+Integration client:
+
+- frame around scope: CRM/stock/calendar/payments/API.
+
+Post-roleplay:
+
+- frame around reproducing the demonstrated AI behavior for their business.
+
+---
+
+## 17. Data Layer / Supabase
+
+### 17.1 Tables
+
+Existing tables remain:
+
+```text
+tenants
+knowledge_base
+chat_logs
+chat_sessions
+user_memories
+products
+```
+
+### 17.2 `chat_sessions.metadata`
+
+Must store v1.2 metadata schema.
+
+### 17.3 `chat_logs.metadata`
+
+Each turn should log:
+
+```text
+conversation_mode
+wow_mechanism
+scores
+roi_depth
+calculation_confidence
+next_best_action.type
+question_budget
+extraction_conflicts
+assumptions
+selected routes
+roleplay isolation active yes/no
+commercial policy branch if price request
+```
+
+Logs must not expose private prompts or secrets.
+
+---
+
+## 18. Cost / Efficiency Requirements
+
+1. Use `gemini-2.5-flash-lite` for structured extraction, routing, light classification.
+2. Use stronger model only where quality matters materially, especially roleplay demo if configured.
+3. Keep one-pass final generation where possible.
+4. Do not use LLM for Python-computable math.
+5. Do not run extractor inside ordinary roleplay turns.
+6. Avoid multiple LLM calls if deterministic strategy can decide.
+7. Store parsed file summaries; never re-send media every turn.
+8. Keep prompt context compact via prompt_composer.
+
+---
+
+## 19. Testing Requirements
+
+### 19.1 Unit tests
+
+Required:
+
+- profile_merger explicit vs inferred update;
+- conflict handling;
+- strategy mode selection;
+- score calculation;
+- question budget exhaustion;
+- wow mechanism selection;
+- ROI readiness levels;
+- ROI formulas;
+- roleplay isolation;
+- price handling policy.
+
+### 19.2 E2E scenarios
+
+Test at least:
+
+1. Cold lead: “Что вы делаете?”
+2. Microbusiness: “Я сам отвечаю в WhatsApp, не успеваю”
+3. Light ROI: “У нас 20 заявок в день, чек 30к, менеджер иногда долго отвечает”
+4. Full ROI: “100 лидов в день, amoCRM, 5 менеджеров, платный трафик”
+5. Integration: “Нужно связать WhatsApp, CRM, склад и оплату”
+6. Low fit: “У меня пока нет заявок, просто хочу AI”
+7. Irritated user: “Зачем столько вопросов?”
+8. Price-first user: “Сколько стоит?”
+9. Roleplay activation
+10. Roleplay active message does not update B2B profile
+11. Roleplay exit: “Сколько стоит сделать такого?”
+12. Contact collection after close
+13. Returning user after 24h
+
+---
+
+## 20. Migration Plan
+
+### Phase 0 — Documentation alignment
+
+Replace old `project_specs.md` with this v1.2 target spec or add it as `project_specs_v1.2.md` and instruct Opus that v1.2 supersedes v1.1.
+
+### Phase 1 — Structural skeleton
+
+- create `core/conversation_orchestrator.py`;
+- create `core/session_context.py`;
+- keep behavior unchanged;
+- move orchestration gradually out of `api.py`.
+
+### Phase 2 — Metadata compatibility
+
+- add v1.2 metadata schema;
+- keep old `client_facts` compatibility;
+- map old fields into new `business_profile` where safe.
+
+### Phase 3 — Structured Extractor
+
+- implement extractor using flash-lite structured output;
+- implement profile_merger;
+- disable extraction during roleplay turns.
+
+### Phase 4 — Strategy Engine
+
+- implement scores;
+- implement conversation modes;
+- implement question budget;
+- implement wow_router.
+
+### Phase 5 — ROI Engine
+
+- implement roi_readiness;
+- implement Python formulas;
+- implement assumptions and confidence.
+
+### Phase 6 — Prompt Composer
+
+- update B2B prompt to follow strategy_result;
+- ensure one question max;
+- ensure ROI safe phrasing.
+
+### Phase 7 — Commercial Policy
+
+- replace blind hardcoded price early-exit with strategy-aware commercial response policy.
+
+### Phase 8 — E2E tests and docs
+
+- update CLAUDE.md;
+- update README if needed;
+- log strategy and ROI metadata;
+- validate all critical scenarios.
+
+---
+
+## 21. Implementation Rules for Opus
+
+1. Before coding, read this document fully.
+2. Do not implement everything in one giant patch.
+3. First propose migration plan and file-level changes.
+4. Preserve current working behavior where possible.
+5. Do not put Sales Intelligence logic inside `gemini_service.py` if it belongs in `sales_intelligence`.
+6. Do not add ROI as a route unless strictly necessary.
+7. Do not calculate ROI with LLM.
+8. Do not update real business_profile from roleplay messages.
+9. Keep backward compatibility with existing `dialog_state` and `client_facts` during migration.
+10. Add tests with every phase.
+11. Update `CLAUDE.md` after architecture changes.
+12. If current code structure differs from this target spec, adapt intelligently and explain the tradeoff.
+13. Never sacrifice roleplay wow quality while adding ROI.
+14. Never turn the bot into a questionnaire.
+15. The core product behavior is: choose the right next best action for the right client.
+
+---
+
+## Appendix A — First prompt to give Opus after replacing specs
+
+```text
+TASK: Прочитай новый project_specs.md v1.2 полностью и предложи план миграции без кода.
+
+Контекст:
+Мы меняем Dami Works AI Agent с route-driven roleplay-first архитектуры на Adaptive Sales Intelligence систему.
+
+Важно:
+Сначала НЕ пиши код.
+
+Нужно:
+1. Подтверди, как ты понял новую целевую архитектуру.
+2. Найди в текущей кодовой базе, какие части соответствуют v1.2, а какие надо менять.
+3. Составь поэтапный план миграции.
+4. Укажи файлы, которые придется создать/изменить.
+5. Укажи риски и как их снизить.
+6. Отдельно объясни, как не сломать roleplay demo и текущий checkout flow.
+7. Отдельно объясни, как изолировать roleplay messages от business_profile extraction.
+8. После этого остановись и дождись моего подтверждения перед кодом.
+```
+
+---
+
+*Документ является целевой спецификацией. При расхождении с v1.1 legacy Claude должен считать этот файл более приоритетным, если пользователь явно не сказал обратное.*

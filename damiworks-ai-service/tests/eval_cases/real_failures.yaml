@@ -1,0 +1,86 @@
+# Known regressions from manual Telegram eval (mirrors tests/test_eval_regressions.py).
+# These encode behaviors that previously broke, so the harness catches them again.
+cases:
+  - id: rf_01_metrics_not_portfolio
+    title: Metric phrase must not be read as a portfolio request
+    reset_before: true
+    messages:
+      - "У нас 5 менеджеров, amoCRM и примерно 100 заявок в день."
+    expected:
+      no_prompt_leakage: true
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      portfolio_false_positive_guard: true
+      notes: "Business metrics must not trigger a portfolio/cases pivot (regression B)."
+
+  - id: rf_02_priblizitelno_not_portfolio
+    title: "'примерно' must not be read as portfolio request"
+    reset_before: true
+    messages:
+      - "Ну примерно, мне просто понять порядок."
+    expected:
+      no_prompt_leakage: true
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      portfolio_false_positive_guard: true
+      notes: "'примерно/порядок' is an estimate request, not a portfolio request."
+
+  - id: rf_03_margin_conversion_not_portfolio
+    title: Margin/conversion phrasing must not be portfolio request
+    reset_before: true
+    messages:
+      - "Маржа примерно 35%, часть заявок менеджеры теряют."
+    expected:
+      no_prompt_leakage: true
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      portfolio_false_positive_guard: true
+      notes: "Regression B: metric statement misclassified as portfolio/examples request."
+
+  - id: rf_04_irritated_user
+    title: Irritated user must get value, not more questions
+    reset_before: true
+    messages:
+      - "Я веду небольшой бизнес."
+      - "Хватит вопросов, объясните уже, чем это полезно."
+    expected:
+      max_questions_per_answer: 1
+      max_total_questions: 2
+      no_prompt_leakage: true
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      notes: "Regression C: keep questioning after irritation."
+
+  - id: rf_05_microbusiness_crm_pressure
+    title: Microbusiness must not be pushed into CRM/enterprise talk
+    reset_before: true
+    messages:
+      - "Я сам отвечаю клиентам в WhatsApp, маленький магазин."
+    expected:
+      expected_mode: microbusiness_helper
+      microbusiness_no_enterprise_pressure: true
+      no_prompt_leakage: true
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      notes: "Regression D: enterprise vocabulary (CRM/воронка/маржа) pushed onto a microbusiness."
+
+  - id: rf_06_greeting_no_fallback_leak
+    title: First greeting must not leak fallback/error scaffolding
+    reset_before: true
+    messages:
+      - "Здравствуйте!"
+    expected:
+      must_not_include:
+        - "ИИ сейчас не ответил"
+        - "Подробная причина записана в логах"
+        - "your-portfolio.dev"
+      no_prompt_leakage: true
+      price_safe: true
+      roi_safe: true
+      no_checkout_card: true
+      notes: "Regression E: greeting must not surface fallback/error text or placeholder links."

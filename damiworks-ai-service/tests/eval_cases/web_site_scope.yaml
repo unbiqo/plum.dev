@@ -1,0 +1,126 @@
+# Eval cases for DamiWorks website live chat (channel=web_site, instance_id=damiworks_site).
+# Mirrors the exact failing transcript reported in the scaffold/price regression.
+globals:
+  default_channel: web_site
+  default_instance_id: damiworks_site
+
+cases:
+  - id: ws_01_scope_completion
+    title: "web_site: Exact failing transcript — KZT pricing, no scaffold phrase, no premature WhatsApp CTA"
+    channel: web_site
+    reset_before: true
+    messages:
+      - "Привет, что вы делаете?"
+      - "Сколько стоит?"
+      - "Я сам отвечаю клиентам в WhatsApp и не успеваю"
+      - "Хочу чтобы бот отвечал на вопросы и передавал контакты прогретых лидов своим менеджерам"
+      - "Бот должен отвечать на вопросы о моем товаре. Передавать лидов можно в таблице с историей переписки"
+    expected:
+      must_not_include:
+        - "В проект добавим"
+        - "$300"
+        - "на какой номер"
+        - "отправить спецификацию"
+      must_include_any:
+        - "200"
+        - "₸"
+        - "тысяч"
+      max_questions_per_answer: 1
+      no_checkout_card: true
+      notes: >
+        Final turn must give KZT price orientation, summarize scope naturally,
+        ask at most 1 simple question, and not leak internal scaffold or USD prices.
+
+  - id: ws_02_price_first_kzt
+    title: "web_site: Cold price intent — KZT orientation, no USD"
+    channel: web_site
+    reset_before: true
+    messages:
+      - "Сколько стоит?"
+    expected:
+      must_not_include:
+        - "$300"
+        - "$600"
+        - "300 долл"
+      price_safe: true
+      no_checkout_card: true
+      max_questions_per_answer: 1
+      notes: Cold price request on web_site must not produce USD prices.
+
+  - id: ws_03_no_contact_cta_without_close_intent
+    title: "web_site: Scope described without close intent — no WhatsApp number request"
+    channel: web_site
+    reset_before: true
+    messages:
+      - "Хочу автоматизировать ответы клиентам"
+      - "У меня магазин одежды, пишут в Instagram"
+    expected:
+      must_not_include:
+        - "на какой номер"
+        - "отправить спецификацию"
+        - "$300"
+      max_questions_per_answer: 1
+      no_checkout_card: true
+      notes: WhatsApp contact request must not appear without explicit close intent.
+
+  - id: ws_04_full_live_transcript_after_guard_fix
+    title: "web_site: Full live transcript — USD guard, no premature CTA, KZT on scope"
+    channel: web_site
+    reset_before: true
+    messages:
+      - "Привет, что вы делаете?"
+      - "Сколько стоит?"
+      - "Хочу чтобы бот отвечал на вопросы и передавал контакты прогретых лидов своим менеджерам"
+      - "Бот должен отвечать на вопросы о моем товаре. Передавать лидов можно в таблице с историей переписки"
+    expected:
+      must_not_include:
+        - "$300"
+        - "$600"
+        - "В проект добавим"
+        - "на какой контакт"
+        - "на какой номер"
+        - "отправить спецификацию"
+        - "передать информацию"
+      must_include_any:
+        - "₸"
+        - "200"
+      max_questions_per_answer: 1
+      no_checkout_card: true
+      notes: >
+        Turn 2 (price intent) must return KZT, not $300.
+        Turn 3 (scope + lids) must NOT ask for contact details — close_intent not signalled.
+        Turn 4 (scope + table) must give KZT pricing and at most 1 simple question.
+
+  - id: ws_05_simulation_redirect_to_custom_demo
+    title: "web_site consultant: live-simulation request is redirected to Custom demo, no roleplay"
+    channel: web_site
+    instance_id: damiworks_site
+    reset_before: true
+    messages:
+      - "Покажи как бот будет отвечать моим клиентам"
+    expected:
+      must_include_any:
+        - "Custom demo"
+      must_not_include:
+        - "режим продавца"
+        - "тест-драйв"
+        - "роль продавца"
+      no_checkout_card: true
+      notes: >
+        Consultant must not roleplay. It points the user to the separate Custom demo tab.
+
+  - id: ws_06_custom_demo_price_needs_context
+    title: "custom_demo: 'сколько стоит?' with no business context asks for product, not DamiWorks prices"
+    channel: web_site
+    instance_id: damiworks_custom_demo
+    reset_before: true
+    messages:
+      - "сколько стоит?"
+    expected:
+      must_not_include:
+        - "350 000"
+        - "200 000 ₸"
+        - "пакет"
+      notes: >
+        In Custom demo the price question is about the client's product. With no business
+        context yet, the demo asks the user to describe the business — never DamiWorks pricing.

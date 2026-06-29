@@ -1,0 +1,80 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+export const runtime = 'nodejs'
+
+export async function POST(req: NextRequest) {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
+  }
+
+  const { message, chat_id, chat_history, reset_context, intake_context, instance_id } =
+    body as Record<string, unknown>
+
+  if (typeof message !== 'string' || message.trim().length === 0)
+    return NextResponse.json({ error: 'message_required' }, { status: 400 })
+  if (message.length > 2000)
+    return NextResponse.json({ error: 'message_too_long' }, { status: 400 })
+  if (typeof chat_id !== 'string' || chat_id.trim().length === 0)
+    return NextResponse.json({ error: 'chat_id_required' }, { status: 400 })
+  if (chat_history !== undefined && !Array.isArray(chat_history))
+    return NextResponse.json({ error: 'chat_history_invalid' }, { status: 400 })
+
+  // Allowlist the instance: DamiWorks consultant (default) or the Custom demo roleplay
+  // instance. Both run over channel="web_site"; the backend separates behavior by instance_id.
+  const ALLOWED_INSTANCES = ['damiworks_site', 'damiworks_custom_demo'] as const
+  const resolvedInstanceId =
+    typeof instance_id === 'string' && (ALLOWED_INSTANCES as readonly string[]).includes(instance_id)
+      ? instance_id
+      : 'damiworks_site'
+
+  // Build effective history (intake context also kept here for conversational memory)
+  const effectiveHistory: Array<{ role: string; content: string }> = []
+  effectiveHistory.push(...((chat_history as Array<{ role: string; content: string }>) ?? []))
+
+  // Inject intake context directly into the user message so the LLM treats it as instructions.
+  // The visible UI always shows only the original user text — this prefix only goes to FastAPI.
+  const hasIntakeCtx = typeof intake_context === 'string' && intake_context.trim().length > 0
+  const effectiveMessage = hasIntakeCtx
+    ? `${(intake_context as string).trim()}\n\nCurrent user message:\n${(message as string).trim()}`
+    : (message as string).trim()
+
+  const fastApiUrl = process.env.FASTAPI_URL ?? 'http://localhost:8000'
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30_000)
+
+  try {
+    const res = await fetch(`${fastApiUrl}/api/v1/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        channel: 'web_site',
+        chat_id,
+        instance_id: resolvedInstanceId,
+        message: effectiveMessage,
+        chat_history: effectiveHistory,
+        reset_context: Boolean(reset_context),
+      }),
+    })
+
+    if (!res.ok) return NextResponse.json({ error: 'backend_error' }, { status: 502 })
+
+    const data = (await res.json()) as {
+      answer: string
+      lead_status?: string | null
+      lead_sent?: boolean
+    }
+    return NextResponse.json({
+      answer: data.answer,
+      lead_status: data.lead_status ?? null,
+      lead_sent: Boolean(data.lead_sent),
+    })
+  } catch {
+    return NextResponse.json({ error: 'unreachable' }, { status: 503 })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
