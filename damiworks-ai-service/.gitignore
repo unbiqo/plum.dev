@@ -1,1 +1,23 @@
 .vercel
+
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Logs
+*.log
+*.err.log
+*.out.log
+
+# Editor
+.DS_Store

@@ -1,101 +1,132 @@
-# Boston Peptides AI Service
+# DamiWorks AI Service
 
-FastAPI microservice for Gemini multi-routing, RAG lookup through Supabase, and async chat logging.
+FastAPI backend — Gemini multi-routing, RAG via Supabase, DamiWorks sales consultant, English School demo.
 
-## Run locally
+## Local dev
 
-```powershell
-cd C:\projects\bp-ai-service
+```bash
 python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-copy .env.example .env
+.venv/Scripts/pip install -r requirements.txt   # Windows
+# source .venv/bin/activate && pip install ...  # Linux/Mac
+cp .env.example .env                            # fill in real values
 uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-## Endpoint
+Health check: `curl http://localhost:8010/health` → `{"status":"ok"}`
 
-```http
-POST /api/v1/chat
-Content-Type: application/json
+## VPS deployment (Docker)
+
+### 1 — Install Docker & Docker Compose
+
+```bash
+curl -fsSL https://get.docker.com | sh
+# Docker Compose v2 is bundled — verify:
+docker compose version
 ```
 
-```json
-{
-  "user_id": "telegram:123456",
-  "message": "Как хранить ретатрутид?",
-  "chat_history": [
-    {
-      "role": "user",
-      "content": "Привет"
-    },
-    {
-      "role": "assistant",
-      "content": "Здравствуйте."
-    }
-  ]
-}
+### 2 — Copy backend to VPS
+
+```bash
+# Option A: clone the monorepo and work from the backend subfolder
+git clone https://github.com/your-org/plum-dev.git
+cd plum-dev/damiworks-ai-service
+
+# Option B: scp just the backend folder
+scp -r damiworks-ai-service/ user@your-vps:/opt/damiworks-api
+cd /opt/damiworks-api
 ```
 
-## Response
+### 3 — Create .env
 
-```json
-{
-  "route": "RAG_REQUIRED",
-  "answer": "Ответ модели...",
-  "checkout": null,
-  "metadata": {
-    "rag_context_found": true
-  }
-}
+```bash
+cp .env.example .env
+nano .env   # fill GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 ```
 
-## Supabase
-
-Apply `sql/chat_logs.sql` in Supabase SQL editor before production use.
-
-The current RAG function is intentionally a placeholder. It tries a simple text search against the table configured by `SUPABASE_RAG_TABLE`, expecting columns:
-
-- `title`
-- `content`
-- `source_url`
-
-Replace `SupabaseService._search_knowledge_base_sync` with vector RPC or hybrid search when the RAG schema is finalized.
-
-## Gemini quota routing
-
-The service uses only `GEMINI_API_KEY` for every Gemini request. Additional
-variables such as `GEMINI_API_KEY2` or `GEMINI_API_KEY_2` are ignored, so
-traffic is not rotated away from the billing-enabled primary key.
-Text generation is fixed to `gemini-2.5-flash-lite` for router, general, and RAG
-answers. Text model env overrides and text model pools are intentionally ignored
-to keep cost and behavior standardized:
-
-- text model: `gemini-2.5-flash-lite`
-- embedding models: `text-embedding-004`, `gemini-embedding-001`,
-  `gemini-embedding-2`
-
-Text model pools:
+Minimum required values:
 
 ```env
-GEMINI_ROUTER_MODEL_POOL=gemini-2.5-flash-lite
-GEMINI_GENERAL_MODEL_POOL=gemini-2.5-flash-lite
-GEMINI_RAG_MODEL_POOL=gemini-2.5-flash-lite
-GEMINI_VECTOR_EMBEDDING_MODEL_POOL=text-embedding-004,gemini-embedding-001
+GEMINI_API_KEY=...
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
-Token budget guards:
+Optional (leave blank to disable Telegram lead notifications):
 
 ```env
-MAX_HISTORY_MESSAGES=15
-RAG_MATCH_COUNT=3
-RAG_CHUNK_MAX_CHARS=1800
-RAG_CONTEXT_MAX_CHARS=5500
-SUMMARY_AFTER_MESSAGES=15
-ENABLE_B2B_MEMORY_SUMMARY=true
+LEAD_TELEGRAM_BOT_TOKEN=...
+LEAD_TELEGRAM_CHAT_ID=...
 ```
 
-`MAX_HISTORY_MESSAGES` is clamped to 15 in code, `RAG_MATCH_COUNT` is clamped to
-4, and stale sessions older than 6 hours start with empty recent history.
+### 4 — Start
 
-Embedding model settings remain separate because embeddings are not text
-generation.
+```bash
+docker compose up -d --build
+```
+
+### 5 — Verify
+
+```bash
+# Container is healthy
+docker compose ps
+
+# Logs (follow)
+docker compose logs -f api
+
+# Health endpoint
+curl http://localhost:8000/health
+# Expected: {"status":"ok"}
+```
+
+### 6 — Stop / restart
+
+```bash
+docker compose down          # stop and remove container
+docker compose restart api   # restart without rebuild
+docker compose up -d --build # rebuild and restart
+```
+
+## Reverse proxy (Caddy — recommended)
+
+Caddy handles HTTPS automatically.
+
+```bash
+# Install Caddy
+apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+apt update && apt install caddy
+
+# Copy the Caddyfile
+cp Caddyfile /etc/caddy/Caddyfile
+systemctl reload caddy
+```
+
+The included `Caddyfile` proxies `api.damiworks.com` → `localhost:8000` with automatic TLS.
+
+Point your DNS `A` record for `api.damiworks.com` at the VPS IP before running this.
+
+## Environment variables
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `GEMINI_API_KEY` | **yes** | — | Backend will not start without this |
+| `SUPABASE_URL` | **yes** | — | |
+| `SUPABASE_SERVICE_ROLE_KEY` | **yes** | — | |
+| `LEAD_TELEGRAM_BOT_TOKEN` | no | `""` | Lead notifications to owner; skipped when empty |
+| `LEAD_TELEGRAM_CHAT_ID` | no | `""` | |
+| `MAX_HISTORY_MESSAGES` | no | `15` | |
+| `RAG_MATCH_COUNT` | no | `3` | |
+| `ENABLE_B2B_MEMORY_SUMMARY` | no | `true` | |
+| `INTELLIGENCE_SHADOW_ENABLED` | no | `true` | |
+| `ENABLE_GENERATION_FALLBACK` | no | `false` | |
+
+## Frontend integration
+
+The Next.js frontend proxies chat through `/api/chat` → this backend. In production set:
+
+```env
+FASTAPI_URL=https://api.damiworks.com
+```
+
+in the Next.js deployment environment (Vercel or your own hosting).
