@@ -6,15 +6,27 @@ import logging
 import os
 import re
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 
 from .gemini_service import GeminiService
 from .gemini_quota import GeminiQuotaExhausted
+from .custom_demo_documents import (
+    CUSTOM_DEMO_DOCUMENT_TTL_SECONDS,
+    format_custom_demo_document_context,
+    get_custom_demo_document,
+    store_custom_demo_document,
+)
+from .english_school_demo import (
+    ENGLISH_SCHOOL_INSTANCE_ID,
+    handle_english_school_chat,
+)
 from .sales_intelligence import (
     ENABLED_MODES,
     QUESTION_BUDGET_INSTRUCTION,
@@ -34,6 +46,7 @@ from .schemas import (
     ChatHistoryMessage,
     ChatRequest,
     ChatResponse,
+    ContactFormRequest,
     LeadCreateRequest,
     ProductCard,
     Route,
@@ -221,7 +234,10 @@ def _force_roleplay_for_custom_demo(
     new_request=True so the context gate is entered and asks for a description.
     No effect on any other instance."""
     if _is_custom_demo_instance(payload) and not roleplay_demo.get("exit"):
-        has_context = bool((dialog_state or {}).get(ROLEPLAY_CONTEXT_SUMMARY_KEY))
+        chat_id = str(getattr(payload, "chat_id", "") or "")
+        has_context = bool((dialog_state or {}).get(ROLEPLAY_CONTEXT_SUMMARY_KEY)) or (
+            bool(chat_id) and get_custom_demo_document(chat_id) is not None
+        )
         return {
             "active": True,
             "topic": roleplay_demo.get("topic", ""),
@@ -247,12 +263,73 @@ ROLEPLAY_CONTEXT_SUMMARY_KEY = "roleplay_demo_context_summary"
 ROLEPLAY_CONTEXT_SOURCE_KEY = "roleplay_demo_context_source"
 ROLEPLAY_CONTEXT_WAIT_COUNT_KEY = "roleplay_demo_context_wait_count"
 ROLEPLAY_NO_FILE_FALLBACK_KEY = "roleplay_demo_no_file_fallback"
+CUSTOM_DEMO_MAX_FILE_BYTES = 5 * 1024 * 1024
+CUSTOM_DEMO_SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".csv"}
 BUYING_MILESTONE_KEYS = {
     "pain_expressed",
     "demo_activated",
     "price_exposed",
     "close_consented",
 }
+
+
+def _custom_demo_file_extension(filename: str) -> str:
+    _, ext = os.path.splitext(filename or "")
+    return ext.lower()
+
+
+def _normalize_uploaded_text(text: str) -> str:
+    paragraphs = [
+        re.sub(r"[ \t\r\f\v]+", " ", part).strip()
+        for part in re.split(r"\n\s*\n+", text or "")
+    ]
+    paragraphs = [part for part in paragraphs if part]
+    if paragraphs:
+        return "\n\n".join(paragraphs)
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _extract_text_document(data: bytes) -> str:
+    for encoding in ("utf-8", "utf-8-sig", "cp1251", "latin-1"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore")
+
+
+def _extract_pdf_document(data: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+    except Exception as exc:  # pragma: no cover - dependency failure path
+        raise HTTPException(status_code=500, detail="PDF support is not installed.") from exc
+
+    try:
+        from io import BytesIO
+
+        reader = PdfReader(BytesIO(data))
+        page_texts = [(page.extract_text() or "") for page in reader.pages]
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not extract text from this PDF.") from exc
+    text = "\n\n".join(page_texts)
+    normalized = _normalize_uploaded_text(text)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Could not extract text from this PDF.")
+    return normalized
+
+
+async def _extract_custom_demo_upload_text(file: UploadFile, data: bytes) -> str:
+    ext = _custom_demo_file_extension(file.filename or "")
+    if ext == ".pdf":
+        return _extract_pdf_document(data)
+    return _normalize_uploaded_text(_extract_text_document(data))
+
+
+def _custom_demo_upload_error(message: str, status_code: int = 400) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"ok": False, "error": message},
+    )
 
 CONTACT_COLLECTION_PATTERNS = (
     r"имя",
@@ -627,6 +704,10 @@ def _roleplay_context_request_answer(topic: str, *, reminder: bool = False) -> s
     )
 
 
+# Discovery mode flag — keep in sync with HIDE_DAMIWORKS_PUBLIC_PRICES in web_site_intake_policy.py.
+# Scope: damiworks_site only. English School and Custom Demo are unaffected.
+HIDE_DAMIWORKS_PUBLIC_PRICES: bool = True
+
 # DamiWorks public package pricing (KZT). Single source of truth for all repair/CTA turns.
 _DAMIWORKS_KZT_PRICING = (
     "150 000–200 000 ₸ за запуск + 40 000–60 000 ₸/мес — пакет «Старт/Пилот» (1 канал, FAQ, сбор контактов); "
@@ -636,6 +717,13 @@ _DAMIWORKS_KZT_PRICING = (
 
 
 def _build_price_override_answer() -> str:
+    if HIDE_DAMIWORKS_PUBLIC_PRICES:
+        return (
+            "Стоимость зависит от каналов, объёма обращений, интеграций и уровня автоматизации. "
+            "Обычно сначала коротко разбираем задачу и предлагаем формат пилота с понятным объёмом.\n\n"
+            "Пройдите короткий подбор (1 минута, 5 вопросов) или опишите, что должен делать "
+            "ваш AI-сотрудник."
+        )
     return (
         f"По Dami Works ориентир:\n\n{_DAMIWORKS_KZT_PRICING}\n\n"
         "Чтобы подобрать точный пакет под ваш сценарий — пройдите короткий подбор (1 минута, 5 вопросов) "
@@ -671,6 +759,20 @@ _WEB_CONTACT_CTA_RE = re.compile(
     r"куда\s+вам\s+написать|куда\s+написать|свяжемся|связаться\s+с\s+вами|"
     r"с\s+вами\s+свяжется|свяжется\s+менеджер",
     re.IGNORECASE,
+)
+
+# DamiWorks-only price amount guardrail. Applied ONLY inside _sanitize_damiworks_web_answer
+# (damiworks_site). Never used for English School or Custom Demo.
+_DAMIWORKS_PRICE_GUARD_RE = re.compile(
+    r"\b(?:150\s*000|200\s*000|350\s*000|700\s*000|40\s*000|60\s*000|120\s*000)"
+    r"(?:\s*[–—\-]\s*(?:200\s*000|60\s*000))?"
+    r"\s*₸",
+    re.IGNORECASE,
+)
+
+_DISCOVERY_PRICE_FALLBACK = (
+    "Стоимость зависит от каналов, объёма обращений, интеграций и уровня автоматизации. "
+    "После короткого разбора задач предложим формат запуска и конкретный объём."
 )
 
 # Conservative terminology normalization for consultant output (PART 2 / PART 9 / PART 10).
@@ -819,20 +921,23 @@ def _sanitize_damiworks_web_answer(
         if _turn.answer:
             return _turn.answer
 
-    # Step 1: Replace USD artifact paragraphs with KZT block.
+    # Step 1: Replace USD artifact paragraphs; inject KZT block only when prices are public.
     if has_usd:
         paragraphs = [p.strip() for p in normalized.split("\n\n") if p.strip()]
         safe_paras: list[str] = [p for p in paragraphs if not _WEB_USD_ARTIFACT_RE.search(p)]
-        insert_at = min(1, len(safe_paras))
-        safe_paras.insert(insert_at, _WEB_KZT_PRICING_BLOCK)
-        if has_price_intent and not any("?" in p for p in safe_paras):
-            safe_paras.append(
-                "Что ближе к вашей задаче: просто отвечать на заявки или ещё делать follow-up/CRM?"
-            )
-        normalized = "\n\n".join(safe_paras)
+        if not HIDE_DAMIWORKS_PUBLIC_PRICES:
+            insert_at = min(1, len(safe_paras))
+            safe_paras.insert(insert_at, _WEB_KZT_PRICING_BLOCK)
+            if has_price_intent and not any("?" in p for p in safe_paras):
+                safe_paras.append(
+                    "Что ближе к вашей задаче: просто отвечать на заявки или ещё делать follow-up/CRM?"
+                )
+        normalized = "\n\n".join(safe_paras) or _DISCOVERY_PRICE_FALLBACK
 
-    # Step 2: Price intent with no KZT at all → full price template.
+    # Step 2: Price intent with no KZT at all → discovery fallback or full price template.
     elif has_price_intent and "₸" not in normalized:
+        if HIDE_DAMIWORKS_PUBLIC_PRICES:
+            return _DISCOVERY_PRICE_FALLBACK
         return (
             f"{_WEB_KZT_PRICING_BLOCK} "
             "Что ближе к вашей задаче: просто отвечать на заявки или ещё делать follow-up/CRM?"
@@ -867,8 +972,8 @@ def _sanitize_damiworks_web_answer(
                 new_paras.append(para_clean)
         normalized = "\n\n".join(new_paras)
 
-    # Step 5: Scope-completion rewrite — ensure KZT + single question.
-    if not close_intent and _WEB_SCOPE_TERMS_RE.search(user_lower):
+    # Step 5: Scope-completion rewrite — ensure KZT + single question (public prices only).
+    if not HIDE_DAMIWORKS_PUBLIC_PRICES and not close_intent and _WEB_SCOPE_TERMS_RE.search(user_lower):
         has_kzt = "₸" in normalized
         q_count = normalized.count("?")
         if not has_kzt or q_count > 1:
@@ -976,6 +1081,13 @@ def _sanitize_damiworks_web_answer(
         cta = _pick_guided_intake_cta(last_assistant_message)
         normalized = f"{normalized}\n\n{cta}"
 
+    # Step 8b: Discovery mode price guardrail — scrub any DamiWorks package price amounts
+    # that survived earlier steps or were generated by the LLM.
+    if HIDE_DAMIWORKS_PUBLIC_PRICES and _DAMIWORKS_PRICE_GUARD_RE.search(normalized):
+        paragraphs = [p.strip() for p in normalized.split("\n\n") if p.strip()]
+        safe_price_paras = [p for p in paragraphs if not _DAMIWORKS_PRICE_GUARD_RE.search(p)]
+        normalized = "\n\n".join(safe_price_paras) if safe_price_paras else _DISCOVERY_PRICE_FALLBACK
+
     # Step 9: Conservative DamiWorks terminology.
     for pattern, replacement in _WEB_TERMINOLOGY_SUBS:
         normalized = pattern.sub(replacement, normalized)
@@ -1036,7 +1148,7 @@ async def _apply_consultant_lead_side_effects(
         stage = turn.stage
         if stage == LeadStage.contact_collected:
             if dialog_state.get("lead_closed"):
-                return "closed", True
+                return "contact_collected", True
             row = _build_lead_row(payload, ctx, status="closed", contact=turn.contact)
             await supabase.upsert_lead(row)
             text = lead_notifier.format_lead_updated(row)
@@ -1044,7 +1156,7 @@ async def _apply_consultant_lead_side_effects(
                 settings.lead_telegram_bot_token, settings.lead_telegram_chat_id, text
             )
             dialog_state["lead_closed"] = True
-            return "closed", True
+            return "contact_collected", True
         if stage == LeadStage.closed:
             return "closed", False
         if stage == LeadStage.contact_requested:
@@ -1403,25 +1515,150 @@ async def create_lead(payload: LeadCreateRequest, request: Request) -> dict[str,
         "transcript_json": [m.model_dump() for m in payload.transcript],
     }
 
-    notified = False
     try:
-        existing = await supabase.get_lead(
-            instance_id=payload.instance_id, chat_id=payload.chat_id
-        )
-        already_notified = bool(existing and existing.get("notified_at"))
-        if interest in {"warm", "hot"} and not already_notified:
-            row["status"] = "notified"
-            row["notified_at"] = datetime.now(timezone.utc).isoformat()
         await supabase.upsert_lead(row)
-        if interest in {"warm", "hot"} and not already_notified:
-            text = lead_notifier.format_lead_created(row)
-            notified = await lead_notifier.send_owner_notification(
-                settings.lead_telegram_bot_token, settings.lead_telegram_chat_id, text
-            )
     except Exception:
         logger.exception("create_lead failed (ignored)")
 
-    return {"ok": True, "lead_status": "open", "notified": notified}
+    return {"ok": True, "lead_status": "intake_completed"}
+
+
+@router.post("/contact")
+async def create_contact_form_lead(
+    payload: ContactFormRequest,
+    request: Request,
+) -> dict:
+    """Footer / contact-section form submission → Supabase + Telegram."""
+    supabase: SupabaseService = request.app.state.supabase
+    settings = request.app.state.gemini.settings
+
+    now = datetime.now(timezone.utc).isoformat()
+    row: dict[str, Any] = {
+        "instance_id": "damiworks_contact_form",
+        "chat_id": str(uuid.uuid4()),
+        "source": "contact_form",
+        "status": "notified",
+        "user_contact_name": payload.name.strip(),
+        "contact_raw": payload.contact.strip(),
+        "business_type": payload.business_type,
+        "summary": payload.message,
+        "notified_at": now,
+    }
+
+    notified = False
+    try:
+        await supabase.upsert_lead(row)
+        text = lead_notifier.format_contact_form_lead(row)
+        notified = await lead_notifier.send_owner_notification(
+            settings.lead_telegram_bot_token, settings.lead_telegram_chat_id, text
+        )
+    except Exception:
+        logger.exception("create_contact_form_lead failed (ignored)")
+
+    return {"ok": True, "notified": notified}
+
+
+@router.post("/custom-demo/documents")
+async def upload_custom_demo_document(
+    file: UploadFile = File(...),
+    chat_id: str = Form(...),
+    instance_id: str = Form(...),
+) -> JSONResponse:
+    if instance_id != CUSTOM_DEMO_INSTANCE_ID:
+        return _custom_demo_upload_error("Document upload is only available for Custom demo.")
+
+    normalized_chat_id = chat_id.strip()
+    if not normalized_chat_id:
+        return _custom_demo_upload_error("chat_id is required.")
+
+    filename = file.filename or ""
+    ext = _custom_demo_file_extension(filename)
+    if ext not in CUSTOM_DEMO_SUPPORTED_EXTENSIONS:
+        return _custom_demo_upload_error("Supported formats: .txt, .pdf, .csv, .md")
+
+    data = await file.read()
+    if not data:
+        return _custom_demo_upload_error("Uploaded file is empty.")
+    if len(data) > CUSTOM_DEMO_MAX_FILE_BYTES:
+        return _custom_demo_upload_error("File is too large (max 5 MB).")
+
+    try:
+        text = await _extract_custom_demo_upload_text(file, data)
+    except HTTPException as exc:
+        return _custom_demo_upload_error(str(exc.detail), status_code=exc.status_code)
+
+    if not text.strip():
+        return _custom_demo_upload_error("Could not extract text from this document.")
+
+    try:
+        document = store_custom_demo_document(
+            chat_id=normalized_chat_id,
+            filename=filename,
+            text=text,
+        )
+    except ValueError:
+        return _custom_demo_upload_error("Could not extract text from this document.")
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "document_id": document.document_id,
+            "filename": document.filename,
+            "char_count": len(text),
+            "chunk_count": len(document.chunks),
+            "ttl_seconds": CUSTOM_DEMO_DOCUMENT_TTL_SECONDS,
+        }
+    )
+
+
+async def _save_english_school_lead(
+    payload: "ChatRequest",
+    response: "ChatResponse",
+    supabase: "SupabaseService",
+    settings: Any,
+) -> None:
+    """Background task: persist English School demo contact lead + notify owner.
+
+    Idempotent — skips if a lead with contact_raw already exists for this chat.
+    """
+    try:
+        state_meta: dict = (response.metadata or {}).get("state") or {}
+        contact = str(state_meta.get("contact") or "").strip()
+        if not contact:
+            return
+
+        chat_id = str(payload.chat_id or "").strip()
+        if not chat_id:
+            return
+
+        existing = await supabase.get_lead(
+            instance_id=str(payload.instance_id),
+            chat_id=chat_id,
+        )
+        if existing and existing.get("contact_raw"):
+            return  # already saved and notified
+
+        now = datetime.now(timezone.utc).isoformat()
+        row: dict[str, Any] = {
+            "instance_id": str(payload.instance_id),
+            "chat_id": chat_id,
+            "source": "english_school_demo",
+            "status": "contact_collected",
+            "contact_raw": contact,
+            "contact_collected_at": now,
+            "closed_at": now,
+            "transcript_json": state_meta,
+            "notified_at": now,
+        }
+        await supabase.upsert_lead(row)
+
+        notif_row = dict(row, _school_state=state_meta)
+        text = lead_notifier.format_english_school_lead(notif_row)
+        await lead_notifier.send_owner_notification(
+            settings.lead_telegram_bot_token, settings.lead_telegram_chat_id, text
+        )
+    except Exception:
+        logger.exception("_save_english_school_lead failed (ignored)")
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -1437,6 +1674,20 @@ async def chat(
         asyncio.create_task(
             send_platform_typing_indicator(payload.channel, payload.chat_id)
         )
+
+        # English school demo has its own static KB — skip all Supabase/intelligence machinery.
+        if payload.instance_id == ENGLISH_SCHOOL_INSTANCE_ID:
+            response = await handle_english_school_chat(gemini, payload)
+            if response.lead_status == "contact_collected":
+                background_tasks.add_task(
+                    _save_english_school_lead,
+                    payload=payload,
+                    response=response,
+                    supabase=supabase,
+                    settings=gemini.settings,
+                )
+            return response
+
         tenant_settings = await supabase.get_tenant_settings(
             instance_id=payload.instance_id,
         )
@@ -2006,13 +2257,35 @@ async def chat(
             if router_requested_roleplay_exit and rp_start > 0
             else effective_history
         )
+        custom_demo_document_context_used = False
 
         if roleplay_demo_active:
+            uploaded_document_context = ""
+            if _is_custom_demo_instance(payload):
+                uploaded_document_context = format_custom_demo_document_context(
+                    payload.chat_id,
+                    payload.message,
+                )
+                custom_demo_document_context_used = bool(uploaded_document_context)
+                if uploaded_document_context:
+                    uploaded_document_context = _join_non_empty(
+                        uploaded_document_context,
+                        (
+                            "CUSTOM DEMO DOCUMENT RULES: Use these uploaded business "
+                            "materials as temporary context for this Custom demo chat only. "
+                            "Prefer relevant facts from the excerpts when answering as the "
+                            "client's AI employee. If the excerpts do not contain the answer, "
+                            "say that the information needs to be clarified instead of inventing it."
+                        ),
+                    )
             answer = await gemini.answer_roleplay_with_demo_context(
                 message=payload.message,
                 chat_history=effective_history,
                 topic=str(dialog_state.get("roleplay_demo_topic") or ""),
-                demo_context=str(dialog_state.get(ROLEPLAY_CONTEXT_SUMMARY_KEY) or ""),
+                demo_context=_join_non_empty(
+                    str(dialog_state.get(ROLEPLAY_CONTEXT_SUMMARY_KEY) or ""),
+                    uploaded_document_context,
+                ),
                 no_file_fallback=bool(dialog_state.get(ROLEPLAY_NO_FILE_FALLBACK_KEY)),
             )
         elif force_checkout_from_last_price and selected_product:
@@ -2354,6 +2627,7 @@ async def chat(
                 "dialog_state": dialog_state,
                 "roleplay_demo_active": roleplay_demo_active,
                 "roleplay_exit_router": router_requested_roleplay_exit,
+                "custom_demo_document_context_used": custom_demo_document_context_used,
                 "roleplay_awaiting_context_file": bool(dialog_state.get(ROLEPLAY_AWAITING_CONTEXT_KEY)),
                 "roleplay_context_source": dialog_state.get(ROLEPLAY_CONTEXT_SOURCE_KEY),
                 "roleplay_no_file_fallback": bool(dialog_state.get(ROLEPLAY_NO_FILE_FALLBACK_KEY)),

@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'chat_id_required' }, { status: 400 })
   }
 
-  const fastApiUrl = process.env.FASTAPI_URL ?? 'http://localhost:8000'
+  const fastApiUrl = process.env.FASTAPI_URL ?? (process.env.NODE_ENV === 'production' ? null : 'http://localhost:8010')
   const payload = {
     chat_id: lead.chat_id,
     instance_id: 'damiworks_site',

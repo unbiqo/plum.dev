@@ -204,9 +204,10 @@ class TestBuildPriceOverrideAnswer:
         assert "$300" not in answer
         assert "$600" not in answer
 
-    def test_kzt_present(self):
+    def test_discovery_safe_text(self):
+        # When HIDE_DAMIWORKS_PUBLIC_PRICES=True, override answer must not quote prices.
         answer = _build_price_override_answer()
-        assert "₸" in answer
+        assert "каналов" in answer.lower() or "объём" in answer.lower()
 
     def test_suggests_intake_instead_of_scope_question(self):
         answer = _build_price_override_answer()
@@ -239,10 +240,11 @@ class TestDamiworksKztPricingConstant:
 class TestSanitizeDamiworksWebAnswer:
     # 1. USD price artifact → replaced with KZT
     def test_usd_price_replaced_with_kzt(self):
+        # USD is always removed; with HIDE_DAMIWORKS_PUBLIC_PRICES KZT is NOT injected.
         answer = "Базовое внедрение AI-помощника стартует от $300."
         result = _sanitize_damiworks_web_answer(answer, "Сколько стоит?", close_intent=False)
         assert "$300" not in result
-        assert "₸" in result
+        assert result  # not empty
 
     def test_usd_price_has_one_question(self):
         answer = "Базовое внедрение AI-помощника стартует от $300."
@@ -268,17 +270,17 @@ class TestSanitizeDamiworksWebAnswer:
         assert "оставьте номер" not in result.lower()
         assert "свяжемся" not in result.lower()
 
-    # 3. Contact CTA preserved with close_intent
+    # 3. Contact CTA preserved with close_intent (answer must not contain price amounts)
     def test_contact_cta_allowed_with_close_intent(self):
         answer = (
             "Отлично, обсудим детали.\n\n"
-            "от 200 000 ₸. Давайте уточним — на какой контакт передать информацию?"
+            "Давайте уточним — на какой контакт передать информацию?"
         )
         result = _sanitize_damiworks_web_answer(answer, "хочу купить", close_intent=True)
         assert any(w in result.lower() for w in ["контакт", "уточним"])
 
-    # 4. Scope message → KZT pricing, no contact CTA
-    def test_scope_message_gets_kzt_pricing(self):
+    # 4. Scope message — with HIDE_DAMIWORKS_PUBLIC_PRICES, no KZT injected; CTA still removed
+    def test_scope_message_no_price_injected(self):
         answer = (
             "Понял, хороший scope.\n\n"
             "Чтобы рассчитать точную стоимость, нужно уточнить объём вопросов. "
@@ -286,19 +288,18 @@ class TestSanitizeDamiworksWebAnswer:
         )
         user_msg = "Бот должен отвечать на вопросы о моем товаре. Передавать лидов в таблице с историей переписки"
         result = _sanitize_damiworks_web_answer(answer, user_msg, close_intent=False)
-        assert "₸" in result
         assert result.count("?") <= 1
         assert "на какой контакт" not in result.lower()
 
     def test_scope_message_no_contact_request(self):
+        # Answer must not contain prices (step 8b would strip the price paragraph).
         answer = (
             "Это отличный сценарий.\n\n"
-            "от 200 000 ₸. Давайте уточним — на какой контакт передать информацию?"
+            "Давайте уточним — на какой контакт передать информацию?"
         )
         user_msg = "Хочу чтобы бот отвечал на вопросы и передавал контакты прогретых лидов менеджерам"
         result = _sanitize_damiworks_web_answer(answer, user_msg, close_intent=False)
         assert "передать информацию" not in result.lower()
-        assert "₸" in result
 
     # 5. Normal WhatsApp channel mention preserved (not a CTA)
     def test_whatsapp_channel_mention_preserved(self):
@@ -321,11 +322,11 @@ class TestSanitizeDamiworksWebAnswer:
         result = _sanitize_damiworks_web_answer(answer, "расскажи", close_intent=False)
         assert "В проект добавим" not in result
 
-    # 8. Price intent with no KZT → direct template
+    # 8. Price intent with no KZT → discovery fallback (no prices in discovery mode)
     def test_price_intent_no_kzt_returns_template(self):
         answer = "Стоимость зависит от задачи и сложности интеграции."
         result = _sanitize_damiworks_web_answer(answer, "Сколько стоит?", close_intent=False)
-        assert "₸" in result
+        assert result  # not empty
         assert result.count("?") <= 1
 
     # 9. Reversed dollar sign: "300$" pattern (the live-QA leak)
@@ -337,29 +338,28 @@ class TestSanitizeDamiworksWebAnswer:
         result = _sanitize_damiworks_web_answer(answer, "почему так дорого", close_intent=False)
         assert "300$" not in result
         assert "$300" not in result
-        assert "₸" in result
-        assert any(x in result for x in ["200", "350"])
+        assert result  # not empty
 
     # 10. Dollar with space: "300 $"
     def test_dollar_with_space_replaced(self):
         answer = "Базовое внедрение от 600 $."
         result = _sanitize_damiworks_web_answer(answer, "цена", close_intent=False)
         assert "600 $" not in result
-        assert "₸" in result
+        assert result  # not empty
 
     # 11. Uppercase USD token
     def test_usd_token_replaced(self):
         answer = "Внедрение AI-сотрудника обходится от 300 USD."
         result = _sanitize_damiworks_web_answer(answer, "цена", close_intent=False)
         assert "USD" not in result
-        assert "₸" in result
+        assert result  # not empty
 
     # 12. Lowercase usd
     def test_usd_lowercase_replaced(self):
         answer = "Обычно 300 usd за базовый пакет."
         result = _sanitize_damiworks_web_answer(answer, "стоимость", close_intent=False)
         assert "usd" not in result.lower()
-        assert "₸" in result
+        assert result  # not empty
 
 
 # ---------------------------------------------------------------------------
@@ -392,26 +392,24 @@ class TestParseIntakeMessage:
 # ---------------------------------------------------------------------------
 
 class TestBuildPriceObjectionAnswer:
-    def test_sales_assistant_returns_kzt_explanation(self):
+    def test_sales_assistant_returns_explanation(self):
         _, ctx = parse_message(_with_intake("x"))
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "₸" in result
         assert "Sales Assistant" in result
-        assert "200 000" in result  # mentions Start alternative
+        assert "Pilot / Start" in result  # mentions Start as cheaper option
 
-    def test_sales_assistant_no_question(self):
+    def test_sales_assistant_at_most_one_question(self):
         _, ctx = parse_message(_with_intake("x"))
         result = price_objection_answer(ctx)
         assert result is not None
-        assert result.count("?") == 0
+        assert result.count("?") <= 1
 
     def test_start_package_returns_start_explanation(self):
         _, ctx = parse_message(_with_intake("x", _INTAKE_START))
         result = price_objection_answer(ctx)
         assert result is not None
         assert "Pilot / Start" in result
-        assert "200 000" in result
 
     def test_no_package_returns_none(self):
         result = price_objection_answer(IntakeContext(exists=False))
@@ -429,7 +427,6 @@ class TestBuildIntakeAcknowledgment:
         assert result is not None
         assert "WhatsApp" in result
         assert "Sales Assistant" in result
-        assert "350 000" in result
 
     def test_includes_next_step(self):
         _, ctx = parse_message(_with_intake("x"))
@@ -500,25 +497,22 @@ class TestDetectIntent:
 # ---------------------------------------------------------------------------
 
 class TestPostIntakeSanitizer:
-    # 1. Price objection → canned KZT explanation, no questions
-    def test_price_objection_returns_kzt_no_question(self):
+    # 1. Price objection → canned discovery answer, no functional re-ask
+    def test_price_objection_returns_discovery_no_reask(self):
         bad = "Цена зависит от сложности. Какой функционал для вас наиболее приоритетен?"
         result = _sanitize_damiworks_web_answer(bad, _with_intake("Почему такая цена?"), close_intent=False)
-        assert "₸" in result
         assert "функционал" not in result.lower()
-        assert result.count("?") == 0
+        assert result.count("?") <= 1
 
     def test_price_objection_dorogo_triggers(self):
         bad = "Стоимость объясняется функциональностью."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("почему так дорого"), close_intent=False)
-        assert "₸" in result
-        assert "350 000" in result
+        assert "Pilot / Start" in result  # mentions cheaper option
 
     def test_price_objection_explains_sales_assistant(self):
         bad = "Это обоснованная цена."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("слишком дорого"), close_intent=False)
         assert "Sales Assistant" in result
-        assert "₸" in result
 
     # 2. "я же выбрал в анкете" → acknowledgment, no broad re-ask
     def test_intake_reference_acknowledged(self):
@@ -532,40 +526,38 @@ class TestPostIntakeSanitizer:
         bad = "Понял. Уточните задачи."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("я уже выбрал в анкете"), close_intent=False)
         assert "Sales Assistant" in result
-        assert "350 000" in result
 
     # 3. Re-ask phrase removal when intake context present
     def test_reask_phrase_removed_with_intake(self):
-        bad = "от 350 000 ₸. Какой функционал для вас наиболее приоритетен?"
+        # Answer has no price amounts — step 8b won't fire; re-ask policy governs.
+        bad = "Хорошо, продолжим. Какой функционал для вас наиболее приоритетен?"
         result = _sanitize_damiworks_web_answer(bad, _with_intake("расскажи о процессе"), close_intent=False)
         assert "какой функционал" not in result.lower()
-        assert "₸" in result
 
     def test_reask_channel_question_removed(self):
         bad = "Хорошо. Какой канал используете?"
         result = _sanitize_damiworks_web_answer(bad, _with_intake("как это работает"), close_intent=False)
         assert "какой канал" not in result.lower()
 
-    # 4. Without intake context, re-ask phrase is NOT removed
+    # 4. Without intake context, re-ask phrase is NOT removed (answer must not contain prices)
     def test_reask_phrase_preserved_without_intake(self):
-        bad = "от 350 000 ₸. Какой функционал для вас наиболее приоритетен?"
+        bad = "Всё понятно. Какой функционал для вас наиболее приоритетен?"
         result = _sanitize_damiworks_web_answer(bad, "расскажи о процессе", close_intent=False)
         assert "функционал" in result.lower()
 
-    # 5. Price objection without intake context falls through to existing KZT guard
-    def test_price_objection_no_intake_uses_existing_guard(self):
+    # 5. USD removed even without intake context (step 8b scrubs all price amounts)
+    def test_price_objection_no_intake_usd_removed(self):
         bad = "от $300 обычно стартует."
         result = _sanitize_damiworks_web_answer(bad, "почему так дорого", close_intent=False)
-        # Existing Step 1 replaces USD
         assert "$300" not in result
-        assert "₸" in result
+        assert result  # not empty
 
-    # 6. Paraphrase generalization — "за что такая цена?" same as "почему такая цена?"
+    # 6. Paraphrase generalization — "за что такая цена?" triggers objection policy
     def test_za_chto_takaya_tsena_triggers_policy(self):
         bad = "Цена обусловлена функционалом."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("за что такая цена?"), close_intent=False)
-        assert "₸" in result
-        assert result.count("?") == 0  # canned objection answer has no question
+        assert "Sales Assistant" in result  # canned objection mentions packages
+        assert result.count("?") <= 1
 
     # 7. Paraphrase generalization — "я уже отвечал на это в анкете"
     def test_uzhe_otvechal_triggers_acknowledgment(self):
@@ -580,15 +572,13 @@ class TestPostIntakeSanitizer:
     def test_pochemu_stolko_triggers_policy(self):
         bad = "Стоимость зависит от объема работ."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("почему столько?"), close_intent=False)
-        assert "₸" in result
         assert "Sales Assistant" in result
 
-    # 9. Re-ask removal covers multiple known-field patterns
+    # 9. Re-ask removal covers multiple known-field patterns (answer must not have prices)
     def test_channel_reask_removed_via_field_policy(self):
-        bad = "от 350 000 ₸. Где у вас пишут клиенты?"
+        bad = "Хорошо. Где у вас пишут клиенты?"
         result = _sanitize_damiworks_web_answer(bad, _with_intake("как это работает"), close_intent=False)
         assert "где у вас пишут клиенты" not in result.lower()
-        assert "₸" in result
 
 
 # ---------------------------------------------------------------------------
@@ -779,21 +769,19 @@ class TestPricingV11:
         result = price_objection_answer(ctx)
         assert result is not None
         assert "Sales Assistant" in result
-        assert "₸" in result
         assert "Pilot / Start" in result  # cheaper option offered
 
     def test_price_objection_start_no_follow_up(self):
         ctx = _make_ctx("Start")
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "₸" in result
+        assert "Pilot / Start" in result
 
     def test_price_objection_integrated_mentions_crm(self):
         ctx = _make_ctx("Integrated AI Employee")
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "₸" in result
-        assert "Sales Assistant" in result  # cheaper alternative mentioned
+        assert "Pilot / Start" in result  # cheaper alternative mentioned
 
     def test_implementation_answer_sales_assistant(self):
         ctx = _make_ctx("Sales Assistant")
@@ -830,7 +818,6 @@ class TestPricingV11:
             close_intent=False,
         )
         assert "Pilot / Start" in result
-        assert "₸" in result
 
     def test_kak_prokhodit_zapusk_triggers_implementation(self):
         ctx = _make_ctx("Sales Assistant")
@@ -892,11 +879,10 @@ class TestDetectPreIntakeFaqIntent:
 
 
 class TestPreIntakeFaqAnswer:
-    def test_price_answer_canonical_figures_no_contact(self):
+    def test_price_answer_discovery_safe_no_contact(self):
+        # Discovery mode: no exact prices; mentions factors; no contact ask.
         ans = pre_intake_faq_answer("price")
-        assert "150 000–200 000 ₸" in ans
-        assert "40 000–60 000 ₸" in ans
-        assert "Sales Assistant" in ans
+        assert any(w in ans.lower() for w in ["каналов", "объём", "интеграц", "автоматиз"])
         assert answer_has_guided_intake_cta(ans)
         for phrase in _CONTACT_PHRASES:
             assert phrase not in ans.lower()
@@ -1049,8 +1035,6 @@ class TestPostIntakeCheaper:
         result = post_intake_response("Можно начать дешевле?", ctx)
         assert result is not None
         assert "Pilot / Start" in result
-        assert "150 000–200 000 ₸" in result
-        assert "40 000–60 000 ₸" in result
         _assert_no_internal_terms(result)
 
 

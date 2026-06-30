@@ -76,3 +76,11 @@ class LeadCreateRequest(BaseModel):
     estimated_monthly_price: str | None = None
     summary: str | None = None
     transcript: list[ChatHistoryMessage] = Field(default_factory=list)
+
+
+class ContactFormRequest(BaseModel):
+    """Footer / contact-section form submission."""
+    name: str = Field(..., min_length=1, max_length=200)
+    contact: str = Field(..., min_length=1, max_length=200)
+    business_type: str | None = None
+    message: str | None = None

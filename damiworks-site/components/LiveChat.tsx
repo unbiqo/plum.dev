@@ -1,17 +1,14 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-
-const generateUUID = (): string => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
 import { Send, RotateCcw, CheckCircle2 } from 'lucide-react'
+import { SHOW_DAMIWORKS_CHAT_PRICES } from '@/lib/constants'
+import {
+  DAMIWORKS_SESSION_TTL_MS,
+  loadChatSession,
+  resetChatSession,
+  touchChatSession,
+} from '@/lib/chatSession'
 import {
   INITIAL_INTAKE,
   PACKAGE_PRICES,
@@ -25,7 +22,6 @@ import {
   type LeadSummary,
   type PackageId,
 } from '@/lib/intake'
-import { parseContactReply } from '@/lib/contact'
 import type { DictLiveChat, DictIntake, DictIntakeQuestion } from '@/lib/i18n'
 
 // ---------------------------------------------------------------------------
@@ -115,7 +111,9 @@ function SummaryCard({
         </div>
         {detail && <div className="text-[11px] text-secondary">{detail}</div>}
         <div className="text-xs font-medium text-accent">
-          {setupDisplay} + {prices.monthly}
+          {SHOW_DAMIWORKS_CHAT_PRICES
+            ? `${setupDisplay} + ${prices.monthly}`
+            : dict.summaryLabels.priceDiscovery}
         </div>
       </div>
     )
@@ -171,8 +169,14 @@ function SummaryCard({
 
       <div className="pt-1 border-t border-accent/10">
         <div className="text-xs text-secondary mb-0.5">{dict.summaryLabels.price}</div>
-        <div className="text-sm font-semibold text-accent">{setupDisplay}</div>
-        <div className="text-xs text-secondary">+ {prices.monthly}</div>
+        {SHOW_DAMIWORKS_CHAT_PRICES ? (
+          <>
+            <div className="text-sm font-semibold text-accent">{setupDisplay}</div>
+            <div className="text-xs text-secondary">+ {prices.monthly}</div>
+          </>
+        ) : (
+          <div className="text-sm font-medium text-accent">{dict.summaryLabels.priceDiscovery}</div>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 pt-1">
@@ -294,19 +298,20 @@ function ChipsPanel({
 // LiveChat — main component
 // ---------------------------------------------------------------------------
 
+const SITE_INSTANCE_ID = 'damiworks_site'
 const LEAD_SENT_KEY = 'damiworks_lead_sent_for_chat_id'
 const LEAD_CONTACT_KEY = 'damiworks_lead_contact_for_chat_id'
-const CHAT_ID_KEY = 'damiworks_chat_id'
-const MESSAGES_SESSION_KEY = 'damiworks_messages'
-const INTAKE_SESSION_KEY = 'damiworks_intake_state'
 
 type Props = {
   dict: DictLiveChat
   intake: DictIntake
+  locale: string
   onStateChange?: (state: LiveChatSnapshot) => void
 }
 
-export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Props) {
+export default function LiveChat({ dict, intake: intakeDict, locale, onStateChange }: Props) {
+  const MESSAGES_SESSION_KEY = `damiworks_messages_${locale}`
+  const INTAKE_SESSION_KEY = `damiworks_intake_state_${locale}`
   const intakeQuestions = intakeDict.questions
   const requiredStepCount = intakeQuestions.filter((q) => !q.optional).length
 
@@ -330,9 +335,12 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
   const [chatId, setChatId] = useState('')
   const [leadSent, setLeadSent] = useState(false)
   const [contactClosed, setContactClosed] = useState(false)
+  const [leadStatus, setLeadStatus] = useState<string | null>(null)
 
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const initDone = useRef(false)
+  const chatIdRef = useRef('')
   const intakeRef = useRef(intake)
   intakeRef.current = intake
 
@@ -351,13 +359,24 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
     if (initDone.current) return
     initDone.current = true
 
-    const stored = localStorage.getItem(CHAT_ID_KEY)
-    const id = stored ?? generateUUID()
-    if (!stored) localStorage.setItem(CHAT_ID_KEY, id)
+    const { session, expired } = loadChatSession(SITE_INSTANCE_ID, DAMIWORKS_SESSION_TTL_MS)
+    const id = session.chat_id
+    chatIdRef.current = id
     setChatId(id)
 
-    if (localStorage.getItem(LEAD_SENT_KEY) === id) setLeadSent(true)
-    if (localStorage.getItem(LEAD_CONTACT_KEY) === id) setContactClosed(true)
+    if (expired) {
+      // Session aged past its TTL — drop stale local history and lead flags so
+      // the user starts clean instead of resuming an abandoned intake.
+      sessionStorage.removeItem(MESSAGES_SESSION_KEY)
+      sessionStorage.removeItem(INTAKE_SESSION_KEY)
+      localStorage.removeItem(LEAD_SENT_KEY)
+      localStorage.removeItem(LEAD_CONTACT_KEY)
+    }
+
+    if (localStorage.getItem(LEAD_CONTACT_KEY) === id) {
+      setContactClosed(true)
+      setLeadSent(true)
+    }
 
     const storedMessages = sessionStorage.getItem(MESSAGES_SESSION_KEY)
     if (storedMessages) {
@@ -448,7 +467,7 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
         business_type: finalIntake.businessType,
         recommended_package: finalPkg,
         estimated_price: `от ${prices.setup} + ${prices.monthly}`,
-        conversation_summary: buildIntakeContextString(finalIntake),
+        conversation_summary: buildIntakeContextString(finalIntake, !SHOW_DAMIWORKS_CHAT_PRICES),
         last_messages: lastMsgs,
         created_at: new Date().toISOString(),
       }
@@ -477,12 +496,11 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
       chatMsgs: Message[],
       userClickedSend: boolean,
     ) => {
-      const currentChatId = localStorage.getItem(CHAT_ID_KEY) ?? chatId
+      const currentChatId = chatIdRef.current || chatId
       if (localStorage.getItem(LEAD_SENT_KEY) === currentChatId) return
       const lead = buildLead(currentChatId, finalIntake, finalPkg, finalScore, chatMsgs, userClickedSend)
       await postLead({ ...lead, event: 'created', contact: null, status: 'Waiting for contact' })
       localStorage.setItem(LEAD_SENT_KEY, currentChatId)
-      setLeadSent(true)
     },
     [chatId, buildLead, postLead],
   )
@@ -497,7 +515,7 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
       finalScore: number,
       chatMsgs: Message[],
     ) => {
-      const currentChatId = localStorage.getItem(CHAT_ID_KEY) ?? chatId
+      const currentChatId = chatIdRef.current || chatId
       if (localStorage.getItem(LEAD_SENT_KEY) !== currentChatId) {
         await sendLead(finalIntake, finalPkg, finalScore, chatMsgs, true)
       }
@@ -620,6 +638,8 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
   const sendMessage = async (userText: string) => {
     if (!userText || loading || !chatId) return
 
+    // Keep the session's sliding TTL window fresh while the user is active.
+    touchChatSession(SITE_INSTANCE_ID)
     setInput('')
     setError(null)
 
@@ -629,11 +649,6 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
         role: m.from === 'user' ? ('user' as const) : ('assistant' as const),
         content: m.text,
       }))
-
-    // The previous assistant message — used to decide whether a short reply
-    // (name/handle) should be accepted as contact after a contact ask.
-    const lastAssistantText =
-      [...priorHistory].reverse().find((m) => m.role === 'assistant')?.content ?? ''
 
     setMessages((prev) => [
       ...prev,
@@ -650,7 +665,7 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
           chat_id: chatId,
           chat_history: priorHistory,
           reset_context: false,
-          intake_context: intake.completed ? buildIntakeContextString(intake) : undefined,
+          intake_context: intake.completed ? buildIntakeContextString(intake, !SHOW_DAMIWORKS_CHAT_PRICES) : undefined,
         }),
       })
 
@@ -665,17 +680,14 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
       setMessages((prev) => [...prev, aiMsg])
 
       if (intake.completed) {
-        // The backend owns the lead lifecycle. When it reports the lead closed
-        // (contact collected), make the chat read-only. An optimistic local
-        // check closes the UI a beat sooner for snappiness.
-        const optimisticContact = parseContactReply(userText, lastAssistantText).kind !== null
-        if (data.lead_status === 'closed' || optimisticContact) {
+        const currentChatId = chatIdRef.current || chatId
+        if (data.lead_status) setLeadStatus(data.lead_status)
+        if (data.lead_status === 'contact_collected') {
           setContactClosed(true)
-          const currentChatId = localStorage.getItem(CHAT_ID_KEY) ?? chatId
+          setLeadSent(true)
           localStorage.setItem(LEAD_CONTACT_KEY, currentChatId)
-        } else if (!leadSent) {
-          // Signal intake-completion "lead created" to the backend (warm/hot →
-          // owner gets "Новый лид"); idempotent per chat.
+        } else if (localStorage.getItem(LEAD_SENT_KEY) !== currentChatId) {
+          // Intake data not yet sent — score and send if warm/hot. Idempotent.
           const allUserTexts = [
             ...messages
               .filter(
@@ -736,10 +748,6 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
   }
 
   const handlePostIntakeChip = (chip: string) => {
-    if (chip === dict.sendLeadChipLabel) {
-      void sendLead(intake, recPkg, score, messages, true)
-      return
-    }
     setSummaryCollapsed(true)
     setChatMode('chat')
     void sendMessage(chip)
@@ -748,8 +756,8 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
   // ------------ reset ------------
 
   const reset = () => {
-    const newId = generateUUID()
-    localStorage.setItem(CHAT_ID_KEY, newId)
+    const newId = resetChatSession(SITE_INSTANCE_ID).chat_id
+    chatIdRef.current = newId
     localStorage.removeItem(LEAD_SENT_KEY)
     localStorage.removeItem(LEAD_CONTACT_KEY)
     sessionStorage.removeItem(MESSAGES_SESSION_KEY)
@@ -765,6 +773,7 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
     setError(null)
     setLeadSent(false)
     setContactClosed(false)
+    setLeadStatus(null)
     setScore(0)
     setRecPkg('Start')
     setSummaryCollapsed(false)
@@ -781,8 +790,8 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
 
   const showIntakeChips = chatMode === 'intake' && !intake.completed && !transitioning
   const showPreIntakeChips = !intake.completed && chatMode !== 'intake'
-  // Once contact is collected the lead is closed — hide qualification chips.
-  const showPostIntakeChips = intake.completed && !contactClosed
+  // Hide chips once the user expressed intent (contact_requested) or contact is collected.
+  const showPostIntakeChips = intake.completed && !contactClosed && leadStatus !== 'contact_requested'
   const showInput = chatMode === 'chat' || chatMode === 'intro' || intake.completed
 
   // ------------ render ------------
@@ -826,6 +835,7 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
                 onAskQuestion={() => {
                   setSummaryCollapsed(true)
                   setChatMode('chat')
+                  setTimeout(() => inputRef.current?.focus(), 50)
                 }}
                 onSendLead={() => void sendLead(intake, recPkg, score, messages, true)}
                 onEditAnswers={reset}
@@ -920,14 +930,14 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
               <button
                 key={chip}
                 onClick={() => handlePostIntakeChip(chip)}
-                disabled={loading || (chip === dict.sendLeadChipLabel && leadSent)}
+                disabled={loading}
                 className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all disabled:opacity-50 ${
                   chip === dict.sendLeadChipLabel
                     ? 'bg-accent text-white border-accent hover:opacity-90'
                     : 'border-accent/30 text-accent bg-accent-soft/40 hover:bg-accent-soft hover:border-accent/60'
                 }`}
               >
-                {chip === dict.sendLeadChipLabel && leadSent ? dict.leadSentChipLabel : chip}
+                {chip}
               </button>
             ))}
           </div>
@@ -948,6 +958,7 @@ export default function LiveChat({ dict, intake: intakeDict, onStateChange }: Pr
       {showInput && (
         <div className="px-4 py-3 border-t border-border-col flex items-end gap-2">
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

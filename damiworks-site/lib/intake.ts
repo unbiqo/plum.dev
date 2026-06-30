@@ -199,15 +199,26 @@ export function recommendPackage(intake: IntakeState): PackageId {
 }
 
 /** Build the hidden context injected into the user message by the proxy. */
-export function buildIntakeContextString(intake: IntakeState): string {
+export function buildIntakeContextString(intake: IntakeState, hidePrices = false): string {
   const channels = intake.channels.join(', ') || 'не указаны'
   const tasks = intake.tasks.join(', ') || 'не указаны'
   const pkg = recommendPackage(intake)
-  const prices = PACKAGE_PRICES[pkg]
-  const priceStr =
-    pkg === 'Start'
-      ? `${prices.setup} за запуск + ${prices.monthly}`
-      : `от ${prices.setup} за запуск + ${prices.monthly}`
+  const priceLines = hidePrices
+    ? [
+        `- Recommended package: ${pkg}`,
+        `- Pricing: hidden (Discovery mode — recommend the package name only; do not quote exact prices)`,
+      ]
+    : (() => {
+        const prices = PACKAGE_PRICES[pkg]
+        const priceStr =
+          pkg === 'Start'
+            ? `${prices.setup} за запуск + ${prices.monthly}`
+            : `от ${prices.setup} за запуск + ${prices.monthly}`
+        return [`- Recommended package: ${pkg}`, `- Shown price: ${priceStr}`]
+      })()
+  const priceRule = hidePrices
+    ? `- Do NOT quote exact package prices; invite the user to leave contact for a scoping call.`
+    : `- If user asks about price, explain using the selected tasks and package above.`
   return [
     `[WEBSITE INTAKE CONTEXT — DO NOT ASK AGAIN]`,
     `Client answered the questionnaire. Use this; do not re-ask.`,
@@ -217,14 +228,13 @@ export function buildIntakeContextString(intake: IntakeState): string {
     `- Volume: ${intake.volume ? `${intake.volume}/day` : 'не указан'}`,
     `- Timeline: ${intake.timeline ?? 'не указано'}`,
     `- Business type: ${intake.businessType ?? 'не указан'}`,
-    `- Recommended package: ${pkg}`,
-    `- Shown price: ${priceStr}`,
+    ...priceLines,
     ``,
     `Rules:`,
     `- Do NOT ask which functionality is priority (already selected above).`,
     `- Do NOT ask which channel they use (already selected).`,
     `- Do NOT ask about volume or timeline (already selected).`,
-    `- If user asks about price, explain using the selected tasks and package above.`,
+    priceRule,
     `- If user says it is expensive, explain package contents and offer Start as cheaper option.`,
     `- If user references the questionnaire, confirm their selections and move forward.`,
   ].join('\n')

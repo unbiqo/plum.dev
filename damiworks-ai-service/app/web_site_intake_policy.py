@@ -175,7 +175,9 @@ _START_INTENT_RE = re.compile(
     r"^\s*подходит\b|"
     r"^\s*давайте[\s.!?]*$|"
     r"^\s*да\s*[.!]*$|"
-    r"^\s*погнали\b",
+    r"^\s*погнали\b|"
+    r"\bоставить\s+заявку\b|"
+    r"как\s+(?:мне\s+)?(?:отправить|оставить)\s+заявку",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -336,6 +338,11 @@ def answer_has_guided_intake_cta(answer: str) -> bool:
     return any(cta in text for cta in GUIDED_INTAKE_CTAS)
 
 
+# Discovery mode: hide exact DamiWorks package prices from public chat.
+# Flip to False to restore public prices (also update api.py and intake.ts).
+# Scope: damiworks_site only — English School and Custom Demo are unaffected.
+HIDE_DAMIWORKS_PUBLIC_PRICES: bool = True
+
 _FAQ_VS_CHATBOT_BODY = (
     "Обычный чат-бот чаще работает по жёсткому сценарию: кнопки, шаблоны и заранее "
     "прописанные ответы.\n\n"
@@ -353,6 +360,10 @@ _FAQ_HOW_IT_WORKS_BODY = (
 )
 
 _FAQ_PRICE_BODY = (
+    "Стоимость зависит от каналов, объёма обращений, интеграций и уровня автоматизации.\n\n"
+    "Обычно мы сначала коротко разбираем задачу и предлагаем формат пилота с понятным объёмом. "
+    "Точная цена называется после уточнения сценария."
+    if HIDE_DAMIWORKS_PUBLIC_PRICES else
     "Pilot / Start обычно начинается от 150 000–200 000 ₸ за запуск и от 40 000–60 000 ₸ "
     "в месяц за сопровождение.\n\n"
     "Более продвинутый Sales Assistant с квалификацией лидов и передачей менеджеру обычно "
@@ -492,12 +503,22 @@ def price_objection_answer(ctx: IntakeContext) -> str | None:
     """Package-aware price objection explanation using exact intake answers."""
     if not ctx.exists or not ctx.recommended_package:
         return None
-    price = ctx.shown_price or ""
     pkg = ctx.recommended_package
     tasks = _tasks_str(ctx)
     channels = _channels_str(ctx)
     handoff = ctx.handoff or "Google Sheets"
 
+    if HIDE_DAMIWORKS_PUBLIC_PRICES:
+        return (
+            f"Стоимость {_pkg_label(pkg)} под ваши задачи ({tasks}, каналы: {channels}) "
+            f"зависит от объёма работ и интеграций.\n\n"
+            f"После короткого разбора предложим конкретный формат и объём запуска. "
+            f"Если нужен вариант проще — можно начать с {_START_LABEL}: "
+            f"базовые ответы + сбор контактов, без сложной квалификации.\n\n"
+            f"Хотите обсудить варианты?"
+        )
+
+    price = ctx.shown_price or ""
     if "Sales Assistant" in pkg:
         return (
             f"Пакет Sales Assistant — под ваши задачи:\n"
@@ -559,10 +580,18 @@ def price_question_answer(ctx: IntakeContext) -> str | None:
     """Package-aware price answer when user asks what it costs."""
     if not ctx.exists or not ctx.recommended_package:
         return None
-    price = ctx.shown_price or ""
     pkg = ctx.recommended_package
     tasks = _tasks_str(ctx)
 
+    if HIDE_DAMIWORKS_PUBLIC_PRICES:
+        return (
+            f"Для вашего набора задач — {tasks} — подойдёт {_pkg_label(pkg)}.\n\n"
+            f"Точную стоимость лучше назвать после короткого разбора: важны каналы, "
+            f"объём заявок, интеграции и глубина автоматизации. "
+            f"Оставьте контакт — мы свяжемся и предложим конкретный формат запуска."
+        )
+
+    price = ctx.shown_price or ""
     if "Sales Assistant" in pkg:
         return (
             f"Для вашего набора задач — {tasks} — подойдёт {_SALES_LABEL}.\n\n"
@@ -596,6 +625,12 @@ def already_answered_acknowledgment(ctx: IntakeContext) -> str | None:
         if biz and biz not in _SKIP_BIZ else
         "Следующий шаг — подготовить короткое ТЗ и примеры вопросов клиентов."
     )
+    if HIDE_DAMIWORKS_PUBLIC_PRICES:
+        return (
+            f"Да, вы правы — вы уже выбрали: {channels}, {tasks}.\n\n"
+            f"Ориентируюсь на {_pkg_label(pkg)}. {next_step}"
+        )
+    price = ctx.shown_price or ""
     return (
         f"Да, вы правы — вы уже выбрали: {channels}, {tasks}.\n\n"
         f"Поэтому ориентируюсь на {_pkg_label(pkg)}: {price}. {next_step}"
@@ -732,6 +767,15 @@ def not_remembered_answer(ctx: IntakeContext, last_assistant_message: str = "") 
 
 def cheaper_answer(ctx: IntakeContext, last_assistant_message: str = "") -> str:  # noqa: ARG001
     """Downgrade explanation for 'можно начать дешевле?' (PART 4)."""
+    if HIDE_DAMIWORKS_PUBLIC_PRICES:
+        return (
+            f"Да, можно начать с {_START_LABEL}. Это проще: AI-сотрудник будет отвечать "
+            f"на частые вопросы, собирать контакты и передавать заявки менеджеру. Без сложной "
+            f"квалификации, follow-up и интеграций на первом этапе.\n\n"
+            f"Если после теста будет понятно, что нужно больше автоматизации, можно расширить до "
+            f"{_SALES_LABEL}.\n\n"
+            f"Хотите начать с {_START_LABEL}?"
+        )
     return (
         f"Да, можно начать с {_START_LABEL}. Это проще и дешевле: AI-сотрудник будет отвечать "
         f"на частые вопросы, собирать контакты и передавать заявки менеджеру. Без сложной "
@@ -745,6 +789,13 @@ def cheaper_answer(ctx: IntakeContext, last_assistant_message: str = "") -> str:
 
 def business_details_answer(ctx: IntakeContext, last_assistant_message: str = "") -> str:  # noqa: ARG001
     """Treat volunteered business details as enough for an initial estimate (PART 7)."""
+    if HIDE_DAMIWORKS_PUBLIC_PRICES:
+        return (
+            f"Отлично, этого уже достаточно для первичной оценки. Для вашего бизнеса можно начать "
+            f"с {_START_LABEL}: AI-сотрудник будет отвечать на вопросы клиентов, собирать контакты "
+            f"и передавать заявки менеджеру.\n\n"
+            f"{pick_contact_ask(last_assistant_message)}"
+        )
     return (
         f"Отлично, этого уже достаточно для первичной оценки. Для вашего бизнеса можно начать "
         f"с {_START_LABEL}: AI-сотрудник будет отвечать на вопросы клиентов, собирать контакты "

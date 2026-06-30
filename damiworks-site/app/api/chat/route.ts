@@ -3,13 +3,17 @@ import { NextRequest, NextResponse } from 'next/server'
 export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
+  const contentType = req.headers.get('content-type') ?? ''
+  if (contentType.includes('multipart/form-data')) {
+    return NextResponse.json({ error: 'multipart_not_supported' }, { status: 400 })
+  }
+
   let body: unknown
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
-
   const { message, chat_id, chat_history, reset_context, intake_context, instance_id } =
     body as Record<string, unknown>
 
@@ -22,9 +26,9 @@ export async function POST(req: NextRequest) {
   if (chat_history !== undefined && !Array.isArray(chat_history))
     return NextResponse.json({ error: 'chat_history_invalid' }, { status: 400 })
 
-  // Allowlist the instance: DamiWorks consultant (default) or the Custom demo roleplay
-  // instance. Both run over channel="web_site"; the backend separates behavior by instance_id.
-  const ALLOWED_INSTANCES = ['damiworks_site', 'damiworks_custom_demo'] as const
+  // Allowlist the instance: DamiWorks consultant (default), the Custom demo roleplay
+  // instance, or the English school live demo. The backend separates behavior by instance_id.
+  const ALLOWED_INSTANCES = ['damiworks_site', 'damiworks_custom_demo', 'damiworks_english_school_demo'] as const
   const resolvedInstanceId =
     typeof instance_id === 'string' && (ALLOWED_INSTANCES as readonly string[]).includes(instance_id)
       ? instance_id
@@ -34,14 +38,19 @@ export async function POST(req: NextRequest) {
   const effectiveHistory: Array<{ role: string; content: string }> = []
   effectiveHistory.push(...((chat_history as Array<{ role: string; content: string }>) ?? []))
 
-  // Inject intake context directly into the user message so the LLM treats it as instructions.
-  // The visible UI always shows only the original user text — this prefix only goes to FastAPI.
+  // Build effective message: intake context is injected as a system instruction prefix.
   const hasIntakeCtx = typeof intake_context === 'string' && intake_context.trim().length > 0
-  const effectiveMessage = hasIntakeCtx
-    ? `${(intake_context as string).trim()}\n\nCurrent user message:\n${(message as string).trim()}`
-    : (message as string).trim()
+  let effectiveMessage: string
 
-  const fastApiUrl = process.env.FASTAPI_URL ?? 'http://localhost:8000'
+  if (hasIntakeCtx) {
+    effectiveMessage = `${(intake_context as string).trim()}\n\nCurrent user message:\n${(message as string).trim()}`
+  } else {
+    effectiveMessage = (message as string).trim()
+  }
+
+  // Production must set FASTAPI_URL; in dev, fall back to the local backend port.
+  const fastApiUrl = process.env.FASTAPI_URL ?? (process.env.NODE_ENV === 'production' ? null : 'http://localhost:8010')
+  if (!fastApiUrl) return NextResponse.json({ error: 'FASTAPI_URL_not_configured' }, { status: 500 })
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 30_000)
 

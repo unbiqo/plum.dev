@@ -1,3 +1,12 @@
+export const SHOW_PUBLIC_PRICING = false
+
+// Discovery mode: temporarily hide exact package prices inside the DamiWorks
+// consultant chat (recommendation card) so cold visitors don't anchor on a
+// public number before a scoping conversation. Flip to true to restore prices.
+// Scope: DamiWorks chat ONLY — does not affect the English School demo, the
+// pricing section, or the footer/contact form.
+export const SHOW_DAMIWORKS_CHAT_PRICES: boolean = false
+
 export const SITE = {
   name: 'DamiWorks',
   tagline: 'AI employees for sales and support.',
@@ -99,6 +108,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     id: 'beauty',
     label: 'Beauty salon',
     agentName: 'Beauty salon AI',
+    hidden: true,
     messages: [
       { from: 'user', text: 'Hi, how much does the treatment cost?' },
       {
@@ -164,7 +174,7 @@ export const CUSTOM_DEMO_TAB = {
   label: 'Your demo',
   title: 'Test an AI employee on your own business data',
   description:
-    'Describe your business and chat as if you were a customer — see how an AI employee would answer. (Document upload coming soon.)',
+    'Upload materials or describe your business, then chat as if you were a customer and see how an AI employee would answer.',
 }
 
 export const TIERS = {
@@ -334,6 +344,7 @@ export const CONTACT = {
     'Other',
   ],
   successMessage: "Thanks — we'll contact you soon.",
+  errorMessage: 'Something went wrong. Please try again.',
 }
 
 export const FOOTER = {

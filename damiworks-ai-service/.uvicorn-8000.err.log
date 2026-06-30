@@ -1,0 +1,477 @@
+INFO:     Will watch for changes in these directories: ['C:\\projects\\plum-dev\\damiworks-ai-service']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [144] using WatchFiles
+INFO:     Started server process [15348]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+2026-06-29 02:45:27,118 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:45:27,120 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:45:27,315 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d4c516e-c27d-4935-8835-7c011f968f6a&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:45:27,504 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d4c516e-c27d-4935-8835-7c011f968f6a&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:45:27,692 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d4c516e-c27d-4935-8835-7c011f968f6a&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:45:27,925 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 201 Created"
+2026-06-29 02:45:27,936 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:45:31,975 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:45:32,178 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:45:32,380 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:45:32,570 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:47:31,918 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:47:31,920 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:47:32,109 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.local-upload-test&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:47:32,295 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.local-upload-test&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:47:32,491 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.local-upload-test&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:47:32,688 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 201 Created"
+2026-06-29 02:47:32,693 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:47:33,626 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:47:33,820 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:47:34,014 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:47:34,212 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:55:45,620 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:55:45,622 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:55:45,817 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:55:46,010 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:55:46,206 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:55:46,415 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 201 Created"
+2026-06-29 02:55:46,421 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:55:48,019 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:55:48,221 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:55:48,414 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:55:48,606 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:56:11,288 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:11,290 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:56:11,507 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:11,691 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:56:11,887 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:12,081 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:56:12,299 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:56:12,305 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:56:14,721 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:56:14,924 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:56:15,122 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:56:15,318 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:56:25,301 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:25,302 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:56:25,502 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:25,704 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:56:25,902 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:26,104 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:56:26,308 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:56:26,316 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:56:27,373 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:56:27,590 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:56:27,802 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:56:28,004 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:56:44,782 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:44,784 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:56:44,986 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:45,186 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:56:45,383 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:45,588 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:56:45,804 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:56:45,814 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:56:46,765 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:56:46,983 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:56:47,198 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:56:47,398 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:56:59,989 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:56:59,989 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:57:00,186 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:00,552 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:57:00,754 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:00,952 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:57:01,162 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:01,167 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:57:01,998 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:57:02,211 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:02,417 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:57:02,618 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:57:24,827 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:24,829 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:57:25,015 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:25,209 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:57:25,396 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:25,592 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:57:25,793 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:25,798 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:57:26,780 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:57:26,986 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:27,208 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:57:27,412 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:57:33,476 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:33,479 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:57:33,671 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:33,861 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:57:34,058 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:34,242 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:57:34,446 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:34,639 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:34,643 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:57:35,476 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:57:35,684 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:35,879 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:57:36,063 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:57:36,257 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T03%3A57%3A36.065086%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 02:57:45,209 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:45,212 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:57:45,399 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:45,586 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:57:45,776 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:45,966 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:57:46,187 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:46,367 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:46,371 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:57:47,649 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:57:47,857 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:48,049 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:57:48,236 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:57:48,439 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T03%3A57%3A48.239599%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 02:57:48,629 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:48,632 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:57:49,315 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-06-29 02:57:49,318 WARNING app.gemini_service: Gemini text generation failed for model=gemini-2.5-flash-lite key=GEMINI_API_KEY; trying next key/model: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+2026-06-29 02:57:49,318 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:57:50,097 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:57:50,292 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 201 Created"
+2026-06-29 02:57:56,072 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:56,074 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 02:57:56,261 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:56,457 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 02:57:56,655 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:56,853 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 02:57:57,060 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:57,251 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 02:57:57,257 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 02:57:58,236 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 02:57:58,452 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 02:57:58,644 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 02:57:58,853 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 02:57:59,048 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T03%3A57%3A58.858256%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 03:41:15,494 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:15,494 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 03:41:15,699 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:15,897 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 03:41:16,093 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:16,276 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 03:41:16,477 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:41:16,666 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:16,672 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 03:41:19,311 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 03:41:19,506 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:41:19,699 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 03:41:19,890 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 03:41:20,090 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T04%3A41%3A19.910283%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 03:41:31,768 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:31,769 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 03:41:31,973 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:32,171 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 03:41:32,381 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:32,581 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 03:41:32,785 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:41:32,980 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:32,983 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 03:41:36,609 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 03:41:36,881 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:41:37,082 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 03:41:37,279 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 03:41:37,488 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T04%3A41%3A37.282289%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 03:41:45,726 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:45,728 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 03:41:45,917 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:46,106 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 03:41:46,296 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:46,492 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 03:41:46,691 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:41:46,875 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:46,880 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 03:41:54,895 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 03:41:55,475 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:41:55,665 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 03:41:55,861 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 03:41:56,050 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T04%3A41%3A55.864359%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 03:41:56,235 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:41:56,238 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 03:41:57,091 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 03:41:57,291 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:42:07,289 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:07,291 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 03:42:07,479 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:07,661 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 03:42:07,848 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:08,037 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 03:42:08,227 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:42:08,411 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:08,414 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 03:42:12,205 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 03:42:12,406 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:42:12,596 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 03:42:12,779 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 03:42:12,964 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T04%3A42%3A12.783932%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 03:42:24,249 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:24,251 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 03:42:24,434 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:24,613 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 03:42:24,792 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:24,974 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 03:42:25,177 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:42:25,366 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:25,371 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 03:42:33,923 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 03:42:34,523 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:42:34,731 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 03:42:34,930 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 03:42:35,124 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T04%3A42%3A34.933362%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+2026-06-29 03:42:40,000 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/tenants?select=commercial_context%2Csystem_prompt_addon%2Crouter_system_prompt%2Chyde_system_prompt%2Cfinal_system_prompt%2Cmemory_summary_system_prompt&instance_id=eq.damiworks_custom_demo&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:40,002 WARNING app.supabase_service: Tenant settings not found for instance_id=damiworks_custom_demo
+2026-06-29 03:42:40,199 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=created_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:40,393 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=8 "HTTP/2 200 OK"
+2026-06-29 03:42:40,593 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?select=metadata&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:40,793 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&order=created_at.desc&limit=100 "HTTP/2 200 OK"
+2026-06-29 03:42:40,999 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:42:41,197 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/user_memories?select=summary&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&limit=1 "HTTP/2 200 OK"
+2026-06-29 03:42:41,201 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 03:42:42,563 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 03:42:42,765 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_sessions?on_conflict=instance_id%2Cchannel%2Cchat_id "HTTP/2 200 OK"
+2026-06-29 03:42:42,965 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 400 Bad Request"
+2026-06-29 03:42:43,165 INFO httpx: HTTP Request: POST https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs "HTTP/2 201 Created"
+2026-06-29 03:42:43,365 INFO httpx: HTTP Request: GET https://smpkttqmtvgilqkdaube.supabase.co/rest/v1/chat_logs?select=message%2Cai_response%2Croute%2Ccreated_at&instance_id=eq.damiworks_custom_demo&channel=eq.web_site&chat_id=eq.2d498abc-3124-4cb0-bb1e-8e02adb8c57b&created_at=gte.2026-06-29T04%3A42%3A43.168531%2B00%3A00&order=created_at.asc&limit=30 "HTTP/2 200 OK"
+WARNING:  WatchFiles detected changes in 'app\english_school_kb.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [15348]
+WARNING:  WatchFiles detected changes in 'app\english_school_demo.py'. Reloading...
+C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\_subprocess.py:84: RuntimeWarning: coroutine 'Server.serve' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+WARNING:  WatchFiles detected changes in 'app\api.py'. Reloading...
+INFO:     Started server process [5752]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [5752]
+WARNING:  WatchFiles detected changes in 'app\api.py'. Reloading...
+INFO:     Started server process [18120]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\_compat.py", line 30, in asyncio_run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\starlette\routing.py", line 701, in lifespan
+    await receive()
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+INFO:     Started server process [21892]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'tests\test_english_school_demo.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [21892]
+INFO:     Started server process [14636]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+2026-06-29 04:22:33,349 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 04:22:35,357 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 04:23:03,189 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 04:23:05,916 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-06-29 04:23:05,918 WARNING app.gemini_service: Gemini text generation failed for model=gemini-2.5-flash-lite key=GEMINI_API_KEY; trying next key/model: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+2026-06-29 04:23:05,919 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 04:23:11,252 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 04:23:26,485 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 04:23:27,085 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 503 Service Unavailable"
+2026-06-29 04:23:27,088 WARNING app.gemini_service: Gemini text generation failed for model=gemini-2.5-flash-lite key=GEMINI_API_KEY; trying next key/model: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+2026-06-29 04:23:27,089 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 04:23:27,715 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+2026-06-29 04:23:39,708 INFO google_genai.models: AFC is enabled with max remote calls: 10.
+2026-06-29 04:23:40,824 INFO httpx: HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent "HTTP/1.1 200 OK"
+WARNING:  WatchFiles detected changes in 'app\english_school_kb.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [14636]
+WARNING:  WatchFiles detected changes in 'app\english_school_kb.py'. Reloading...
+INFO:     Started server process [18356]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\_compat.py", line 30, in asyncio_run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\starlette\routing.py", line 701, in lifespan
+    await receive()
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+WARNING:  WatchFiles detected changes in 'app\english_school_demo.py'. Reloading...
+INFO:     Started server process [6796]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6796]
+WARNING:  WatchFiles detected changes in 'app\english_school_demo.py'. Reloading...
+INFO:     Started server process [9948]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\_compat.py", line 30, in asyncio_run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\starlette\routing.py", line 701, in lifespan
+    await receive()
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+WARNING:  WatchFiles detected changes in 'app\english_school_demo.py'. Reloading...
+INFO:     Started server process [2876]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2876]
+WARNING:  WatchFiles detected changes in 'tests\test_english_school_demo.py'. Reloading...
+INFO:     Started server process [24232]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\_compat.py", line 30, in asyncio_run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\starlette\routing.py", line 701, in lifespan
+    await receive()
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+WARNING:  WatchFiles detected changes in 'tests\test_english_school_demo.py'. Reloading...
+INFO:     Started server process [7320]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\_compat.py", line 30, in asyncio_run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\starlette\routing.py", line 701, in lifespan
+    await receive()
+  File "C:\Users\immbi\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+INFO:     Started server process [20872]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.

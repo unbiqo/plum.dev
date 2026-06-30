@@ -8,10 +8,13 @@ import ValuePropSection from '@/components/ValuePropSection'
 import PricingSection from '@/components/PricingSection'
 import ContactSection from '@/components/ContactSection'
 import Footer from '@/components/Footer'
+import { SHOW_PUBLIC_PRICING } from '@/lib/constants'
 
 type Props = { locale: Locale; dict: Dict }
 
 export default function HomePage({ locale, dict }: Props) {
+  const pricing = SHOW_PUBLIC_PRICING ? dict.pricing : { ...dict.pricing, plans: [] }
+
   return (
     <main>
       <Header
@@ -32,7 +35,7 @@ export default function HomePage({ locale, dict }: Props) {
       />
       <TieredCapabilitiesSection dict={dict.capabilities} />
       <ValuePropSection dict={dict.valueProp} />
-      <PricingSection dict={dict.pricing} />
+      <PricingSection dict={pricing} />
       <ContactSection dict={dict.contact} />
       <Footer dict={dict.footer} site={dict.site} />
     </main>

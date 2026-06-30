@@ -1,14 +1,18 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Send } from 'lucide-react'
 import type { DictDemo, DictDemoScenario, DictLiveChat, DictCustomDemoChat, DictIntake, Locale } from '@/lib/i18n'
 import LiveChat, { type LiveChatSnapshot } from '@/components/LiveChat'
 import CustomDemoChat from '@/components/CustomDemoChat'
+import EnglishSchoolChat, { type SchoolMessage, type SchoolBackendState } from '@/components/EnglishSchoolChat'
+import EnglishSchoolSummaryPanel from '@/components/EnglishSchoolSummaryPanel'
 import type { IntakeField, PackageId } from '@/lib/intake'
 
-// Functional identifier — not copy, not locale-specific
+// Functional identifiers — not copy, not locale-specific
 const DAMIWORKS_TAB_ID = 'damiworks'
+const ENGLISH_SCHOOL_TAB_ID = 'english'
+const SELECTED_DEMO_TAB_SESSION_KEY = 'damiworks_selected_demo_tab'
 
 function StaticChatWindow({
   scenario,
@@ -230,17 +234,45 @@ type Props = {
 export default function DemoSection({ dict, locale, liveChat, customDemoChat, intake }: Props) {
   const [selectedId, setSelectedId] = useState(DAMIWORKS_TAB_ID)
   const [liveSnapshot, setLiveSnapshot] = useState<LiveChatSnapshot | null>(null)
+  const [schoolMessages, setSchoolMessages] = useState<SchoolMessage[]>([])
+  const [schoolState, setSchoolState] = useState<SchoolBackendState | null>(null)
   const handleLiveStateChange = useCallback((state: LiveChatSnapshot) => {
     setLiveSnapshot(state)
   }, [])
+  const handleSchoolConversationUpdate = useCallback((messages: SchoolMessage[]) => {
+    setSchoolMessages(messages)
+  }, [])
+  const handleSchoolStateUpdate = useCallback((state: SchoolBackendState) => {
+    setSchoolState(state)
+  }, [])
   const isConsultant = selectedId === DAMIWORKS_TAB_ID
+  const isEnglishSchool = selectedId === ENGLISH_SCHOOL_TAB_ID
   const isCustomDemo = selectedId === dict.customDemoTab.id
   const scenario = dict.scenarios.find((s) => s.id === selectedId)
 
-  const tabs = [
-    ...dict.scenarios.map((s) => ({ id: s.id, label: s.label })),
-    { id: dict.customDemoTab.id, label: dict.customDemoTab.label },
-  ]
+  const tabs = useMemo(
+    () => [
+      ...dict.scenarios.filter((s) => !s.hidden).map((s) => ({ id: s.id, label: s.label })),
+      ...(dict.customDemoTab.hidden ? [] : [{ id: dict.customDemoTab.id, label: dict.customDemoTab.label }]),
+    ],
+    [dict.customDemoTab, dict.scenarios],
+  )
+  const validTabIds = useMemo(
+    () => new Set([DAMIWORKS_TAB_ID, ...tabs.map((tab) => tab.id)]),
+    [tabs],
+  )
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem(SELECTED_DEMO_TAB_SESSION_KEY)
+    if (stored && validTabIds.has(stored)) {
+      setSelectedId(stored)
+    }
+  }, [validTabIds])
+
+  const selectTab = (id: string) => {
+    setSelectedId(id)
+    sessionStorage.setItem(SELECTED_DEMO_TAB_SESSION_KEY, id)
+  }
 
   return (
     <section id="demo" className="scroll-mt-20 py-24 bg-bg border-t border-border-col">
@@ -256,7 +288,7 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
             {tabs.map((s) => (
               <button
                 key={s.id}
-                onClick={() => setSelectedId(s.id)}
+                onClick={() => selectTab(s.id)}
                 className={`flex-shrink-0 text-left px-4 py-3 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                   selectedId === s.id
                     ? 'bg-accent-soft text-accent'
@@ -268,9 +300,15 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
             ))}
           </div>
 
-          {/* Center: live consultant chat, custom demo chat, or static demo */}
+          {/* Center: live consultant chat, English school live chat, custom demo chat, or static demo */}
           {isConsultant ? (
-            <LiveChat dict={liveChat} intake={intake} onStateChange={handleLiveStateChange} />
+            <LiveChat dict={liveChat} intake={intake} locale={locale} onStateChange={handleLiveStateChange} />
+          ) : isEnglishSchool ? (
+            <EnglishSchoolChat
+              dict={dict.schoolChat}
+              onConversationUpdate={handleSchoolConversationUpdate}
+              onStateUpdate={handleSchoolStateUpdate}
+            />
           ) : isCustomDemo ? (
             <CustomDemoChat dict={customDemoChat} />
           ) : (
@@ -280,6 +318,12 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
           {/* Right: context-aware summary */}
           {isConsultant ? (
             <PackageSelectionPanel dict={dict} intake={intake} snapshot={liveSnapshot} />
+          ) : isEnglishSchool ? (
+            <EnglishSchoolSummaryPanel
+              messages={schoolMessages}
+              dict={dict.schoolSummary}
+              backendState={schoolState}
+            />
           ) : isCustomDemo ? (
             <CustomDemoSummaryPanel dict={dict} />
           ) : (

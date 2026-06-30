@@ -83,6 +83,41 @@ def format_lead_updated(lead: dict) -> str:
     )
 
 
+def format_english_school_lead(lead: dict) -> str:
+    """Contact collected from the English School demo chat."""
+    state = lead.get("_school_state") or {}
+    return "\n".join(
+        [
+            "🏫 Demo лид — English School",
+            "",
+            f"Контакт: {_fmt(lead.get('contact_raw'))}",
+            f"Программа: {_fmt(state.get('program'))}",
+            f"Формат: {_fmt(state.get('format_preference'))}",
+            f"Возраст: {_fmt(state.get('student_age'))}",
+            f"Город: {_fmt(state.get('city'))}",
+            f"Расписание: {_fmt(state.get('preferred_schedule'))}",
+            "",
+            "Статус: контакт получен в демо",
+        ]
+    )
+
+
+def format_contact_form_lead(lead: dict) -> str:
+    """Contact-section footer form submission."""
+    return "\n".join(
+        [
+            "📬 Заявка с сайта",
+            "",
+            f"Имя: {_fmt(lead.get('user_contact_name'))}",
+            f"Контакт: {_fmt(lead.get('contact_raw'))}",
+            f"Бизнес: {_fmt(lead.get('business_type'))}",
+            f"Сообщение: {_fmt(lead.get('summary'))}",
+            "",
+            "Статус: новая заявка",
+        ]
+    )
+
+
 def _send_sync(bot_token: str, chat_id: str, text: str) -> None:
     body = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
     request = urllib_request.Request(

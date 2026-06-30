@@ -11,10 +11,31 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
     message: '',
   })
   const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSubmitted(true)
+    if (loading) return
+    setLoading(true)
+    setError(null)
+    try {
+      await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          contact: form.contact,
+          businessType: form.businessType || undefined,
+          message: form.message || undefined,
+        }),
+      })
+      setSubmitted(true)
+    } catch {
+      setError(dict.errorMessage ?? 'Что-то пошло не так. Попробуйте ещё раз.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const inputClass =
@@ -77,11 +98,15 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
                 onChange={(e) => setForm({ ...form, message: e.target.value })}
                 className={`${inputClass} resize-none`}
               />
+              {error && (
+                <p className="text-xs text-red-500">{error}</p>
+              )}
               <button
                 type="submit"
-                className="w-full bg-accent text-white rounded-xl py-3 font-medium text-sm hover:opacity-90 transition-opacity"
+                disabled={loading}
+                className="w-full bg-accent text-white rounded-xl py-3 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {dict.submitButton}
+                {loading ? '...' : dict.submitButton}
               </button>
             </form>
           )}

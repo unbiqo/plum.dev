@@ -425,6 +425,66 @@ suite('formatLeadMessage events', () => {
 })
 
 // ---------------------------------------------------------------------------
+// buildIntakeContextString — hidePrices (Discovery mode)
+// ---------------------------------------------------------------------------
+
+const PRICE_AMOUNT_RE =
+  /\b(?:150\s*000|200\s*000|350\s*000|700\s*000|40\s*000|60\s*000|120\s*000)(?:\s*[–—-]\s*(?:200\s*000|60\s*000))?\s*₸/i
+
+suite('buildIntakeContextString — hidePrices mode', () => {
+  const intake: IntakeState = {
+    channels: ['WhatsApp', 'Instagram'],
+    tasks: ['Ответы на вопросы', 'Передавать заявки менеджеру'],
+    handoff: 'Google Sheets',
+    volume: '10–30',
+    timeline: 'В ближайшие дни',
+    businessType: 'Услуги',
+    completed: true,
+  }
+
+  // 1. No exact price amounts when hiding
+  const ctxHidden = buildIntakeContextString(intake, true)
+  assert.ok(
+    !PRICE_AMOUNT_RE.test(ctxHidden),
+    `hidePrices=true should not contain price amounts, got:\n${ctxHidden}`,
+  )
+  pass('hidePrices=true — no exact price amounts in context string')
+
+  // 2. "Pricing: hidden" present, "Shown price:" absent
+  assert.ok(ctxHidden.includes('Pricing: hidden'), 'Expected "Pricing: hidden" in context')
+  assert.ok(!ctxHidden.includes('Shown price:'), 'Expected no "Shown price:" when hiding')
+  pass('hidePrices=true — "Pricing: hidden" present, "Shown price:" absent')
+
+  // 3. Discovery-mode rule present; standard price rule absent
+  assert.ok(
+    ctxHidden.includes('Do NOT quote exact package prices'),
+    'Expected discovery price rule in context',
+  )
+  assert.ok(
+    !ctxHidden.includes('If user asks about price, explain using the selected tasks'),
+    'Standard price rule should not appear when hiding',
+  )
+  pass('hidePrices=true — discovery rule present, standard price rule absent')
+
+  // 4. hidePrices=false — prices appear normally
+  const ctxPublic = buildIntakeContextString(intake, false)
+  assert.ok(ctxPublic.includes('Shown price:'), 'Expected "Shown price:" when not hiding')
+  assert.ok(PRICE_AMOUNT_RE.test(ctxPublic), 'Expected price amount when hidePrices=false')
+  assert.ok(
+    ctxPublic.includes('If user asks about price, explain using the selected tasks'),
+    'Expected standard price rule when not hiding',
+  )
+  pass('hidePrices=false — prices present normally')
+
+  // 5. Other intake fields still present when hiding
+  assert.ok(ctxHidden.includes('WhatsApp'), 'Channels should be in context')
+  assert.ok(ctxHidden.includes('Google Sheets'), 'Handoff should be in context')
+  assert.ok(ctxHidden.includes('10–30'), 'Volume should be in context')
+  assert.ok(ctxHidden.includes('WEBSITE INTAKE CONTEXT'), 'Marker should be in context')
+  pass('hidePrices=true — other intake fields still present')
+})
+
+// ---------------------------------------------------------------------------
 // Done
 // ---------------------------------------------------------------------------
 

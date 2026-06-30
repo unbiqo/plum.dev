@@ -72,6 +72,7 @@ export interface DictDemoScenario {
   id: string
   label: string
   agentName: string
+  hidden?: boolean
   messages: { from: 'user' | 'ai'; text: string }[]
   leadSummary: { service: string; need: string; time: string; status: string }
 }
@@ -126,6 +127,45 @@ export interface DictCustomDemoTab {
   label: string
   title: string
   description: string
+  hidden?: boolean
+}
+
+export interface DictSchoolChatLabels {
+  headerTitle: string
+  onlineLabel: string
+  inputPlaceholder: string
+  sendAriaLabel: string
+  resetTitle: string
+  resetLabel: string
+  errorMessage: string
+  introMessage: string
+}
+
+export interface DictSchoolSummaryLabels {
+  title: string
+  format: string
+  goal: string
+  time: string
+  status: string
+  statusValues: {
+    consultation: string
+    exploring: string
+    intent_detected: string
+    objection: string
+    agreed_next_step: string
+    not_ready: string
+    contact_requested: string
+    contact_collected: string
+    off_topic: string
+    // Legacy keys kept for fallback compatibility
+    interested: string
+    wantsTrialLesson: string
+    contactRequested: string
+    contactReceived: string
+  }
+  pillReady: string
+  pillAwaiting: string
+  pillContact: string
 }
 
 export interface DictDemo {
@@ -137,6 +177,8 @@ export interface DictDemo {
   leadSummary: DictLeadSummaryLabels
   packageSummary: DictPackageSummaryLabels
   customSummary: DictCustomSummaryLabels
+  schoolChat: DictSchoolChatLabels
+  schoolSummary: DictSchoolSummaryLabels
 }
 
 export interface DictTierFeature {
@@ -189,10 +231,23 @@ export interface DictPricingPlan {
   cta: string
 }
 
+export interface DictPilotOffer {
+  eyebrow: string
+  title: string
+  subtitle: string
+  body: string
+  includesTitle: string
+  bullets: string[]
+  pricingLine: string
+  ctaPrimary: string
+  ctaSecondary: string
+}
+
 export interface DictPricing {
   headline: string
   subheadline: string
   note: string
+  pilotOffer: DictPilotOffer
   plans: DictPricingPlan[]
 }
 
@@ -206,6 +261,7 @@ export interface DictContact {
   placeholderMessage: string
   submitButton: string
   successMessage: string
+  errorMessage: string
   businessTypes: string[]
 }
 
@@ -225,6 +281,7 @@ export interface DictLiveChatSummaryLabels {
   volume: string
   timeline: string
   price: string
+  priceDiscovery: string
 }
 
 export interface DictLiveChat {
@@ -266,6 +323,12 @@ export interface DictCustomDemoChat {
   resetLabel: string
   sendAriaLabel: string
   onlineLabel: string
+  attachAriaLabel: string
+  removeFileAriaLabel: string
+  fileTooBig: string
+  fileTypeError: string
+  fileUploadError: string
+  materialsUploadedMessage: string
 }
 
 export interface DictIntakeQuestion {
@@ -446,9 +509,28 @@ const en: Dict = {
         },
       },
       {
+        id: 'english',
+        label: 'English school',
+        agentName: 'Alem English Academy',
+        messages: [
+          { from: 'user', text: 'Do you have English courses?' },
+          {
+            from: 'ai',
+            text: 'Yes! We have groups for children, teens, and adults — offline and online. I can help find the right format.',
+          },
+        ],
+        leadSummary: {
+          service: 'English course',
+          need: 'Group lessons',
+          time: 'This week',
+          status: 'Warm lead',
+        },
+      },
+      {
         id: 'beauty',
         label: 'Beauty salon',
         agentName: 'Beauty salon AI',
+        hidden: true,
         messages: [
           { from: 'user', text: 'Hi, how much does the treatment cost?' },
           {
@@ -463,31 +545,14 @@ const en: Dict = {
           status: 'Hot lead',
         },
       },
-      {
-        id: 'english',
-        label: 'English school',
-        agentName: 'English school AI',
-        messages: [
-          { from: 'user', text: 'Do you have beginner English courses?' },
-          {
-            from: 'ai',
-            text: 'Yes! We have beginner groups starting each month, 3 times a week. I can sign you up for a free trial lesson.',
-          },
-        ],
-        leadSummary: {
-          service: 'Beginner English course',
-          need: 'Group lessons',
-          time: 'This week',
-          status: 'Warm lead',
-        },
-      },
     ],
     customDemoTab: {
       id: 'custom_demo',
       label: 'Your demo',
       title: 'Test an AI employee on your own business data',
       description:
-        'Describe your business and chat as if you were a customer — see how an AI employee would answer. (Document upload coming soon.)',
+        'Upload materials or describe your business, then chat as if you were a customer and see how an AI employee would answer.',
+      hidden: true,
     },
     staticChat: {
       inputPlaceholder: 'Type a message...',
@@ -516,7 +581,7 @@ const en: Dict = {
       empty: '—',
       status: {
         beforeIntake: 'Takes about 1 minute',
-        packageSelected: 'Package selected',
+        packageSelected: 'Summary ready. Ask a question or leave a contact.',
         leadSubmitted: 'Lead submitted',
       },
       packageLabels: {
@@ -529,6 +594,43 @@ const en: Dict = {
       title: 'Your demo',
       text: 'Describe your business or upload materials — the AI will show how it could respond to your customers.',
       status: 'Demo uses your data',
+    },
+    schoolChat: {
+      headerTitle: 'Alem English Academy',
+      onlineLabel: 'Online',
+      inputPlaceholder: 'Type a message...',
+      sendAriaLabel: 'Send',
+      resetTitle: 'Reset chat',
+      resetLabel: 'Reset',
+      errorMessage: 'Something went wrong. Please try again.',
+      introMessage:
+        'Hello! I\'m the Alem English Academy assistant. I can tell you about our programs, prices, schedules, and help you sign up for a trial lesson. What brings you here?',
+    },
+    schoolSummary: {
+      title: 'Lead summary',
+      format: 'Format',
+      goal: 'Goal',
+      time: 'Convenient time',
+      status: 'Status',
+      statusValues: {
+        consultation:     'Consultation',
+        exploring:        'Exploring options',
+        intent_detected:  'Showed interest',
+        objection:        'Has objection',
+        agreed_next_step: 'Ready to book',
+        not_ready:        'Not ready yet',
+        contact_requested:'Contact requested',
+        contact_collected:'Contact received',
+        off_topic:        'Off-topic',
+        // Legacy
+        interested:       'Interested',
+        wantsTrialLesson: 'Wants trial lesson',
+        contactRequested: 'Contact requested',
+        contactReceived:  'Contact received',
+      },
+      pillReady: 'Lead ready for handoff',
+      pillAwaiting: 'Awaiting contact',
+      pillContact: 'Contact received',
     },
   },
   capabilities: {
@@ -616,6 +718,26 @@ const en: Dict = {
     subheadline:
       'Clear packages for different needs: from a first launch to lead qualification, integrations, and advanced workflows.',
     note: 'Final cost depends on project scope and complexity.',
+    pilotOffer: {
+      eyebrow: 'Pilot launch',
+      title: 'AI Administrator Pilot Launch',
+      subtitle:
+        'We are currently selecting a small number of online schools and education centers for pilot AI administrator deployments.',
+      body:
+        'We first show a demo, review your programs, prices, and common customer questions, then suggest a pilot format — from a simple website AI chat to WhatsApp/Telegram handoff for qualified leads.',
+      includesTitle: 'What is included in the pilot',
+      bullets: [
+        'AI answers first questions from parents and students',
+        'Explains programs, prices, and formats',
+        'Helps choose the right course',
+        'Books a trial lesson or consultation',
+        'Hands off a warm lead to an administrator or manager',
+      ],
+      pricingLine:
+        'Pilot pricing is discussed individually. Special terms may be available for the first schools in exchange for feedback and permission to use an anonymized case study.',
+      ctaPrimary: 'Discuss pilot',
+      ctaSecondary: 'See school demo',
+    },
     plans: [
       {
         id: 'start',
@@ -703,6 +825,7 @@ const en: Dict = {
     placeholderMessage: 'What do you want to automate? (optional)',
     submitButton: 'Send request',
     successMessage: "Thanks — we'll contact you soon.",
+    errorMessage: 'Something went wrong. Please try again.',
     businessTypes: [
       'Beauty / Wellness',
       'Education / Tutoring',
@@ -750,6 +873,7 @@ const en: Dict = {
       volume: 'Volume:',
       timeline: 'Timeline:',
       price: 'Price',
+      priceDiscovery: 'Determined after a short review',
     },
     packageSelectedPattern: '✅ {pkg} selected',
     perDayLabel: '/day',
@@ -771,7 +895,7 @@ const en: Dict = {
   },
   customDemoChat: {
     introMessage:
-      "Upload materials about your business — proposal, presentation, price list, catalog, FAQ, or service description. If you don't have a file, just describe here what you sell, prices, terms, and common customer questions.\n\nThen write a question as if you were a customer — I'll show how an AI employee would respond based on these materials.",
+      "Upload business materials — a proposal, presentation, price list, catalog, FAQ, or service description. If you don't have a file, describe what you sell, your prices, terms, and common customer questions.\n\nThen ask a question as if you were a customer — I'll show how an AI employee could respond using those materials.",
     headerTitle: 'Custom demo',
     inputPlaceholder: 'Describe your business or write a question as a customer...',
     errorMessage: 'Something went wrong. Please try again.',
@@ -779,6 +903,12 @@ const en: Dict = {
     resetLabel: 'Reset',
     sendAriaLabel: 'Send',
     onlineLabel: 'Online',
+    attachAriaLabel: 'Attach file',
+    removeFileAriaLabel: 'Remove file',
+    fileTooBig: 'File is too large (max 5 MB)',
+    fileTypeError: 'Supported formats: .txt, .pdf, .csv, .md',
+    fileUploadError: 'Could not upload the file. Please try another document.',
+    materialsUploadedMessage: 'Materials uploaded. Now ask a customer question and I will answer using those materials.',
   },
   intake: {
     questions: [
@@ -972,9 +1102,28 @@ const ru: Dict = {
         },
       },
       {
+        id: 'english',
+        label: 'Школа английского',
+        agentName: 'Alem English Academy',
+        messages: [
+          { from: 'user', text: 'У вас есть курсы английского?' },
+          {
+            from: 'ai',
+            text: 'Да! Есть группы для детей, подростков и взрослых — офлайн и онлайн. Помогу подобрать подходящий формат.',
+          },
+        ],
+        leadSummary: {
+          service: 'Курс английского',
+          need: 'Групповые занятия',
+          time: 'На этой неделе',
+          status: 'Тёплый лид',
+        },
+      },
+      {
         id: 'beauty',
         label: 'Салон красоты',
         agentName: 'AI салона красоты',
+        hidden: true,
         messages: [
           { from: 'user', text: 'Привет, сколько стоит уход?' },
           {
@@ -989,31 +1138,14 @@ const ru: Dict = {
           status: 'Горячий лид',
         },
       },
-      {
-        id: 'english',
-        label: 'Школа английского',
-        agentName: 'AI школы английского',
-        messages: [
-          { from: 'user', text: 'У вас есть курсы для начинающих?' },
-          {
-            from: 'ai',
-            text: 'Да! Есть группы для начинающих, которые стартуют каждый месяц, 3 раза в неделю. Могу записать вас на пробный урок бесплатно.',
-          },
-        ],
-        leadSummary: {
-          service: 'Курс английского для начинающих',
-          need: 'Групповые занятия',
-          time: 'На этой неделе',
-          status: 'Тёплый лид',
-        },
-      },
     ],
     customDemoTab: {
       id: 'custom_demo',
       label: 'Своё демо',
       title: 'Протестируйте AI-сотрудника на своих данных',
       description:
-        'Опишите бизнес и общайтесь как клиент — посмотрите, как AI ответит. (Загрузка документов скоро.)',
+        'Загрузите материалы или опишите бизнес, затем общайтесь как клиент и посмотрите, как AI ответит.',
+      hidden: true,
     },
     staticChat: {
       inputPlaceholder: 'Написать сообщение...',
@@ -1042,7 +1174,7 @@ const ru: Dict = {
       empty: '—',
       status: {
         beforeIntake: 'Подбор займёт около минуты',
-        packageSelected: 'Пакет подобран',
+        packageSelected: 'Сводка готова. Напишите вопрос или оставьте контакт.',
         leadSubmitted: 'Заявка отправлена',
       },
       packageLabels: {
@@ -1055,6 +1187,43 @@ const ru: Dict = {
       title: 'Своё демо',
       text: 'Опишите бизнес или загрузите материалы — AI покажет, как мог бы отвечать вашим клиентам.',
       status: 'Демо строится на ваших данных',
+    },
+    schoolChat: {
+      headerTitle: 'Alem English Academy',
+      onlineLabel: 'Онлайн',
+      inputPlaceholder: 'Написать сообщение...',
+      sendAriaLabel: 'Отправить',
+      resetTitle: 'Сбросить чат',
+      resetLabel: 'Сброс',
+      errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
+      introMessage:
+        'Здравствуйте! Я помощник Alem English Academy. Расскажу о программах, ценах, расписании и помогу записаться на пробный урок. Чем могу помочь?',
+    },
+    schoolSummary: {
+      title: 'Сводка по заявке',
+      format: 'Формат',
+      goal: 'Цель',
+      time: 'Удобное время',
+      status: 'Статус',
+      statusValues: {
+        consultation:     'Консультация',
+        exploring:        'Изучает варианты',
+        intent_detected:  'Проявил интерес',
+        objection:        'Возражение',
+        agreed_next_step: 'Готов к записи',
+        not_ready:        'Пока не готов',
+        contact_requested:'Контакт запрошен',
+        contact_collected:'Контакт получен',
+        off_topic:        'Не по теме',
+        // Legacy
+        interested:       'Интересуется',
+        wantsTrialLesson: 'Хочет пробный урок',
+        contactRequested: 'Контакт запрошен',
+        contactReceived:  'Контакт получен',
+      },
+      pillReady: 'Заявка готова к передаче',
+      pillAwaiting: 'Ожидаем контакт',
+      pillContact: 'Контакт получен',
     },
   },
   capabilities: {
@@ -1142,6 +1311,26 @@ const ru: Dict = {
     subheadline:
       'Прозрачные пакеты под разные задачи: от первого запуска до квалификации лидов, интеграций и сложных сценариев.',
     note: 'Итоговая стоимость зависит от объёма и сложности проекта.',
+    pilotOffer: {
+      eyebrow: 'Пилот для школ',
+      title: 'Пилотный запуск AI-администратора',
+      subtitle:
+        'Для школ, курсов, марафонов и образовательных проектов',
+      body:
+        'DamiWorks помогает обрабатывать входящие заявки из WhatsApp, Telegram, Instagram и сайта: отвечает на первые вопросы, объясняет программы и условия, собирает контакт и передаёт тёплую заявку вашей команде.\n\nСначала показываем демо, разбираем ваши программы, цены, каналы и типичные вопросы клиентов. После этого предлагаем формат пилота: от простого AI-чата на сайте до связки с мессенджерами и передачей заявок администратору или менеджеру.',
+      includesTitle: 'Что входит в пилот',
+      bullets: [
+        'AI отвечает на первые вопросы клиентов',
+        'Объясняет программы, цены, расписание и условия',
+        'Помогает выбрать подходящий курс, формат или консультацию',
+        'Собирает контакт и ключевую информацию по заявке',
+        'Передаёт тёплую заявку вашей команде',
+      ],
+      pricingLine:
+        'Формат пилота подбираем после короткого разбора вашего проекта.',
+      ctaPrimary: 'Обсудить пилот',
+      ctaSecondary: 'Посмотреть демо',
+    },
     plans: [
       {
         id: 'start',
@@ -1229,6 +1418,7 @@ const ru: Dict = {
     placeholderMessage: 'Что хотите автоматизировать? Например: ответы в WhatsApp, заявки, запись, follow-up. (необязательно)',
     submitButton: 'Отправить заявку',
     successMessage: 'Спасибо — скоро свяжемся с вами.',
+    errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
     businessTypes: [
       'Красота / Оздоровление',
       'Образование / Репетиторство',
@@ -1280,6 +1470,7 @@ const ru: Dict = {
       volume: 'Объём:',
       timeline: 'Запуск:',
       price: 'Стоимость',
+      priceDiscovery: 'Обсуждается после разбора задач',
     },
     packageSelectedPattern: '✅ {pkg} подобран',
     perDayLabel: '/день',
@@ -1301,7 +1492,7 @@ const ru: Dict = {
   },
   customDemoChat: {
     introMessage:
-      'Загрузите материалы о бизнесе — КП, презентацию, прайс, каталог, FAQ или описание услуг. Если файла нет, просто опишите здесь, что продаёте, цены, условия и частые вопросы клиентов.\n\nЗатем напишите вопрос как будто вы клиент — я покажу, как AI-сотрудник ответит на основе этих материалов.',
+      'Загрузите материалы о бизнесе — КП, презентацию, прайс, каталог, FAQ или описание услуг. Если файла нет, опишите, что продаёте, цены, условия и частые вопросы клиентов.\n\nЗатем напишите вопрос как будто вы клиент — я покажу, как AI-сотрудник ответит на основе этих материалов.',
     headerTitle: 'Custom demo',
     inputPlaceholder: 'Опишите бизнес или напишите вопрос как клиент...',
     errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
@@ -1309,6 +1500,12 @@ const ru: Dict = {
     resetLabel: 'Сброс',
     sendAriaLabel: 'Отправить',
     onlineLabel: 'Online',
+    attachAriaLabel: 'Прикрепить файл',
+    removeFileAriaLabel: 'Убрать файл',
+    fileTooBig: 'Файл слишком большой (макс. 5 МБ)',
+    fileTypeError: 'Поддерживаемые форматы: .txt, .pdf, .csv, .md',
+    fileUploadError: 'Не удалось загрузить файл. Попробуйте другой документ.',
+    materialsUploadedMessage: 'Материалы загружены. Теперь задайте вопрос как клиент — я отвечу с учетом этих материалов.',
   },
   intake: {
     questions: [

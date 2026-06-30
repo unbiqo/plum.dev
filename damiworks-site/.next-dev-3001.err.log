@@ -1,0 +1,26 @@
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename 'C:\projects\plum-dev\damiworks-site\.next\cache\webpack\client-development\2.pack.gz_' -> 'C:\projects\plum-dev\damiworks-site\.next\cache\webpack\client-development\2.pack.gz'
+ ⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
+ ⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
+ ⚠ Cross origin request detected from 192.168.1.96 to /_next/* resource. In a future major version of Next.js, you will need to explicitly configure "allowedDevOrigins" in next.config to allow this.
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+ ⚠ Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ ⨯ Error: Cannot find module './331.js'
+Require stack:
+- C:\projects\plum-dev\damiworks-site\.next\server\webpack-runtime.js
+- C:\projects\plum-dev\damiworks-site\.next\server\app\api\chat\route.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\server\require.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\server\load-components.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\build\utils.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\build\swc\options.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\build\swc\index.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\build\next-config-ts\transpile-config.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\server\config.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\server\next.js
+- C:\projects\plum-dev\damiworks-site\node_modules\next\dist\server\lib\start-server.js
+    at <unknown> (C:\projects\plum-dev\damiworks-site\.next\server\app\ru\page.js:2:7821)
+    at Object.<anonymous> (C:\projects\plum-dev\damiworks-site\.next\server\app\ru\page.js:2:7874) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [Array],
+  page: '/ru'
+}
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename 'C:\projects\plum-dev\damiworks-site\.next\cache\webpack\server-development\1.pack.gz_' -> 'C:\projects\plum-dev\damiworks-site\.next\cache\webpack\server-development\1.pack.gz'

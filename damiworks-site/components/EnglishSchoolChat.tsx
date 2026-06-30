@@ -1,43 +1,51 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Send, RotateCcw, Paperclip, X } from 'lucide-react'
-import type { DictCustomDemoChat } from '@/lib/i18n'
+import { Send, RotateCcw } from 'lucide-react'
+import type { DictSchoolChatLabels } from '@/lib/i18n'
 import {
-  BEAUTY_SESSION_TTL_MS,
+  ENGLISH_SCHOOL_SESSION_TTL_MS,
   loadChatSession,
   resetChatSession,
   touchChatSession,
 } from '@/lib/chatSession'
 
 // ---------------------------------------------------------------------------
-// CustomDemoChat — separate live roleplay/simulation chat.
+// EnglishSchoolChat — live chat for the English School (Alem English Academy) demo.
 //
-// Independent from the DamiWorks consultant (LiveChat): its own chat_id (fresh per
-// page load via module singleton), sessionStorage for messages, its own
-// instance_id ("damiworks_custom_demo"), and NO guided
-// intake / lead collection / package pricing. The backend separates behavior by
-// instance_id; here the AI plays the user's future AI employee answering customers.
+// Uses instance_id="damiworks_english_school_demo" — separate from the DamiWorks
+// consultant and the custom demo. No file upload, no intake, no lead notification.
+// The backend serves answers from a preloaded static knowledge base.
 // ---------------------------------------------------------------------------
 
-const CUSTOM_DEMO_INSTANCE_ID = 'damiworks_custom_demo'
-const MESSAGES_SESSION_KEY = 'damiworks_custom_demo_messages'
-const ACCEPTED_EXTENSIONS = ['.txt', '.md', '.csv', '.pdf']
-const MAX_FILE_BYTES = 5 * 1024 * 1024
+const SCHOOL_INSTANCE_ID = 'damiworks_english_school_demo'
+const MESSAGES_SESSION_KEY = 'damiworks_english_school_messages'
 
-type Message = { from: 'user' | 'ai'; text: string }
+export type SchoolMessage = { from: 'user' | 'ai'; text: string }
 
-export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
-  const [messages, setMessages] = useState<Message[]>([])
+export type SchoolBackendState = {
+  leadStatus: 'open' | 'contact_requested' | 'contact_collected' | 'closed' | null
+  preferredSchedule: string | null
+  formatPreference: string | null
+  program: string | null
+  conversationStatus: string | null
+  conversationStatusLabel: string | null
+}
+
+type Props = {
+  dict: DictSchoolChatLabels
+  onConversationUpdate?: (messages: SchoolMessage[]) => void
+  onStateUpdate?: (state: SchoolBackendState) => void
+}
+
+export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateUpdate }: Props) {
+  const [messages, setMessages] = useState<SchoolMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chatId, setChatId] = useState('')
-  const [attachedFile, setAttachedFile] = useState<File | null>(null)
-  const [fileError, setFileError] = useState<string | null>(null)
 
   const messagesContainerRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const initDone = useRef(false)
 
   // ------------ initialization ------------
@@ -46,14 +54,14 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
     if (initDone.current) return
     initDone.current = true
 
-    const { session, expired } = loadChatSession(CUSTOM_DEMO_INSTANCE_ID, BEAUTY_SESSION_TTL_MS)
+    const { session, expired } = loadChatSession(SCHOOL_INSTANCE_ID, ENGLISH_SCHOOL_SESSION_TTL_MS)
     setChatId(session.chat_id)
     if (expired) sessionStorage.removeItem(MESSAGES_SESSION_KEY)
 
     const stored = expired ? null : sessionStorage.getItem(MESSAGES_SESSION_KEY)
     if (stored) {
       try {
-        const parsed = JSON.parse(stored) as Message[]
+        const parsed = JSON.parse(stored) as SchoolMessage[]
         if (parsed.length > 0) {
           setMessages(parsed)
           return
@@ -73,60 +81,25 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
     }
   }, [messages])
 
-  // ------------ auto-scroll — scrolls only the message container, not the page ------------
+  // ------------ notify parent of conversation state ------------
+
+  useEffect(() => {
+    onConversationUpdate?.(messages)
+  }, [messages, onConversationUpdate])
+
+  // ------------ auto-scroll ------------
 
   useEffect(() => {
     const el = messagesContainerRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, loading])
 
-  // ------------ file handling ------------
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (fileInputRef.current) fileInputRef.current.value = ''
-    if (!file) return
-
-    const ext = '.' + (file.name.split('.').pop() ?? '').toLowerCase()
-    if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-      setAttachedFile(null)
-      setFileError(dict.fileTypeError)
-      return
-    }
-    if (file.size > MAX_FILE_BYTES) {
-      setAttachedFile(null)
-      setFileError(dict.fileTooBig)
-      return
-    }
-    setFileError(null)
-    setAttachedFile(file)
-  }
-
-  const removeFile = () => {
-    setAttachedFile(null)
-    setFileError(null)
-  }
-
-  const uploadFile = async (fileToUpload: File) => {
-    const fd = new FormData()
-    fd.append('chat_id', chatId)
-    fd.append('instance_id', CUSTOM_DEMO_INSTANCE_ID)
-    fd.append('file', fileToUpload)
-
-    const res = await fetch('/api/custom-demo/upload', { method: 'POST', body: fd })
-    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
-    if (!res.ok || data.ok === false) {
-      throw new Error(data.error || 'upload_failed')
-    }
-  }
-
   // ------------ send ------------
 
   const sendMessage = async (userText: string) => {
-    if (!userText && !attachedFile) return
-    if (loading || !chatId) return
+    if (!userText.trim() || loading || !chatId) return
 
-    touchChatSession(CUSTOM_DEMO_INSTANCE_ID)
+    touchChatSession(SCHOOL_INSTANCE_ID)
     setInput('')
     setError(null)
 
@@ -135,31 +108,17 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
       content: m.text,
     }))
 
-    const displayText = userText || `📎 ${attachedFile!.name}`
-    setMessages((prev) => [...prev, { from: 'user', text: displayText }])
+    setMessages((prev) => [...prev, { from: 'user', text: userText }])
     setLoading(true)
 
-    const fileToSend = attachedFile
-    setAttachedFile(null)
-    let fileUploaded = false
-
     try {
-      if (fileToSend) {
-        await uploadFile(fileToSend)
-        fileUploaded = true
-        if (!userText) {
-          setMessages((prev) => [...prev, { from: 'ai', text: dict.materialsUploadedMessage }])
-          return
-        }
-      }
-
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userText,
           chat_id: chatId,
-          instance_id: CUSTOM_DEMO_INSTANCE_ID,
+          instance_id: SCHOOL_INSTANCE_ID,
           chat_history: priorHistory,
           reset_context: false,
         }),
@@ -169,14 +128,29 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
         setError(dict.errorMessage)
         return
       }
-      const data = (await res.json()) as { answer: string }
-      setMessages((prev) => [...prev, { from: 'ai', text: data.answer }])
-    } catch {
-      if (fileToSend && !fileUploaded) {
-        setFileError(dict.fileUploadError)
-      } else {
-        setError(dict.errorMessage)
+      const data = (await res.json()) as {
+        answer: string
+        lead_status?: string | null
+        metadata?: {
+          state?: Record<string, string | undefined>
+          conversation_status?: string | null
+          conversation_status_label?: string | null
+        }
       }
+      setMessages((prev) => [...prev, { from: 'ai', text: data.answer }])
+      if (onStateUpdate) {
+        const s = data.metadata?.state ?? {}
+        onStateUpdate({
+          leadStatus: (data.lead_status ?? null) as SchoolBackendState['leadStatus'],
+          preferredSchedule: s.preferred_schedule || null,
+          formatPreference: s.format_preference || null,
+          program: s.program || null,
+          conversationStatus: data.metadata?.conversation_status ?? null,
+          conversationStatusLabel: data.metadata?.conversation_status_label ?? null,
+        })
+      }
+    } catch {
+      setError(dict.errorMessage)
     } finally {
       setLoading(false)
     }
@@ -184,19 +158,17 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
 
   const send = () => {
     const userText = input.trim()
-    if (!userText && !attachedFile) return
+    if (!userText) return
     void sendMessage(userText)
   }
 
   const reset = () => {
-    const session = resetChatSession(CUSTOM_DEMO_INSTANCE_ID)
+    const session = resetChatSession(SCHOOL_INSTANCE_ID)
     sessionStorage.removeItem(MESSAGES_SESSION_KEY)
     setChatId(session.chat_id)
     setMessages([{ from: 'ai', text: dict.introMessage }])
     setInput('')
     setError(null)
-    setAttachedFile(null)
-    setFileError(null)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -233,12 +205,12 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
       </div>
 
       {/* Messages */}
-      <div ref={messagesContainerRef} className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[460px] sm:max-h-[380px]">
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[460px] sm:max-h-[380px]"
+      >
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+          <div key={i} className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`text-sm px-4 py-2.5 rounded-2xl max-w-[78%] leading-relaxed whitespace-pre-wrap ${
                 msg.from === 'user'
@@ -260,7 +232,6 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
             </div>
           </div>
         )}
-
       </div>
 
       {/* Error */}
@@ -270,46 +241,8 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
         </div>
       )}
 
-      {/* Attached file chip */}
-      {attachedFile && (
-        <div className="px-4 pb-1 flex items-center gap-1.5">
-          <Paperclip size={11} className="text-accent flex-shrink-0" />
-          <span className="text-xs text-primary truncate max-w-[200px]">{attachedFile.name}</span>
-          <button
-            onClick={removeFile}
-            aria-label={dict.removeFileAriaLabel}
-            title={dict.removeFileAriaLabel}
-            className="text-secondary hover:text-primary transition-colors flex-shrink-0"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      )}
-
-      {/* File type/size error */}
-      {fileError && (
-        <div className="px-4 pb-1">
-          <p className="text-xs text-red-500">{fileError}</p>
-        </div>
-      )}
-
-      {/* Free chat input */}
+      {/* Input */}
       <div className="px-4 py-3 border-t border-border-col flex items-end gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".txt,.md,.csv,.pdf"
-          className="hidden"
-          onChange={handleFileSelect}
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={loading}
-          aria-label={dict.attachAriaLabel}
-          className="w-9 h-9 border border-border-col rounded-xl flex items-center justify-center text-secondary hover:text-primary hover:border-accent transition-colors flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Paperclip size={14} />
-        </button>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -323,7 +256,7 @@ export default function CustomDemoChat({ dict }: { dict: DictCustomDemoChat }) {
         />
         <button
           onClick={send}
-          disabled={loading || (!input.trim() && !attachedFile) || !chatId}
+          disabled={loading || !input.trim() || !chatId}
           aria-label={dict.sendAriaLabel}
           className="w-9 h-9 bg-accent rounded-xl flex items-center justify-center text-white hover:opacity-90 transition-opacity flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
         >
