@@ -97,6 +97,7 @@ def resolve_post_intake_turn(
     last_assistant_message: str = "",
     *,
     lead_closed: bool = False,
+    calendly_enabled: bool = False,
 ) -> PostIntakeTurn:
     """Decide the lead stage and deterministic answer for a post-intake turn.
 
@@ -122,7 +123,7 @@ def resolve_post_intake_turn(
     ):
         return PostIntakeTurn(
             LeadStage.contact_requested,
-            start_handoff_answer(last_assistant_message),
+            start_handoff_answer(last_assistant_message, calendly_enabled=calendly_enabled),
         )
 
     # Concrete feature mention post-intake ("квалификацию", "доставку", etc.) —
@@ -130,7 +131,7 @@ def resolve_post_intake_turn(
     if is_feature_detail(user_message):
         return PostIntakeTurn(
             LeadStage.contact_requested,
-            feature_detail_answer(last_assistant_message),
+            feature_detail_answer(last_assistant_message, calendly_enabled=calendly_enabled),
         )
 
     # Everything else (cheaper / price / implementation / not-remembered /

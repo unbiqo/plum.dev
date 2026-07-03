@@ -34,6 +34,9 @@ class ChatRequest(BaseModel):
     chat_history: list[ChatHistoryMessage] = Field(default_factory=list)
     reset_context: bool = False
     attachments: list[ChatAttachment] = Field(default_factory=list)
+    # Frontend signal: a Calendly booking CTA is visible in the UI, so contact
+    # asks may present booking a call as the preferred next step.
+    calendly_enabled: bool = False
 
 
 class ProductCard(BaseModel):

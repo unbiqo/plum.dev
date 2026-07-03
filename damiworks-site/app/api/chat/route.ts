@@ -66,6 +66,9 @@ export async function POST(req: NextRequest) {
         message: effectiveMessage,
         chat_history: effectiveHistory,
         reset_context: Boolean(reset_context),
+        // Calendly booking CTA is visible in the UI — the backend uses this to
+        // present booking a call as the preferred next step in contact asks.
+        calendly_enabled: Boolean((process.env.NEXT_PUBLIC_CALENDLY_URL ?? '').trim()),
       }),
     })
 

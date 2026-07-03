@@ -888,6 +888,7 @@ def _sanitize_damiworks_web_answer(
     close_intent: bool,
     last_assistant_message: str = "",
     lead_closed: bool = False,
+    calendly_enabled: bool = False,
 ) -> str:
     """Final output guard for web_site / damiworks_site channel.
 
@@ -916,7 +917,11 @@ def _sanitize_damiworks_web_answer(
     # passes so the template is never mangled.
     if _ctx.exists:
         _turn = resolve_post_intake_turn(
-            _real_user_msg, _ctx, last_assistant_message, lead_closed=lead_closed
+            _real_user_msg,
+            _ctx,
+            last_assistant_message,
+            lead_closed=lead_closed,
+            calendly_enabled=calendly_enabled,
         )
         if _turn.answer:
             return _turn.answer
@@ -1066,7 +1071,7 @@ def _sanitize_damiworks_web_answer(
             or not _answer_has_contact_ask(normalized)
         )
     ):
-        normalized = f"Отлично. {_pick_contact_ask(last_assistant_message)}"
+        normalized = f"Отлично. {_pick_contact_ask(last_assistant_message, calendly_enabled=calendly_enabled)}"
 
     # Step 8: Ensure exactly one soft guided-intake CTA before intake is completed.
     # Never doubled (skip if the answer already nudges to the intake) and never
@@ -2493,6 +2498,7 @@ async def chat(
                 close_intent=_close_context,
                 last_assistant_message=_last_assistant_message_text(effective_history),
                 lead_closed=_consultant_lead_closed,
+                calendly_enabled=payload.calendly_enabled,
             )
         dialog_state = _update_dialog_state_after_answer(
             dialog_state=dialog_state,

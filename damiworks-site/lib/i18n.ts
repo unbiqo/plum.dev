@@ -255,6 +255,9 @@ export interface DictContact {
   headline: string
   description: string
   note: string
+  // Calendly primary CTA — rendered only when NEXT_PUBLIC_CALENDLY_URL is set.
+  calendlyButton: string
+  calendlySubtext: string
   placeholderName: string
   placeholderContact: string
   placeholderBusinessType: string
@@ -312,6 +315,9 @@ export interface DictLiveChat {
   leadSentChipLabel: string
   contactClosedPill: string
   contactClosedInputPlaceholder: string
+  // Calendly conversion CTA — rendered only when NEXT_PUBLIC_CALENDLY_URL is set.
+  bookCallButton: string
+  leaveContactButton: string
 }
 
 export interface DictCustomDemoChat {
@@ -816,9 +822,11 @@ const en: Dict = {
     ],
   },
   contact: {
-    headline: "Let's talk about\nyour business",
+    headline: "Let's discuss where an AI employee\ndelivers impact fastest",
     description: "Tell us a few details and we'll show you how DamiWorks can help.",
     note: 'We usually reply within a few hours.',
+    calendlyButton: '📅 Book a 20-minute call',
+    calendlySubtext: 'or leave your contact — I will reach out to you myself',
     placeholderName: 'Your name',
     placeholderContact: 'WhatsApp / Telegram',
     placeholderBusinessType: 'Select your business type',
@@ -892,6 +900,8 @@ const en: Dict = {
     leadSentChipLabel: '✅ Sent',
     contactClosedPill: '✅ Request sent. We will contact you on WhatsApp/Telegram.',
     contactClosedInputPlaceholder: 'Request sent',
+    bookCallButton: '📅 Book a call',
+    leaveContactButton: '📱 Leave contact',
   },
   customDemoChat: {
     introMessage:
@@ -1409,9 +1419,11 @@ const ru: Dict = {
     ],
   },
   contact: {
-    headline: 'Обсудим ваш\nбизнес',
+    headline: 'Обсудим, где AI-сотрудник\nбыстрее всего даст эффект',
     description: 'Расскажите о бизнесе — покажем, как DamiWorks может помочь.',
     note: 'Обычно отвечаем в течение нескольких часов.',
+    calendlyButton: '📅 Забронировать 20-минутный звонок',
+    calendlySubtext: 'или оставьте контакт — я сам напишу вам',
     placeholderName: 'Ваше имя',
     placeholderContact: 'WhatsApp / Telegram',
     placeholderBusinessType: 'Выберите тип бизнеса',
@@ -1489,6 +1501,8 @@ const ru: Dict = {
     leadSentChipLabel: '✅ Отправлено',
     contactClosedPill: '✅ Заявка отправлена. Мы свяжемся с вами в WhatsApp/Telegram.',
     contactClosedInputPlaceholder: 'Заявка отправлена',
+    bookCallButton: '📅 Забронировать звонок',
+    leaveContactButton: '📱 Оставить контакт',
   },
   customDemoChat: {
     introMessage:

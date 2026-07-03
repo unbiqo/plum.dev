@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "npx tsx tests/intake.test.ts && npx tsx tests/chatSession.test.ts"
+    "test": "npx tsx tests/intake.test.ts && npx tsx tests/chatSession.test.ts && npx tsx tests/calendly.test.ts"
   },
   "dependencies": {
     "next": "^15.0.0",

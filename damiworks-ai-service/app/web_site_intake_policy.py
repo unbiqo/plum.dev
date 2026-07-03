@@ -651,6 +651,15 @@ CONTACT_ASKS: tuple[str, ...] = (
     "Для следующего шага оставьте имя и номер — мы свяжемся и уточним детали.",
 )
 
+# Calendly-preferred contact ask — used only when the frontend reports that a
+# booking CTA is visible (ChatRequest.calendly_enabled). Presents the call as
+# the preferred next step while keeping WhatsApp/Telegram as an equal option.
+CALENDLY_CONTACT_ASK = (
+    "Лучший следующий шаг — выбрать удобное время для короткого 20-минутного звонка. "
+    "Так я смогу быстро понять вашу воронку, каналы и где AI-сотрудник даст больше пользы.\n\n"
+    "Можете забронировать звонок или просто оставить WhatsApp/Telegram — как удобнее."
+)
+
 # Soft, non-contact next steps for informational post-intake answers — never a
 # contact ask (keeps the chat helpful, not pushy).
 SOFT_NEXT_STEPS: tuple[str, ...] = (
@@ -659,8 +668,10 @@ SOFT_NEXT_STEPS: tuple[str, ...] = (
 )
 
 
-def pick_contact_ask(last_assistant_message: str = "") -> str:
+def pick_contact_ask(last_assistant_message: str = "", *, calendly_enabled: bool = False) -> str:
     prev = last_assistant_message or ""
+    if calendly_enabled and CALENDLY_CONTACT_ASK not in prev:
+        return CALENDLY_CONTACT_ASK
     for ask in CONTACT_ASKS:
         if ask not in prev:
             return ask
@@ -677,6 +688,8 @@ def pick_soft_next_step(last_assistant_message: str = "") -> str:
 
 def answer_has_contact_ask(answer: str) -> bool:
     text = answer or ""
+    if CALENDLY_CONTACT_ASK in text:
+        return True
     if any(ask in text for ask in CONTACT_ASKS):
         return True
     return bool(
@@ -732,9 +745,9 @@ def neutral_ack_answer() -> str:
     return "Хорошо. Если захотите продолжить, следующим шагом можно перейти к запуску."
 
 
-def start_handoff_answer(last_assistant_message: str = "") -> str:
+def start_handoff_answer(last_assistant_message: str = "", *, calendly_enabled: bool = False) -> str:
     """Acknowledge start intent and ask for contact (PART 2)."""
-    return "Отлично. " + pick_contact_ask(last_assistant_message)
+    return "Отлично. " + pick_contact_ask(last_assistant_message, calendly_enabled=calendly_enabled)
 
 
 def phone_handoff_ack() -> str:
@@ -866,9 +879,9 @@ def is_feature_detail(user_message: str) -> bool:
     return bool(_FEATURE_DETAIL_RE.search(m.casefold().replace("ё", "е")))
 
 
-def feature_detail_answer(last_assistant_message: str = "") -> str:
+def feature_detail_answer(last_assistant_message: str = "", *, calendly_enabled: bool = False) -> str:
     """Acknowledge a user-mentioned feature and move to contact ask."""
-    return "Понял, добавим в запуск. " + pick_contact_ask(last_assistant_message)
+    return "Понял, добавим в запуск. " + pick_contact_ask(last_assistant_message, calendly_enabled=calendly_enabled)
 
 
 # Generic fillers that must never be treated as a contact name (PART 2).

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { DictContact } from '@/lib/i18n'
+import { CALENDLY_URL } from '@/lib/calendly'
 
 export default function ContactSection({ dict }: { dict: DictContact }) {
   const [form, setForm] = useState({
@@ -53,6 +54,20 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
             </h2>
             <p className="text-secondary mb-2">{dict.description}</p>
             <p className="text-sm text-secondary">{dict.note}</p>
+            {/* Calendly is the primary conversion path — hidden when the URL is unset. */}
+            {CALENDLY_URL && (
+              <div className="mt-6">
+                <a
+                  href={CALENDLY_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center bg-accent text-white rounded-xl px-6 py-3 font-medium text-sm hover:opacity-90 transition-opacity"
+                >
+                  {dict.calendlyButton}
+                </a>
+                <p className="text-sm text-secondary mt-3">{dict.calendlySubtext}</p>
+              </div>
+            )}
           </div>
 
           {/* Right */}

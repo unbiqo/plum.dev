@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Send, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { SHOW_DAMIWORKS_CHAT_PRICES } from '@/lib/constants'
+import { CALENDLY_URL } from '@/lib/calendly'
 import {
   DAMIWORKS_SESSION_TTL_MS,
   loadChatSession,
@@ -925,21 +926,68 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       {/* Post-intake chips (persistent after intake completed, until lead closed) */}
       {showPostIntakeChips && (
         <div className="px-4 py-3 border-t border-border-col space-y-2">
-          <div className="flex flex-wrap gap-1.5">
-            {dict.postIntakeChips.map((chip) => (
-              <button
-                key={chip}
-                onClick={() => handlePostIntakeChip(chip)}
-                disabled={loading}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all disabled:opacity-50 ${
-                  chip === dict.sendLeadChipLabel
-                    ? 'bg-accent text-white border-accent hover:opacity-90'
-                    : 'border-accent/30 text-accent bg-accent-soft/40 hover:bg-accent-soft hover:border-accent/60'
-                }`}
+          {/* Calendly conversion row: booking is primary, leaving a contact stays
+              available via the existing chat flow. Hidden when the URL is unset. */}
+          {CALENDLY_URL && (
+            <div className="flex flex-wrap gap-1.5">
+              <a
+                href={CALENDLY_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-full text-xs font-medium border bg-accent text-white border-accent hover:opacity-90 transition-all"
               >
-                {chip}
+                {dict.bookCallButton}
+              </a>
+              <button
+                onClick={() => handlePostIntakeChip(dict.sendLeadChipLabel)}
+                disabled={loading}
+                className="px-3 py-1.5 rounded-full text-xs font-medium border border-accent/30 text-accent bg-accent-soft/40 hover:bg-accent-soft hover:border-accent/60 transition-all disabled:opacity-50"
+              >
+                {dict.leaveContactButton}
               </button>
-            ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {dict.postIntakeChips
+              .filter((chip) => !CALENDLY_URL || chip !== dict.sendLeadChipLabel)
+              .map((chip) => (
+                <button
+                  key={chip}
+                  onClick={() => handlePostIntakeChip(chip)}
+                  disabled={loading}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all disabled:opacity-50 ${
+                    chip === dict.sendLeadChipLabel
+                      ? 'bg-accent text-white border-accent hover:opacity-90'
+                      : 'border-accent/30 text-accent bg-accent-soft/40 hover:bg-accent-soft hover:border-accent/60'
+                  }`}
+                >
+                  {chip}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Contact requested — assistant asked for contact info. Offer booking a
+          call as the primary path; the secondary button focuses the input so the
+          user can type their contact as before. Never changes lead state. */}
+      {intake.completed && !contactClosed && leadStatus === 'contact_requested' && CALENDLY_URL && (
+        <div className="px-4 py-3 border-t border-border-col">
+          <div className="flex flex-wrap gap-1.5">
+            <a
+              href={CALENDLY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-full text-xs font-medium border bg-accent text-white border-accent hover:opacity-90 transition-all"
+            >
+              {dict.bookCallButton}
+            </a>
+            <button
+              onClick={() => inputRef.current?.focus()}
+              className="px-3 py-1.5 rounded-full text-xs font-medium border border-accent/30 text-accent bg-accent-soft/40 hover:bg-accent-soft hover:border-accent/60 transition-all"
+            >
+              {dict.leaveContactButton}
+            </button>
           </div>
         </div>
       )}
