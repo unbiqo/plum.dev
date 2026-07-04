@@ -154,6 +154,10 @@ SLOT_FIELDS = (
 _FREE_TEXT_SLOTS = frozenset({"preferred_location_text", "preferred_schedule", "contact"})
 _UNSET = ("", "unknown", None, False)
 
+# Intents where a mentioned format is part of a comparison/objection, not an
+# explicit choice by the user — format_preference must not be confirmed there.
+_FORMAT_NON_CHOICE_INTENTS = frozenset({"compare_competitor", "price_objection"})
+
 # Map a "question type" (from detect_asked_slots) to the state field that, when
 # already known, means we must not ask that question again.
 QUESTION_TO_SLOT: dict[str, str] = {
@@ -197,6 +201,8 @@ class ConversationState:
     trial_cta_mentioned: bool = False
     contact_asked: bool = False
     admin_handoff_offered: bool = False
+    # True once the assistant has spoken at least once — no repeated greetings.
+    greeting_already_sent: bool = False
 
     def known_slots(self) -> dict[str, str]:
         """Slots with a concrete, non-empty value."""
@@ -246,6 +252,7 @@ def build_conversation_state(
         contact=contact,
         recent_topics_answered=_detect_answered_topics(history),
         recent_questions_asked=questions_asked,
+        greeting_already_sent=any(m.role == "assistant" for m in history),
         **recent_facts,
     )
 
@@ -264,6 +271,14 @@ def apply_planner_updates(state: ConversationState, planner: dict) -> Conversati
     for key in SLOT_FIELDS:
         value = slots.get(key)
         if value in _UNSET:
+            continue
+        # A competitor-price mention or a price objection is NOT a format
+        # choice — never confirm format_preference from those intents.
+        if (
+            key == "format_preference"
+            and not correction
+            and planner.get("current_intent") in _FORMAT_NON_CHOICE_INTENTS
+        ):
             continue
         if key in _FREE_TEXT_SLOTS:
             setattr(state, key, value)

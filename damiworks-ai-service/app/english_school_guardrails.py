@@ -18,6 +18,9 @@ Checks:
 9. No premature contact push when planner forbids it or intent is offensive.
 10. No apology in offensive context.
 11. No unsupported promotions/discounts not found in KB.
+12. Contact request must target the adult client, never the child/grandchild.
+13. No repeated greeting once the conversation is under way.
+14. No invented booking confirmations / availability claims.
 """
 
 from __future__ import annotations
@@ -76,6 +79,27 @@ _REPEAT_TOPIC_PRICES: dict[str, frozenset[int]] = {
 }
 
 _APOLOGY_RE = re.compile(r"извин|прошу прощен", re.IGNORECASE)
+
+# Contact must belong to the adult client — never the child/grandchild.
+_CHILD_CONTACT_RE = re.compile(
+    r"\b(?:его|её|ее)\s+(?:имя\s+и\s+)?(?:номер|телефон|контакт)"
+    r"|(?:номер|телефон|контакт)\w*\s+(?:ребёнка|ребенка|внука|внучки|сына|дочери|дочки)",
+    re.IGNORECASE,
+)
+
+# Greeting at the start of an answer mid-conversation (context-reset feel).
+_GREETING_RE = re.compile(
+    r"^\W*(?:здравствуйте|привет|добрый\s+(?:день|вечер)|доброе\s+утро)",
+    re.IGNORECASE,
+)
+
+# Claims of a confirmed booking / free slot — only the administrator confirms
+# actual availability, the bot must never assert it.
+_AVAILABILITY_CLAIM_RE = re.compile(
+    r"записал[аи]?\s+вас|вы\s+записан[ыа]?\b|есть\s+свободн\w*\s+(?:мест|слот|окн|врем)"
+    r"|есть\s+мест[оа]\b|жд[её]м\s+вас\s+(?:завтра|сегодня|в\s+\d)",
+    re.IGNORECASE,
+)
 
 # Promotional terms never in KB (except the explicit 10% family discount).
 _UNSUPPORTED_PROMO_RE = re.compile(
@@ -246,6 +270,35 @@ def validate_answer(
             "самостоятельно. По остальным условиям направь к администратору."
         )
 
+    # 12. Contact request must target the adult client, not the child.
+    child_contact = bool(_CHILD_CONTACT_RE.search(answer or ""))
+    checks["no_child_contact_request"] = not child_contact
+    if child_contact:
+        fixes.append(
+            "Не проси номер или имя ребёнка/внука. Контакт нужен у взрослого клиента: "
+            "«Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram для связи»."
+        )
+
+    # 13. No repeated greeting once the conversation is under way.
+    if state.greeting_already_sent:
+        greeted = bool(_GREETING_RE.search(answer or ""))
+        checks["no_repeated_greeting"] = not greeted
+        if greeted:
+            fixes.append(
+                "Убери приветствие («Здравствуйте», «Добрый день») — разговор уже идёт. "
+                "Начни сразу с ответа по существу."
+            )
+
+    # 14. No invented booking confirmation / availability claims.
+    availability = bool(_AVAILABILITY_CLAIM_RE.search(answer or ""))
+    checks["no_invented_availability"] = not availability
+    if availability:
+        fixes.append(
+            "Не подтверждай запись и не утверждай, что есть свободное время или места — "
+            "наличие мест подтверждает администратор. Скажи, что администратор свяжется "
+            "и предложит ближайшее доступное время."
+        )
+
     return ValidationResult(failed=bool(fixes), fix=" ".join(fixes), checks=checks)
 
 
@@ -255,19 +308,40 @@ def validate_answer(
 
 _FALLBACK_PRICE_FORMAT = (
     "Чтобы не ошибиться с деталями, уточню точную информацию у администратора и вернусь с ответом. "
-    "Подскажите, как с вами удобнее связаться — оставьте имя и номер WhatsApp или Telegram."
+    "Подскажите, как с вами удобнее связаться — оставьте ваше имя и номер WhatsApp или Telegram."
 )
 _FALLBACK_GUARANTEE = (
     "Точный результат зависит от стартового уровня, цели и регулярности, поэтому мы начинаем с "
     "бесплатной диагностики на пробном уроке и предлагаем реалистичный план. Хотите, подберём удобное время?"
 )
+# Price objection / competitor comparison — a useful commercial answer, not a
+# generic deflection. No prices, no guarantees, no competitor claims.
+_FALLBACK_PRICE_OBJECTION = (
+    "Понимаю, разница в цене важна. Стоимость обычно зависит от длительности урока, программы, "
+    "обратной связи преподавателя и плана прогресса. Если бюджет ключевой — мини-группа заметно "
+    "доступнее индивидуальных занятий. На пробном уроке можно спокойно сравнить формат и "
+    "преподавателя, без обязательства продолжать."
+)
 _FALLBACK_CONTACT = (
-    "Отлично! Оставьте, пожалуйста, имя и номер WhatsApp или Telegram — администратор свяжется с вами "
-    "и подберёт удобное время для пробного урока."
+    "Отлично! Оставьте, пожалуйста, ваше имя и номер WhatsApp или Telegram — администратор свяжется "
+    "с вами и подберёт удобное время для пробного урока."
+)
+# Contact already collected — acknowledge it, never ask again, route to admin.
+_FALLBACK_CONTACT_RECEIVED = (
+    "Спасибо, контакт получен! Передаю заявку администратору — он свяжется с вами и предложит "
+    "ближайшее доступное время для пробного урока."
+)
+_FALLBACK_CONTACT_RECEIVED_ASK_DETAILS = (
+    _FALLBACK_CONTACT_RECEIVED
+    + " Подскажите, пожалуйста, как к вам обращаться и сколько лет ученику?"
+)
+_FALLBACK_ADMIN_HAS_CONTACT = (
+    "Детали уточню у администратора — контакт у нас уже есть, свяжемся с вами и поможем подобрать "
+    "подходящий вариант."
 )
 _FALLBACK_GENERAL = (
-    "Подскажу детали точнее с помощью администратора. Оставьте, пожалуйста, имя и номер WhatsApp или "
-    "Telegram — мы свяжемся с вами и поможем."
+    "Подскажу детали точнее с помощью администратора. Оставьте, пожалуйста, ваше имя и номер "
+    "WhatsApp или Telegram — мы свяжемся с вами и поможем."
 )
 _FALLBACK_OFFENSIVE = (
     "Я могу помочь с вопросами по обучению в Alem English Academy. "
@@ -286,22 +360,41 @@ _FALLBACK_GENERAL_ADVICE = (
 )
 
 
-def build_safe_fallback(planner: dict) -> str:
-    """Intent-aware safe answer used when generation/repair fails."""
+def build_safe_fallback(planner: dict, state: ConversationState | None = None) -> str:
+    """Intent-aware safe answer used when generation/repair fails.
+
+    ``state`` (when available) makes the fallback contact-aware: once the user
+    has left a phone/Telegram, no fallback may ask for the contact again — it
+    acknowledges the contact and routes the request to the administrator.
+    """
     intent = (planner or {}).get("current_intent", "unknown")
+    contact_known = bool(state is not None and getattr(state, "contact", ""))
+
     if intent == "offensive":
         return _FALLBACK_OFFENSIVE
     if intent == "ask_language_availability":
         return _FALLBACK_LANGUAGE
     if intent == "ask_general_advice":
         return _FALLBACK_GENERAL_ADVICE
+    if intent in ("price_objection", "compare_competitor"):
+        return _FALLBACK_PRICE_OBJECTION
+    if intent in ("contact", "wants_trial"):
+        if contact_known:
+            ask_details = (
+                state is not None
+                and state.user_role == "parent"
+                and not state.is_known("student_age")
+            )
+            return (
+                _FALLBACK_CONTACT_RECEIVED_ASK_DETAILS if ask_details
+                else _FALLBACK_CONTACT_RECEIVED
+            )
+        return _FALLBACK_CONTACT
+    if intent in ("objection", "correction"):
+        return _FALLBACK_GUARANTEE
     if intent in (
         "ask_price", "ask_all_prices", "ask_relevant_price",
         "ask_format", "ask_program", "ask_comparison", "compare_options",
     ):
-        return _FALLBACK_PRICE_FORMAT
-    if intent in ("objection", "price_objection", "correction"):
-        return _FALLBACK_GUARANTEE
-    if intent in ("contact", "wants_trial"):
-        return _FALLBACK_CONTACT
-    return _FALLBACK_GENERAL
+        return _FALLBACK_ADMIN_HAS_CONTACT if contact_known else _FALLBACK_PRICE_FORMAT
+    return _FALLBACK_ADMIN_HAS_CONTACT if contact_known else _FALLBACK_GENERAL

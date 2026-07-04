@@ -225,7 +225,7 @@ async def handle_english_school_chat(
         except asyncio.TimeoutError:
             writer_timeout = True
             logger.warning("english_school_chat: writer timed out")
-            answer = build_safe_fallback(planner)
+            answer = build_safe_fallback(planner, state)
 
         validation = validate_answer(answer, state, planner)
 
@@ -243,11 +243,11 @@ async def handle_english_school_chat(
                 )
                 validation = validate_answer(answer, state, planner)
                 if validation.failed:
-                    answer = build_safe_fallback(planner)
+                    answer = build_safe_fallback(planner, state)
             except asyncio.TimeoutError:
                 repair_timeout = True
                 logger.warning("english_school_chat: repair writer timed out")
-                answer = build_safe_fallback(planner)
+                answer = build_safe_fallback(planner, state)
 
         fallback_reason: str | None = (
             "planner_timeout" if planner_timeout

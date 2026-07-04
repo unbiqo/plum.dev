@@ -413,7 +413,7 @@ const en: Dict = {
     subheadline:
       'DamiWorks builds AI employees that reply to customers, qualify leads, follow up, and hand off warm leads to your team.',
     ctaPrimary: { label: 'Try live demo →', href: '#demo' },
-    ctaSecondary: { label: 'See pricing', href: '#pricing' },
+    ctaSecondary: { label: 'Discuss your project', href: '#contact' },
     trustBadges: [],
     chat: {
       headerTitle: 'AI receptionist',
@@ -1011,7 +1011,7 @@ const ru: Dict = {
     subheadline:
       'DamiWorks создаёт AI-сотрудников, которые отвечают клиентам, квалифицируют лиды, делают follow-up и передают тёплые заявки вашей команде.',
     ctaPrimary: { label: 'Попробовать демо →', href: '#demo' },
-    ctaSecondary: { label: 'Посмотреть цены', href: '#pricing' },
+    ctaSecondary: { label: 'Обсудить задачу', href: '#contact' },
     trustBadges: [],
     chat: {
       headerTitle: 'AI-администратор',

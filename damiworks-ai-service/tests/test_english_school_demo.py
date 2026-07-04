@@ -978,6 +978,236 @@ def test_safe_fallback_for_general_advice_has_no_admin_or_contact_push() -> None
     assert not res.failed, res.fix
 
 
+# ---------------------------------------------------------------------------
+# Round 6: adult contact, contact-aware fallbacks, booking, format, greeting
+# ---------------------------------------------------------------------------
+
+def test_guardrail_rejects_child_contact_request() -> None:
+    # "его имя и номер телефона" after "хочу внука записать" — must fail.
+    res = validate_answer(
+        "Отлично! Чтобы записать внука, мне понадобится его имя и номер телефона в WhatsApp или Telegram.",
+        ConversationState(),
+        _default_planner(current_intent="wants_trial"),
+    )
+    assert res.failed and not res.checks["no_child_contact_request"]
+
+
+def test_guardrail_accepts_adult_contact_request() -> None:
+    res = validate_answer(
+        "Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram для связи.",
+        ConversationState(),
+        _default_planner(current_intent="wants_trial"),
+    )
+    assert res.checks["no_child_contact_request"] is True
+    assert not res.failed, res.fix
+
+
+def test_orchestrator_repairs_child_contact_wording() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="wants_trial", recommended_next_step="ask_contact"),
+        writer_texts=[
+            "Отлично! Мне понадобится его имя и номер телефона в WhatsApp.",  # child contact → fails
+            "Отлично! Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram для связи.",  # adult → passes
+        ],
+    )
+    resp = _run(handle_english_school_chat(gem, _request("Хорошо. Я хочу внука записать")))
+    assert gem.writer_calls == 2
+    assert resp.metadata["repaired_answer"] is True
+    low = resp.answer.casefold()
+    assert "его имя" not in low and "его номер" not in low
+    assert "ваше имя" in low
+
+
+def test_no_contact_reask_after_phone_provided() -> None:
+    # Even when the writer keeps re-asking for the contact and the safe fallback
+    # kicks in, the final answer must NOT ask for the contact again.
+    history = [
+        _msg("user", "Хочу записать внука"),
+        _msg("assistant", "Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram для связи."),
+    ]
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="contact"),
+        writer_texts=[
+            "Оставьте, пожалуйста, имя и номер WhatsApp или Telegram.",  # re-asks → fails
+            "Хорошо! Оставьте ваш контакт для связи.",                    # still re-asks → fails
+        ],
+    )
+    resp = _run(handle_english_school_chat(
+        gem, _request("запишите внука на ближайший урок +7777282882", history=history)
+    ))
+    low = resp.answer.casefold()
+    assert "оставьте" not in low
+    assert "администратор" in low
+    assert resp.lead_status == "contact_collected"
+
+
+def test_booking_with_phone_acknowledged_and_routed_to_admin() -> None:
+    good = (
+        "Спасибо, номер записала! Заявка принята — администратор свяжется с вами и предложит "
+        "ближайшее доступное время пробного урока. Подскажите, как к вам обращаться и сколько лет внуку?"
+    )
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="contact", slots={"user_role": "parent"}),
+        writer_texts=[good],
+    )
+    resp = _run(handle_english_school_chat(gem, _request("запишите внука на ближайший урок +7777282882")))
+    assert resp.answer == good
+    assert resp.metadata["validation_result"]["failed"] is False
+    assert resp.lead_status == "contact_collected"
+
+
+def test_guardrail_blocks_invented_availability() -> None:
+    # The bot must not confirm a slot or claim free places — admin's job.
+    res = validate_answer(
+        "Отлично, записал вас на завтра в 15:00 — есть свободное место в группе.",
+        ConversationState(),
+        _default_planner(current_intent="wants_trial"),
+    )
+    assert res.failed and not res.checks["no_invented_availability"]
+
+    res2 = validate_answer(
+        "Заявка принята — администратор подтвердит ближайшее доступное время пробного урока.",
+        ConversationState(),
+        _default_planner(current_intent="wants_trial"),
+    )
+    assert res2.checks["no_invented_availability"] is True
+
+
+def test_format_not_confirmed_from_competitor_price_comparison() -> None:
+    state = ConversationState()
+    apply_planner_updates(
+        state,
+        _default_planner(current_intent="compare_competitor", slots={"format_preference": "individual"}),
+    )
+    assert state.format_preference == "unknown"
+
+
+def test_format_not_confirmed_from_price_objection() -> None:
+    state = ConversationState()
+    apply_planner_updates(
+        state,
+        _default_planner(current_intent="price_objection", slots={"format_preference": "individual"}),
+    )
+    assert state.format_preference == "unknown"
+
+
+def test_format_still_set_on_explicit_choice() -> None:
+    state = ConversationState()
+    apply_planner_updates(
+        state,
+        _default_planner(current_intent="wants_trial", slots={"format_preference": "individual"}),
+    )
+    assert state.format_preference == "individual"
+
+
+def test_price_objection_fallback_is_commercial_not_generic() -> None:
+    fb = build_safe_fallback(_default_planner(current_intent="price_objection"))
+    low = fb.casefold()
+    assert "мини-групп" in low and "пробн" in low
+    assert "₸" not in fb and "гаранти" not in low
+    assert "точный результат" not in low  # old generic deflection
+    # It must pass the guardrail even with a price-repeat ban active.
+    res = validate_answer(
+        fb, ConversationState(),
+        _default_planner(current_intent="price_objection", must_not_repeat=["individual_price"]),
+    )
+    assert not res.failed, res.fix
+
+
+def test_competitor_price_objection_falls_back_commercially() -> None:
+    # Writer keeps repeating a banned price → safe fallback must be the
+    # commercial objection answer, not the generic "результат зависит..." text.
+    history = [_msg("assistant", "Индивидуально — 9 500 ₸ за 60 минут, пакет из 8 — 72 000 ₸.")]
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="compare_competitor", must_not_repeat=["individual_price"]),
+        writer_texts=[
+            "Индивидуально у нас 9 500 ₸ — это лучше, чем 7000.",
+            "Наши занятия стоят 9 500 ₸, зато качество выше.",
+        ],
+    )
+    resp = _run(handle_english_school_chat(
+        gem, _request("Чё так дорого? У меня возле дома инд стоит 7000", history=history)
+    ))
+    assert "9 500" not in resp.answer
+    low = resp.answer.casefold()
+    assert "мини-групп" in low
+    assert "точный результат" not in low
+
+
+def test_guardrail_rejects_repeated_greeting_mid_conversation() -> None:
+    state = ConversationState(greeting_already_sent=True)
+    res = validate_answer(
+        "Здравствуйте! Стоимость зависит от программы — групповые от 39 000 ₸ в месяц.",
+        state,
+        _default_planner(current_intent="ask_relevant_price"),
+    )
+    assert res.failed and not res.checks["no_repeated_greeting"]
+
+
+def test_greeting_allowed_on_first_turn() -> None:
+    res = validate_answer(
+        "Здравствуйте! Расскажу о программах школы.",
+        ConversationState(),  # greeting_already_sent=False → check not applied
+        _default_planner(),
+    )
+    assert res.checks.get("no_repeated_greeting") is None
+    assert not res.failed, res.fix
+
+
+def test_build_state_sets_greeting_flag() -> None:
+    history = [
+        _msg("assistant", "Здравствуйте! Я помощник Alem English Academy."),
+        _msg("user", "привет"),
+    ]
+    assert build_conversation_state(history, "Сколько стоит?").greeting_already_sent is True
+    assert build_conversation_state([], "привет").greeting_already_sent is False
+
+
+def test_orchestrator_repairs_repeated_greeting() -> None:
+    history = [
+        _msg("assistant", "Здравствуйте! Я помощник Alem English Academy. Чем могу помочь?"),
+        _msg("user", "Хочу внука записать"),
+        _msg("assistant", "Подскажите, сколько лет внуку?"),
+    ]
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_relevant_price"),
+        writer_texts=[
+            "Здравствуйте! Групповые занятия стоят от 39 000 ₸ в месяц.",  # greets again → fails
+            "Групповые занятия стоят от 39 000 ₸ в месяц, индивидуальные — 9 500 ₸ за занятие.",
+        ],
+    )
+    resp = _run(handle_english_school_chat(gem, _request("Сколько будет стоить?", history=history)))
+    assert gem.writer_calls == 2
+    assert not resp.answer.casefold().startswith("здравствуйте")
+    assert "39 000" in resp.answer
+
+
+def test_turn_plan_contains_contact_received_rule() -> None:
+    state = ConversationState(contact="+7777282882")
+    plan = build_turn_plan(
+        state,
+        _default_planner(current_intent="contact", recommended_next_step="ask_contact"),
+    )
+    assert "КОНТАКТ УЖЕ ПОЛУЧЕН" in plan
+    assert "Следующий шаг" not in plan  # ask_contact suppressed for known contact
+
+
+def test_safe_fallback_contact_aware() -> None:
+    state = ConversationState(contact="+7777282882")
+    for intent in ("contact", "wants_trial", "ask_price", "smalltalk"):
+        fb = build_safe_fallback(_default_planner(current_intent=intent), state)
+        low = fb.casefold()
+        assert "оставьте" not in low, intent
+        assert "имя и номер" not in low, intent
+    # Age/name details asked only for a parent with unknown student age.
+    parent = ConversationState(contact="+7777282882", user_role="parent")
+    fb = build_safe_fallback(_default_planner(current_intent="wants_trial"), parent)
+    assert "сколько лет" in fb.casefold()
+    parent_with_age = ConversationState(contact="+7777282882", user_role="parent", student_age="10")
+    fb2 = build_safe_fallback(_default_planner(current_intent="wants_trial"), parent_with_age)
+    assert "сколько лет" not in fb2.casefold()
+
+
 def test_orchestrator_repairs_when_writer_violates_do_not_ask_location() -> None:
     # Planner knows the district and forbids asking it again; the writer still asks.
     # The guardrail must catch it and the repair must fix it.
