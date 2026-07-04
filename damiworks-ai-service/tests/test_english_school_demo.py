@@ -27,7 +27,11 @@ from app.english_school_kb import (
     format_kb_context,
     get_full_kb_context,
 )
-from app.english_school_planner import plan_conversation_turn, reclassify_general_question
+from app.english_school_planner import (
+    plan_conversation_turn,
+    reclassify_discount_question,
+    reclassify_general_question,
+)
 from app.english_school_state import (
     ConversationState,
     apply_planner_updates,
@@ -1206,6 +1210,125 @@ def test_safe_fallback_contact_aware() -> None:
     parent_with_age = ConversationState(contact="+7777282882", user_role="parent", student_age="10")
     fb2 = build_safe_fallback(_default_planner(current_intent="wants_trial"), parent_with_age)
     assert "сколько лет" not in fb2.casefold()
+
+
+# ---------------------------------------------------------------------------
+# Round 7: discount questions (crash path), cheaper options, group objection
+# ---------------------------------------------------------------------------
+
+def test_discount_reclassifier_retags_price_intent() -> None:
+    plan = _default_planner(current_intent="ask_price")
+    out = reclassify_discount_question("А скидка на индивидуальные?", plan)
+    assert out["current_intent"] == "ask_discount"
+
+
+def test_discount_reclassifier_ignores_plain_price_question() -> None:
+    plan = reclassify_discount_question(
+        "сколько стоят индивидуальные занятия?", _default_planner(current_intent="ask_price")
+    )
+    assert plan["current_intent"] == "ask_price"
+
+
+def test_discount_reclassifier_leaves_protected_intents() -> None:
+    for intent in ("contact", "wants_trial", "compare_competitor", "offensive"):
+        plan = reclassify_discount_question("а скидка есть?", _default_planner(current_intent=intent))
+        assert plan["current_intent"] == intent
+
+
+def test_discount_question_honest_answer_passes_without_price() -> None:
+    # Regression for the production crash: «А скидка на индивидуальные?» was
+    # filed under ask_price, the price-present check rejected the honest no-₸
+    # answer, and the repair loop pushed the turn past the frontend timeout.
+    honest = (
+        "Скидок на индивидуальные занятия у нас нет. Есть семейная скидка 10% на групповой "
+        "формат для второго ребёнка. Если хотите, администратор уточнит дополнительные условия."
+    )
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_price"), writer_texts=[honest])
+    resp = _run(handle_english_school_chat(gem, _request("А скидка на индивидуальные?")))
+    assert resp.answer == honest
+    assert gem.writer_calls == 1  # no repair loop
+    assert resp.metadata["current_intent"] == "ask_discount"
+    assert resp.metadata["validation_result"]["failed"] is False
+
+
+def test_discount_question_invented_percent_gets_repaired() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_discount"),
+        writer_texts=[
+            "Конечно! Могу предложить скидку 20% на индивидуальные занятия.",  # invented → fails
+            "Скидок на индивидуальные нет, но пакет из 8 занятий — 72 000 ₸ — выгоднее разовых.",
+        ],
+    )
+    resp = _run(handle_english_school_chat(gem, _request("А скидка на индивидуальные?")))
+    assert gem.writer_calls == 2
+    assert resp.metadata["repaired_answer"] is True
+    assert "20%" not in resp.answer
+
+
+def test_discount_worst_case_returns_safe_fallback_not_error() -> None:
+    # Both writer attempts hallucinate promos → deterministic discount fallback,
+    # never an exception, never a contact push, no invented numbers.
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_discount"),
+        writer_texts=[
+            "Дам вам скидку 30% и рассрочку!",
+            "Могу предложить специальную цену со скидкой 25%.",
+        ],
+    )
+    resp = _run(handle_english_school_chat(gem, _request("Скидки есть?")))
+    assert resp.answer == build_safe_fallback(_default_planner(current_intent="ask_discount"))
+    assert "30" not in resp.answer and "25" not in resp.answer
+    assert "рассрочк" not in resp.answer.casefold()
+
+
+def test_discount_fallback_is_safe_and_graceful() -> None:
+    fb = build_safe_fallback(_default_planner(current_intent="ask_discount"))
+    low = fb.casefold()
+    assert "администратор" in low
+    assert "10%" in fb          # the only KB-backed discount
+    assert "пакет" in low       # package economy, not a "discount"
+    assert "₸" not in fb        # no hardcoded prices in the fallback
+    res = validate_answer(fb, ConversationState(), _default_planner(current_intent="ask_discount"))
+    assert not res.failed, res.fix
+
+
+def test_cheaper_option_answer_passes_guardrails() -> None:
+    # «А нет подешевле варианта?» — mini-group + package economy is a safe answer.
+    answer = (
+        "Есть два варианта: мини-группы по 4–6 человек дешевле индивидуальных занятий, а если "
+        "важен именно формат один-на-один — пакет из 8 занятий за 72 000 ₸ выгоднее, чем "
+        "разовые уроки."
+    )
+    res = validate_answer(answer, ConversationState(), _default_planner(current_intent="price_objection"))
+    assert not res.failed, res.fix
+
+
+def test_group_objection_individual_first_recommendation_passes() -> None:
+    # «Я плохо усваиваю материал в группе» — individual as the main fit,
+    # package for budget, mini-group only as a soft aside.
+    answer = (
+        "Раз в группе усваивать сложно, индивидуальные занятия подойдут лучше: преподаватель "
+        "работает только с вами и в вашем темпе. Разовое занятие — 9 500 ₸, пакет из 8 — "
+        "72 000 ₸, он выгоднее. Начать можно с бесплатного пробного урока в индивидуальном формате."
+    )
+    res = validate_answer(answer, ConversationState(), _default_planner(current_intent="objection"))
+    assert not res.failed, res.fix
+
+
+def test_kb_backs_claimed_school_facts() -> None:
+    # The transcript claims flagged as potential hallucinations are all in the
+    # KB — pin that so future KB edits don't silently orphan writer claims.
+    kb = get_full_kb_context().casefold()
+    for fact in ("zoom", "гибрид", "от 3 лет", "8 недель", "филиал"):
+        assert fact in kb, fact
+
+
+def test_stage_timeouts_fit_frontend_budget() -> None:
+    # planner + writer + repair (each worst-case) + instant fallback must stay
+    # inside the frontend proxy abort window with margin.
+    from app.english_school_demo import _PLANNER_TIMEOUT, _REPAIR_TIMEOUT, _WRITER_TIMEOUT
+
+    assert _PLANNER_TIMEOUT + _WRITER_TIMEOUT + _REPAIR_TIMEOUT <= 30
 
 
 def test_orchestrator_repairs_when_writer_violates_do_not_ask_location() -> None:

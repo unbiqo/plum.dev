@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
+// The English School demo turn can take three sequential LLM calls (planner +
+// writer + repair) before its safe fallback; give the proxy enough headroom so
+// a slow-but-successful backend answer is never turned into a generic error.
+export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
   const contentType = req.headers.get('content-type') ?? ''
@@ -52,7 +56,7 @@ export async function POST(req: NextRequest) {
   const fastApiUrl = process.env.FASTAPI_URL ?? (process.env.NODE_ENV === 'production' ? null : 'http://localhost:8010')
   if (!fastApiUrl) return NextResponse.json({ error: 'FASTAPI_URL_not_configured' }, { status: 500 })
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30_000)
+  const timeout = setTimeout(() => controller.abort(), 55_000)
 
   try {
     const res = await fetch(`${fastApiUrl}/api/v1/chat`, {

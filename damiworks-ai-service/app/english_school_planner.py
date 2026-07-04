@@ -29,6 +29,7 @@ INTENTS = (
     "ask_price",
     "ask_all_prices",       # user explicitly asks for all prices / full price list
     "ask_relevant_price",   # broad price question without specific context
+    "ask_discount",         # "есть скидки?", "а скидка на индивидуальные?"
     "ask_format",
     "ask_program",
     "ask_language_availability",  # "А французский?", "есть немецкий?"
@@ -192,6 +193,19 @@ _PLANNER_SYSTEM = """\
     практика, стартовый уровень) и мягко предложить диагностику или подходящую программу».
   * Вопросы о ФАКТАХ ШКОЛЫ (точные цены, расписание, свободные группы, адреса, преподаватели,
     скидки, длительность конкретной программы школы) — это НЕ ask_general_advice.
+- ask_discount: вопрос про скидки, акции, промокоды («есть скидки?», «а скидка на индивидуальные?»,
+  «какие акции?»).
+  * В базе есть ТОЛЬКО: бесплатный пробный урок и семейная скидка 10% на групповой формат для
+    второго ребёнка из одной семьи. Других скидок НЕТ — не изобретай.
+  * Пакет из 8 индивидуальных занятий (72 000 ₸) выгоднее разовых — это пакетная цена, НЕ скидка.
+  * Запрос «большой скидки» или особых условий → предложи уточнить у администратора.
+  * НЕ ставь ask_price — вопрос о скидке не требует перечислять цены.
+- «Плохо усваиваю в группе» / «группа мне не подходит»: current_intent = objection или ask_format.
+  * response_goal = «рекомендовать индивидуальные занятия как основной вариант (формат
+    один-на-один, свой темп); для бюджета — пакет из 8 занятий; мини-группу упомянуть только
+    мягко, как запасной вариант»
+  * НЕ предлагай мини-группу как основную рекомендацию — пользователь только что сказал,
+    что группа ему не подходит.
 - ask_language_availability: пользователь спрашивает про другой язык (французский, испанский,
   немецкий, китайский и т.д.).
   * response_goal = «сообщить, что в базе только английский; посоветовать уточнить у администратора»
@@ -281,6 +295,41 @@ def reclassify_general_question(message: str, plan: dict) -> dict:
         "затем мягко предложить диагностику или подходящую программу."
     )
     plan["reason"] = ((plan.get("reason") or "") + " | general_advice_reclassified").strip(" |")
+    return plan
+
+
+# ---------------------------------------------------------------------------
+# Deterministic reclassifier — discount/promo questions
+# ---------------------------------------------------------------------------
+# «А скидка на индивидуальные?» filed under ask_price forces the price-present
+# guardrail on an honest "no discounts" answer (no ₸ amount) → repair loop →
+# slow turn → frontend proxy timeout → generic error. Retagging to ask_discount
+# keeps the turn on a single fast writer pass with the promo guardrail intact.
+
+_DISCOUNT_MSG_RE = re.compile(r"скидк|\bакци|промокод", re.IGNORECASE)
+_DISCOUNT_RECLASS_INTENTS = frozenset({
+    "ask_price", "ask_all_prices", "ask_relevant_price", "ask_format",
+    "price_objection", "compare_options", "answer_question", "qualify", "unknown",
+})
+
+
+def reclassify_discount_question(message: str, plan: dict) -> dict:
+    """Deterministically retag discount/promo questions to ask_discount."""
+    if plan.get("current_intent") == "ask_discount":
+        return plan
+    if plan.get("current_intent") not in _DISCOUNT_RECLASS_INTENTS:
+        return plan
+    if not _DISCOUNT_MSG_RE.search(message or ""):
+        return plan
+
+    plan["current_intent"] = "ask_discount"
+    plan["response_goal"] = (
+        "Честно ответить про скидки, называя только условия из базы (бесплатный пробный урок; "
+        "семейная скидка 10% на групповой формат для второго ребёнка). Никаких других скидок "
+        "не изобретать. Если речь про индивидуальные — отметить, что пакет из 8 занятий "
+        "выгоднее разовых, и предложить уточнить дополнительные условия у администратора."
+    )
+    plan["reason"] = ((plan.get("reason") or "") + " | discount_reclassified").strip(" |")
     return plan
 
 

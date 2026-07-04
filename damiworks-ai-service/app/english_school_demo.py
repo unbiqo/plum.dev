@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING
 
 from .english_school_guardrails import build_safe_fallback, validate_answer
 from .english_school_kb import get_full_kb_context
-from .english_school_planner import plan_conversation_turn, reclassify_general_question
+from .english_school_planner import (
+    plan_conversation_turn,
+    reclassify_discount_question,
+    reclassify_general_question,
+)
 from .english_school_state import ConversationState, apply_planner_updates, build_conversation_state
 from .english_school_writer import write_response
 from .schemas import ChatHistoryMessage, ChatResponse, Route
@@ -37,8 +41,13 @@ logger = logging.getLogger(__name__)
 
 ENGLISH_SCHOOL_INSTANCE_ID = "damiworks_english_school_demo"
 
-# Per-call timeout in seconds. Keeps any single turn from hanging indefinitely.
-_LLM_TIMEOUT = 25.0
+# Per-stage LLM timeouts in seconds. The frontend proxy aborts the whole HTTP
+# request (60s budget); the worst case here — planner + writer + repair, each
+# hitting its limit and degrading to an instant fallback — must stay well
+# inside that budget so the user always gets an answer, never a generic error.
+_PLANNER_TIMEOUT = 8.0
+_WRITER_TIMEOUT = 12.0
+_REPAIR_TIMEOUT = 8.0
 
 # ---------------------------------------------------------------------------
 # Conversation status — current sales moment, changes every turn
@@ -48,6 +57,7 @@ _INTENT_TO_CONV_STATUS: dict[str, str] = {
     "ask_price":              "intent_detected",
     "ask_all_prices":         "intent_detected",
     "ask_relevant_price":     "intent_detected",
+    "ask_discount":           "intent_detected",
     "compare_competitor":     "intent_detected",
     "compare_options":        "intent_detected",
     "ask_comparison":         "intent_detected",
@@ -199,7 +209,7 @@ async def handle_english_school_chat(
         try:
             planner = await asyncio.wait_for(
                 plan_conversation_turn(message, history, state, kb_context, gemini),
-                timeout=_LLM_TIMEOUT,
+                timeout=_PLANNER_TIMEOUT,
             )
         except asyncio.TimeoutError:
             planner_timeout = True
@@ -208,11 +218,12 @@ async def handle_english_school_chat(
             )
             planner = _safe_planner_fallback(message)
 
-        # Deterministic safety net: a general "how fast can I go A2 -> B2" type
-        # question must never sit in a price intent (the price guardrail would
-        # force the admin fallback). Covers planner misclassification, planner
-        # fallback and planner timeout alike.
+        # Deterministic safety nets (cover planner misclassification, planner
+        # fallback and planner timeout alike): a general "how fast can I go
+        # A2 -> B2" question must never sit in a price intent, and a discount
+        # question must never trigger the price-present check.
         planner = reclassify_general_question(message, planner)
+        planner = reclassify_discount_question(message, planner)
 
         state = apply_planner_updates(state, planner)
 
@@ -220,7 +231,7 @@ async def handle_english_school_chat(
         try:
             answer = await asyncio.wait_for(
                 write_response(message, history, state, planner, kb_context, gemini),
-                timeout=_LLM_TIMEOUT,
+                timeout=_WRITER_TIMEOUT,
             )
         except asyncio.TimeoutError:
             writer_timeout = True
@@ -239,7 +250,7 @@ async def handle_english_school_chat(
                         message, history, state, planner, kb_context, gemini,
                         repair=validation.fix,
                     ),
-                    timeout=_LLM_TIMEOUT,
+                    timeout=_REPAIR_TIMEOUT,
                 )
                 validation = validate_answer(answer, state, planner)
                 if validation.failed:

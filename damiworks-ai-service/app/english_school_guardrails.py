@@ -314,6 +314,15 @@ _FALLBACK_GUARANTEE = (
     "Точный результат зависит от стартового уровня, цели и регулярности, поэтому мы начинаем с "
     "бесплатной диагностики на пробном уроке и предлагаем реалистичный план. Хотите, подберём удобное время?"
 )
+# Discount question — never invent a promo, never crash: state only the two
+# KB-backed facts (free trial, family 10% on group format) plus the package
+# economy, and offer the administrator for anything beyond that.
+_FALLBACK_DISCOUNT = (
+    "Не буду обещать скидку, которой нет в наших условиях. Из постоянного: пробный урок "
+    "бесплатный, а при обучении двух детей из одной семьи действует скидка 10% на групповой "
+    "формат. Пакет из 8 индивидуальных занятий выходит выгоднее разовых уроков. Дополнительные "
+    "условия могу уточнить у администратора — напишите, если интересно."
+)
 # Price objection / competitor comparison — a useful commercial answer, not a
 # generic deflection. No prices, no guarantees, no competitor claims.
 _FALLBACK_PRICE_OBJECTION = (
@@ -376,6 +385,8 @@ def build_safe_fallback(planner: dict, state: ConversationState | None = None) -
         return _FALLBACK_LANGUAGE
     if intent == "ask_general_advice":
         return _FALLBACK_GENERAL_ADVICE
+    if intent == "ask_discount":
+        return _FALLBACK_DISCOUNT
     if intent in ("price_objection", "compare_competitor"):
         return _FALLBACK_PRICE_OBJECTION
     if intent in ("contact", "wants_trial"):
