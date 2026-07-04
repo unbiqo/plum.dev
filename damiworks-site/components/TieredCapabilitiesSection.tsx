@@ -14,7 +14,7 @@ const TIER_NUMBER_COLOR = [
 
 export default function TieredCapabilitiesSection({ dict }: { dict: DictCapabilities }) {
   return (
-    <section className="py-24 bg-surface border-t border-border-col">
+    <section id="formats" className="scroll-mt-20 py-24 bg-surface border-t border-border-col">
       <div className="max-w-6xl mx-auto px-6">
         <div className="text-center mb-12">
           <h2 className="text-3xl lg:text-4xl font-bold text-primary mb-3">{dict.headline}</h2>

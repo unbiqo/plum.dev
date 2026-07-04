@@ -9,55 +9,50 @@ export default function PricingSection({ dict }: { dict: DictPricing }) {
     return (
       <section id="pricing" className="scroll-mt-20 py-24 bg-surface border-t border-border-col">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="bg-bg border border-border-col rounded-2xl p-6 sm:p-8 lg:p-10 shadow-sm">
-            <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-10 lg:gap-14 items-start">
-              <div>
-                <div className="inline-flex items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold text-accent mb-5">
-                  {pilot.eyebrow}
-                </div>
-                <h2 className="text-3xl lg:text-4xl font-bold text-primary mb-4">
-                  {pilot.title}
-                </h2>
-                <p className="text-lg text-secondary leading-relaxed mb-5">
-                  {pilot.subtitle}
-                </p>
-                <p className="text-secondary leading-relaxed mb-6 whitespace-pre-line">{pilot.body}</p>
-                <div className="rounded-2xl bg-surface border border-border-col p-5 mb-7">
-                  <p className="text-sm font-medium text-primary leading-relaxed">
-                    {pilot.pricingLine}
-                  </p>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <a
-                    href="#contact"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90"
-                  >
-                    {pilot.ctaPrimary}
-                    <ArrowRight size={16} aria-hidden="true" />
-                  </a>
-                  <a
-                    href="#demo"
-                    className="inline-flex items-center justify-center rounded-xl border border-border-col px-5 py-3 text-sm font-medium text-primary transition-colors hover:bg-surface"
-                  >
-                    {pilot.ctaSecondary}
-                  </a>
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-surface border border-border-col p-6">
-                <h3 className="text-xl font-bold text-primary mb-5">{pilot.includesTitle}</h3>
-                <ul className="space-y-4">
-                  {pilot.bullets.map((item) => (
-                    <li key={item} className="flex items-start gap-3 text-sm text-secondary">
-                      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
-                        <Check size={15} aria-hidden="true" />
-                      </span>
-                      <span className="leading-relaxed">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <div className="max-w-3xl mb-10">
+            <div className="inline-flex items-center rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold text-accent mb-5">
+              {pilot.eyebrow}
             </div>
+            <h2 className="text-3xl lg:text-4xl font-bold text-primary mb-4">
+              {pilot.title}
+            </h2>
+            <p className="text-lg text-secondary leading-relaxed mb-5">
+              {pilot.subtitle}
+            </p>
+            <p className="text-secondary leading-relaxed whitespace-pre-line">{pilot.body}</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+            {pilot.cards.map((card) => (
+              <div key={card.label} className="bg-bg border border-border-col rounded-2xl p-6">
+                <div className="text-xs font-semibold uppercase tracking-wide text-accent mb-3">
+                  {card.label}
+                </div>
+                <h3 className="text-base font-bold text-primary mb-2">{card.title}</h3>
+                <p className="text-sm text-secondary leading-relaxed">{card.text}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-l-2 border-accent pl-5 mb-7">
+            <p className="text-sm font-medium text-primary leading-relaxed">{pilot.pricingLine}</p>
+            <p className="text-sm text-secondary leading-relaxed mt-3">{pilot.adaptNote}</p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <a
+              href="#contact"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90"
+            >
+              {pilot.ctaPrimary}
+              <ArrowRight size={16} aria-hidden="true" />
+            </a>
+            <a
+              href="#demo"
+              className="inline-flex items-center justify-center rounded-xl border border-border-col px-5 py-3 text-sm font-medium text-primary transition-colors hover:bg-bg"
+            >
+              {pilot.ctaSecondary}
+            </a>
           </div>
         </div>
       </section>

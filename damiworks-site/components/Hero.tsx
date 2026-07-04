@@ -16,7 +16,7 @@ export default function Hero({ dict }: { dict: DictHero }) {
             <p className="text-lg text-secondary leading-relaxed mb-8 max-w-md">
               {dict.subheadline}
             </p>
-            <div className="flex flex-wrap gap-3 mb-8">
+            <div className="flex flex-wrap gap-3 mb-3">
               <a
                 href={dict.ctaPrimary.href}
                 className="inline-flex items-center bg-accent text-white font-medium px-6 py-3 rounded-xl hover:opacity-90 transition-opacity"

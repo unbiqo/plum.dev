@@ -1,7 +1,16 @@
-import { Link2, BookOpen, Users } from 'lucide-react'
+import {
+  Link2,
+  BookOpen,
+  Users,
+  MessageCircle,
+  Zap,
+  ListChecks,
+  Phone,
+  ClipboardList,
+} from 'lucide-react'
 import type { DictHowItWorks } from '@/lib/i18n'
 
-const ICON_MAP = { Link2, BookOpen, Users } as const
+const ICON_MAP = { Link2, BookOpen, Users, MessageCircle, Zap, ListChecks, Phone, ClipboardList } as const
 
 export default function HowItWorks({ dict }: { dict: DictHowItWorks }) {
   return (
@@ -17,16 +26,16 @@ export default function HowItWorks({ dict }: { dict: DictHowItWorks }) {
           <p className="text-secondary text-lg">{dict.subheadline}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
           {dict.steps.map((step) => {
             const Icon = ICON_MAP[step.icon]
             return (
-              <div key={step.number} className="bg-bg border border-border-col rounded-2xl p-8">
+              <div key={step.number} className="bg-bg border border-border-col rounded-2xl p-6">
                 <div className="w-10 h-10 rounded-full bg-accent-soft flex items-center justify-center mb-5">
                   <Icon size={18} className="text-accent" />
                 </div>
                 <div className="text-2xl font-bold text-accent mb-2">{step.number}</div>
-                <h3 className="text-lg font-semibold text-primary mb-2">{step.title}</h3>
+                <h3 className="text-base font-semibold text-primary mb-2">{step.title}</h3>
                 <p className="text-secondary text-sm leading-relaxed">{step.description}</p>
               </div>
             )

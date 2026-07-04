@@ -57,7 +57,7 @@ export interface DictHero {
 
 export interface DictHowItWorksStep {
   number: string
-  icon: 'Link2' | 'BookOpen' | 'Users'
+  icon: 'Link2' | 'BookOpen' | 'Users' | 'MessageCircle' | 'Zap' | 'ListChecks' | 'Phone' | 'ClipboardList'
   title: string
   description: string
 }
@@ -66,6 +66,49 @@ export interface DictHowItWorks {
   headline: string
   subheadline: string
   steps: DictHowItWorksStep[]
+}
+
+// «Где обычно теряются заявки» — pain section right after the hero.
+export interface DictPain {
+  headline: string
+  emphasisTitle: string
+  emphasisText: string
+  items: string[]
+  bottomLine: string
+}
+
+// «Это не обычный чат-бот» — objection-handling comparison section.
+export interface DictVsChatbot {
+  headline: string
+  description1: string
+  description2: string
+  chatbotCard: { title: string; items: string[] }
+  aiCard: { title: string; items: string[] }
+}
+
+// «Что можно автоматизировать» — tasks, not tiers.
+export interface DictAutomate {
+  headline: string
+  actionLabel: string
+  outcomeLabel: string
+  exampleLabel: string
+  items: { title: string; description: string; outcome: string; example: string }[]
+  bottomLine: string
+}
+
+// «Что нужно от вас» — lowers the implementation fear.
+export interface DictWhatWeNeed {
+  headline: string
+  items: { number: string; title: string; description: string }[]
+  bottomLine: string
+}
+
+// «AI работает в рамках правил бизнеса» — trust/safety section.
+export interface DictTrust {
+  headline: string
+  description1: string
+  description2: string
+  cards: string[]
 }
 
 export interface DictDemoScenario {
@@ -238,7 +281,10 @@ export interface DictPilotOffer {
   body: string
   includesTitle: string
   bullets: string[]
+  cards: { label: string; title: string; text: string }[]
   pricingLine: string
+  // One example, not the whole brand: how the same approach adapts to other niches.
+  adaptNote: string
   ctaPrimary: string
   ctaSecondary: string
 }
@@ -255,6 +301,9 @@ export interface DictContact {
   headline: string
   description: string
   note: string
+  highlights: string[]
+  formTitle: string
+  formSubtitle: string
   // Calendly primary CTA — rendered only when NEXT_PUBLIC_CALENDLY_URL is set.
   calendlyButton: string
   calendlySubtext: string
@@ -262,6 +311,7 @@ export interface DictContact {
   placeholderContact: string
   placeholderBusinessType: string
   placeholderMessage: string
+  messageHelp: string
   submitButton: string
   successMessage: string
   errorMessage: string
@@ -371,10 +421,15 @@ export interface Dict {
   bookACallLabel: string
   langSwitcher: DictLangSwitcher
   hero: DictHero
+  pain: DictPain
   howItWorks: DictHowItWorks
   demo: DictDemo
+  vsChatbot: DictVsChatbot
+  automate: DictAutomate
   capabilities: DictCapabilities
   valueProp: DictValueProp
+  whatWeNeed: DictWhatWeNeed
+  trust: DictTrust
   pricing: DictPricing
   contact: DictContact
   footer: DictFooter
@@ -401,104 +456,154 @@ const en: Dict = {
   nav: [
     { label: 'How it works', href: '#how-it-works' },
     { label: 'Demo', href: '#demo' },
-    { label: 'Pricing', href: '#pricing' },
+    { label: 'Formats', href: '#formats' },
     { label: 'Contact', href: '#contact' },
   ],
   bookACallLabel: 'Book a call',
   langSwitcher: { enLabel: 'EN', ruLabel: 'RU' },
   hero: {
     eyebrow: '',
-    headlinePart1: 'An AI employee that turns inquiries ',
-    headlineAccent: 'into customers',
+    headlinePart1: 'An AI employee that keeps you from ',
+    headlineAccent: 'losing leads',
     subheadline:
-      'DamiWorks builds AI employees that reply to customers, qualify leads, follow up, and hand off warm leads to your team.',
+      'DamiWorks helps your business reply to customers 24/7, qualify leads, follow up, and hand warm requests to your team.',
     ctaPrimary: { label: 'Try live demo →', href: '#demo' },
-    ctaSecondary: { label: 'Discuss your project', href: '#contact' },
+    ctaSecondary: { label: 'Review my requests →', href: '#contact' },
     trustBadges: [],
     chat: {
       headerTitle: 'AI receptionist',
       onlineLabel: 'Online',
       leadLabel: 'New inquiry',
-      leadFieldLabels: { service: 'Service', objection: 'Objection', need: 'Need', time: 'Time', status: 'Status' },
+      leadFieldLabels: { service: 'Client', objection: 'Task', need: 'Handoff', time: 'Time', status: 'Status' },
       scenarios: [
         {
-          id: 'beauty',
+          id: 'outcome',
           messages: [
-            { from: 'user', text: 'Hi! How much is RF facial lifting?', leadStateIndex: 1 },
-            { from: 'ai',   text: 'Hi! RF facial lifting starts from ₸18,000. It helps tighten the skin and improve tone without injections or long downtime.' },
-            { from: 'user', text: "That feels a bit expensive. I'm not sure it's right for me.", leadStateIndex: 2 },
-            { from: 'ai',   text: "I understand. You can start with a short consultation: a specialist will look at your skin, explain whether RF lifting makes sense for you, and recommend the right option without unnecessary procedures." },
-            { from: 'user', text: 'Okay. Do you have any time tomorrow after 5 PM?', leadStateIndex: 3 },
-            { from: 'ai',   text: "Yes, there's an opening tomorrow at 6:30 PM. Would you like me to book you for that time?" },
-            { from: 'user', text: 'Yes, please book me.', leadStateIndex: 4 },
-            { from: 'ai',   text: "Done! You're booked for tomorrow at 6:30 PM. See you then!" },
-            { from: 'user', text: 'Thank you, goodbye.' },
+            { from: 'user', text: 'Can I book a consultation?', leadStateIndex: 1 },
+            { from: 'ai', text: 'Of course. What would you like to automate, and what time is convenient for you?', leadStateIndex: 2 },
+            { from: 'user', text: 'Instagram requests. After 5 PM works best.', leadStateIndex: 3 },
           ],
           leadStates: [
             { service: '—', objection: '—', need: '—', time: '—', status: 'New inquiry' },
-            { service: 'RF facial lifting', objection: '—', need: 'Interested in procedure', time: '—', status: 'Consultation' },
-            { service: 'RF facial lifting', objection: 'Price / hesitation', need: 'Check if procedure fits', time: '—', status: 'Warm lead' },
-            { service: 'RF facial lifting', objection: 'Consultation offered', need: 'Requested time after 5 PM', time: 'After 5 PM', status: 'Booking in progress' },
-            { service: 'RF facial lifting', objection: 'Consultation offered', need: 'Booking confirmed', time: 'Tomorrow, 6:30 PM', status: 'Booked' },
-          ],
-        },
-        {
-          id: 'education',
-          messages: [
-            { from: 'user', text: 'Hi! Do you have English classes for school students?', leadStateIndex: 1 },
-            { from: 'ai',   text: "Hi! Yes, we offer English classes for school students in small groups and one-on-one. We recommend the format based on the child's age, goal, and schedule." },
-            { from: 'user', text: "We already tried courses before, but didn't see much progress.", leadStateIndex: 2 },
-            { from: 'ai',   text: "I understand. Often the issue is not the child, but the wrong format or a program that is too general. In the trial lesson, the teacher shows how classes work, identifies the child's strengths and weak spots, and explains what plan can lead to clearer progress." },
-            { from: 'user', text: 'Okay. Is there any time this week after school?', leadStateIndex: 3 },
-            { from: 'ai',   text: "Yes, there's a trial lesson on Thursday at 4:00 PM. Would you like me to book it?" },
-            { from: 'user', text: 'Yes, please book it.', leadStateIndex: 4 },
-            { from: 'ai',   text: "Done! The trial lesson is booked for Thursday at 4:00 PM. We'll send the details and a reminder before the lesson." },
-            { from: 'user', text: 'Thank you!' },
-          ],
-          leadStates: [
-            { service: '—', objection: '—', need: '—', time: '—', status: 'New inquiry' },
-            { service: 'English for school students', objection: '—', need: 'Choose learning format', time: '—', status: 'Consultation' },
-            { service: 'English for school students', objection: 'No progress before', need: 'Trial lesson and clear plan', time: '—', status: 'Warm lead' },
-            { service: 'English for school students', objection: 'Trial lesson offered', need: 'After-school booking', time: 'After school', status: 'Booking in progress' },
-            { service: 'English for school students', objection: 'Trial lesson offered', need: 'Trial lesson confirmed', time: 'Thursday, 4:00 PM', status: 'Booked' },
+            { service: 'Aliya', objection: 'Consultation', need: '—', time: '—', status: 'New message' },
+            { service: 'Aliya', objection: 'Instagram requests', need: 'Telegram', time: 'After 5 PM', status: 'Warm lead' },
+            { service: 'Aliya', objection: 'Instagram requests', need: 'Telegram', time: 'After 5 PM', status: 'Sent to team' },
           ],
         },
       ],
     },
   },
+  pain: {
+    headline: 'Where businesses lose leads',
+    emphasisTitle: 'The cost of waiting',
+    emphasisText:
+      'Every unanswered request is not just a message. It is a potential customer who has already shown interest.',
+    items: [
+      'A customer writes in the evening and nobody replies.',
+      'The manager is busy and answers hours later.',
+      'The same questions repeat every day.',
+      'No follow-up after the first reply.',
+      'Requests are handed over without context.',
+    ],
+    bottomLine:
+      'The problem is not that the team works badly. Manual request handling simply does not scale when customers expect a fast reply.',
+  },
   howItWorks: {
-    headline: 'How it works',
-    subheadline: 'A simple process designed for busy business owners.',
+    headline: 'How an inquiry becomes a lead',
+    subheadline: 'The customer journey: from first message to a clear request for your team.',
     steps: [
       {
         number: '01',
-        icon: 'Link2',
-        title: 'Connect your channels',
-        description: 'We connect WhatsApp, Instagram and Telegram to your AI platform.',
+        icon: 'MessageCircle',
+        title: 'Customer writes',
+        description: 'On Instagram, WhatsApp, Telegram, your website or a form.',
       },
       {
         number: '02',
-        icon: 'BookOpen',
-        title: 'Train your AI employee',
-        description:
-          'We learn about your business, services and customers so the AI speaks like your team.',
+        icon: 'Zap',
+        title: 'AI replies instantly',
+        description: 'Even in the evening, at night, or when the team is busy.',
       },
       {
         number: '03',
-        icon: 'Users',
-        title: 'Receive qualified leads',
-        description: 'AI replies, qualifies, follows up and sends ready-to-buy leads straight to you.',
+        icon: 'ListChecks',
+        title: 'AI clarifies the need',
+        description: 'Asks the right questions and collects the details.',
+      },
+      {
+        number: '04',
+        icon: 'Phone',
+        title: 'AI collects contact info',
+        description: 'Name, phone, messenger, or a good time to call.',
+      },
+      {
+        number: '05',
+        icon: 'ClipboardList',
+        title: 'Team gets a summary',
+        description: 'Who wrote, what they need, when to contact them, and the next step.',
       },
     ],
   },
+  vsChatbot: {
+    headline: 'This is not a regular chatbot',
+    description1:
+      'A chatbot answers by script. An AI employee holds a conversation.',
+    description2:
+      'An AI employee understands free text, asks clarifying questions, collects data, and hands your team a clear request.',
+    chatbotCard: {
+      title: 'Chatbot',
+      items: ['Waits for buttons', 'Gets lost in free text', 'Often calls a human too early'],
+    },
+    aiCard: {
+      title: 'AI employee',
+      items: ['Understands the question', 'Clarifies details', 'Collects contact info', 'Hands off the request'],
+    },
+  },
+  automate: {
+    headline: 'What you can automate',
+    actionLabel: 'What AI does',
+    outcomeLabel: 'Business outcome',
+    exampleLabel: 'Example',
+    items: [
+      { title: 'Requests', description: 'Clarifies the need, contact details, and a convenient time.', outcome: 'Managers receive a warm request, not a raw conversation.', example: 'Customer wants a consultation, prefers after 5 PM, contact via Telegram.' },
+      { title: 'Answers', description: 'Replies to repeated questions about services, price, terms, schedule, delivery, or access.', outcome: 'The team spends less time on routine messages.', example: 'AI explains the program, start date, payment options, and what is included.' },
+      { title: 'Follow-up', description: 'Sends a careful reminder when a customer goes silent after the first answer.', outcome: 'Warm requests do not disappear after one reply.', example: '“Would you like me to send available times for a consultation?”' },
+      { title: 'Handoff', description: 'Collects the key details and sends a short summary to your team.', outcome: 'The team sees context and the next step in one place.', example: 'Name, task, channel, preferred time, and lead status.' },
+      { title: 'Integrations', description: 'Connects to CRM, spreadsheets, Telegram, WhatsApp, or internal tools when needed.', outcome: 'AI works with your real process instead of creating another place your team has to check.', example: 'A qualified request goes to Telegram and Google Sheets automatically.' },
+    ],
+    bottomLine: 'The launch format is chosen after a short scoping call.',
+  },
+  whatWeNeed: {
+    headline: 'What we need from you to launch',
+    items: [
+      { number: '01', title: 'Services and terms', description: 'What you sell, your constraints, prices, schedule, or rules.' },
+      { number: '02', title: 'Common customer questions', description: 'What people usually ask before buying or booking.' },
+      { number: '03', title: 'Communication channels', description: 'Where requests come from: website, Instagram, Telegram, WhatsApp.' },
+      { number: '04', title: 'Where to send requests', description: 'To a manager, an administrator, a spreadsheet, or a CRM.' },
+    ],
+    bottomLine: "You don't need to understand AI. We handle the setup. If something is missing, we'll help collect it during scoping.",
+  },
+  trust: {
+    headline: 'AI works within your business rules',
+    description1:
+      'The AI employee does not make complex decisions for a person. It answers routine questions, collects data, and hands the request to your team.',
+    description2:
+      'If a question is complex, sensitive, or needs a specialist, the AI hands the conversation to a human.',
+    cards: [
+      'No medical, legal, or financial conclusions',
+      'No promises beyond the knowledge base',
+      'No terms you have not confirmed',
+      'Complex cases go to your team',
+    ],
+  },
   demo: {
-    headline: 'Choose a demo',
+    headline: 'Try the AI employee live',
     subheadline:
-      'Start with the DamiWorks consultant, then explore examples of AI employees for different industries.',
+      'Ask a question in chat, take the short assessment, or see an example AI employee for a specific niche.',
     scenarios: [
       {
         id: 'damiworks',
-        label: 'DamiWorks',
+        label: 'DamiWorks consultant',
         agentName: 'DamiWorks consultant',
         messages: [
           { from: 'user', text: 'What can your AI do for my business?' },
@@ -640,54 +745,48 @@ const en: Dict = {
     },
   },
   capabilities: {
-    headline: 'What an AI employee can do',
+    headline: 'Where you can start',
     subheadline:
-      'We match the level of automation to your current process: from answers and lead handoff to qualification, follow-up, integrations, and quality control.',
-    cta: 'Not sure what you need? Take the short quiz in the DamiWorks chat.',
-    ctaLink: 'Find my package →',
+      'You do not need to build a complex system right away. We usually start with one clear scenario and expand the AI employee after the first real conversations.',
+    cta: 'Not sure which format you need? Take the short assessment in the DamiWorks chat.',
+    ctaLink: 'Take the assessment →',
     tiers: [
       {
         id: 'start',
         number: '01',
-        name: 'Pilot / Start',
-        tagline: 'Basic AI employee',
+        name: 'Starter AI employee',
+        tagline: 'To test on real conversations.',
         features: [
           { name: 'FAQ answers', description: 'Products, services, prices, delivery, booking, and terms.' },
-          { name: 'Knowledge base / FAQ', description: 'We compile the core business info: price list, services, common questions.' },
           { name: 'Contact collection', description: 'Name, phone number, product or service of interest.' },
           { name: 'Lead handoff', description: 'To manager, WhatsApp/Telegram, or Google Sheets.' },
           { name: '1 channel', description: 'WhatsApp, Instagram, Telegram, or website.' },
-          { name: 'First corrections', description: 'Adjustments based on real conversations.' },
         ],
         footerText: 'To quickly test an AI employee on real conversations without a complex integration.',
       },
       {
         id: 'sales',
         number: '02',
-        name: 'Sales Assistant',
-        tagline: 'Everything in Pilot / Start + helps you sell',
+        name: 'Sales AI employee',
+        tagline: 'When you need to qualify leads, not just answer.',
         features: [
           { name: 'Lead qualification', description: 'Understands who is ready to buy vs. just browsing.' },
           { name: 'Interest & need collection', description: 'Product, budget, preferred contact time.' },
-          { name: 'Warm lead handoff', description: 'To manager, Google Sheets, or CRM with a brief summary.' },
           { name: 'Follow-up', description: 'Soft reminders if the customer hasn\'t replied.' },
-          { name: '2–3 channels', description: 'E.g. WhatsApp + Instagram + website.' },
-          { name: 'Regular improvements', description: 'Knowledge base and scenario updates after launch.' },
+          { name: 'Warm lead handoff', description: 'To manager, Google Sheets, or CRM with a brief summary.' },
         ],
         footerText: 'When AI should not just answer, but separate warm leads from casual questions.',
       },
       {
         id: 'integrated',
         number: '03',
-        name: 'Integrated AI Employee',
-        tagline: 'Everything in Sales Assistant + integrations',
+        name: 'AI employee with integrations',
+        tagline: 'When you need CRM, spreadsheets, statuses, routing, and business rules.',
         features: [
           { name: 'CRM/API', description: 'Integration with internal business systems.' },
           { name: 'Warehouse, orders, statuses', description: 'Stock, order stage, delivery, or other data.' },
           { name: 'Routing', description: 'Different managers, departments, or scenarios.' },
           { name: 'Custom business rules', description: 'Logic tailored to real company processes.' },
-          { name: 'Multiple channels', description: 'Expansion across different customer touchpoints.' },
-          { name: 'Advanced monitoring', description: 'Quality control, stability, and complex scenario oversight.' },
         ],
         footerText:
           'When AI needs to work not only in conversations, but also with business data, rules, and teams.',
@@ -695,7 +794,7 @@ const en: Dict = {
     ],
   },
   valueProp: {
-    headline: 'Not just access to AI agents',
+    headline: 'How we implement your AI employee',
     description:
       'A platform gives you access to a tool. DamiWorks handles the implementation end to end: we analyze your process, build the knowledge base, design scenarios, connect channels, test responses, and improve the system after launch. You get a configured AI employee ready for real customer conversations, not an empty dashboard.',
     items: [
@@ -725,13 +824,12 @@ const en: Dict = {
       'Clear packages for different needs: from a first launch to lead qualification, integrations, and advanced workflows.',
     note: 'Final cost depends on project scope and complexity.',
     pilotOffer: {
-      eyebrow: 'Pilot launch',
-      title: 'AI Administrator Pilot Launch',
-      subtitle:
-        'We are currently selecting a small number of online schools and education centers for pilot AI administrator deployments.',
+      eyebrow: 'Pilot example',
+      title: 'Pilot example: courses and education projects',
+      subtitle: 'For online courses, schools, coaching programs, clubs, marathons, and self-development programs.',
       body:
-        'We first show a demo, review your programs, prices, and common customer questions, then suggest a pilot format: from a simple website AI chat to WhatsApp/Telegram handoff for qualified leads.',
-      includesTitle: 'What is included in the pilot',
+        'An AI administrator answers questions about the program, schedule, payment, access to lessons, private channels, and materials, then collects contact details and hands the request to your team.',
+      includesTitle: 'Where AI helps',
       bullets: [
         'AI answers first questions from parents and students',
         'Explains programs, prices, and formats',
@@ -739,8 +837,15 @@ const en: Dict = {
         'Books a trial lesson or consultation',
         'Hands off a warm lead to an administrator or manager',
       ],
+      cards: [
+        { label: 'Requests', title: 'Questions before purchase', text: 'AI explains the program, format, schedule, price, start date, and who the course is for.' },
+        { label: 'Access', title: 'Channels and materials', text: 'AI answers how to get access after payment, where lessons are, and what to do if something is unclear.' },
+        { label: 'Handoff', title: 'Clear next step', text: 'AI collects contact details, goal, preferred format, and sends the team a clear request.' },
+      ],
       pricingLine:
-        'Pilot pricing is discussed individually. Special terms may be available for the first schools in exchange for feedback and permission to use an anonymized case study.',
+        'Pilot format is selected after a short review of your process.',
+      adaptNote:
+        'The same approach adapts to clinics, salons, local services, online stores, and B2B services.',
       ctaPrimary: 'Discuss pilot',
       ctaSecondary: 'See school demo',
     },
@@ -823,14 +928,23 @@ const en: Dict = {
   },
   contact: {
     headline: "Let's discuss where an AI employee\ndelivers impact fastest",
-    description: "Tell us a few details and we'll show you how DamiWorks can help.",
+    description:
+      'In 20 minutes we will review your incoming requests and channels, and show which tasks to automate first.',
     note: '',
-    calendlyButton: '📅 Book a 20-minute call',
-    calendlySubtext: "or fill out the form and we'll get back to you",
+    highlights: [
+      'Review your current requests and customer channels',
+      'Find the first automation scenario',
+      'Estimate where AI can deliver the fastest effect',
+    ],
+    formTitle: 'Leave a request',
+    formSubtitle: "We'll message you in WhatsApp or Telegram.",
+    calendlyButton: 'Book a 20-minute review',
+    calendlySubtext: "Or fill in the form, and we'll message you.",
     placeholderName: 'Your name',
     placeholderContact: 'WhatsApp / Telegram',
     placeholderBusinessType: 'Select your business type',
-    placeholderMessage: 'What do you want to automate? (optional)',
+    placeholderMessage: 'For example: Instagram requests, WhatsApp replies, booking clients, repeated questions. (optional)',
+    messageHelp: "A short note is enough. We'll clarify the details ourselves.",
     submitButton: 'Send request',
     successMessage: "Thanks! We'll contact you soon.",
     errorMessage: 'Something went wrong. Please try again.',
@@ -999,103 +1113,154 @@ const ru: Dict = {
   nav: [
     { label: 'Как это работает', href: '#how-it-works' },
     { label: 'Демо', href: '#demo' },
-    { label: 'Цены', href: '#pricing' },
+    { label: 'Форматы', href: '#formats' },
     { label: 'Контакты', href: '#contact' },
   ],
   bookACallLabel: 'Записаться на звонок',
   langSwitcher: { enLabel: 'EN', ruLabel: 'RU' },
   hero: {
     eyebrow: '',
-    headlinePart1: 'AI-сотрудник, который превращает обращения ',
-    headlineAccent: 'в клиентов',
+    headlinePart1: 'AI-сотрудник, который не даёт ',
+    headlineAccent: 'терять заявки',
     subheadline:
-      'DamiWorks создаёт AI-сотрудников, которые отвечают клиентам, квалифицируют лиды, делают follow-up и передают тёплые заявки вашей команде.',
+      'DamiWorks помогает бизнесу отвечать клиентам 24/7, квалифицировать лидов, делать follow-up и передавать тёплые заявки вашей команде.',
     ctaPrimary: { label: 'Попробовать демо →', href: '#demo' },
-    ctaSecondary: { label: 'Обсудить задачу', href: '#contact' },
+    ctaSecondary: { label: 'Разобрать мои заявки →', href: '#contact' },
     trustBadges: [],
     chat: {
       headerTitle: 'AI-администратор',
       onlineLabel: 'Онлайн',
       leadLabel: 'Новая заявка',
-      leadFieldLabels: { service: 'Услуга', objection: 'Возражение', need: 'Потребность', time: 'Время', status: 'Статус' },
+      leadFieldLabels: { service: 'Клиент', objection: 'Задача', need: 'Передано', time: 'Время', status: 'Статус' },
       scenarios: [
         {
-          id: 'beauty',
+          id: 'outcome',
           messages: [
-            { from: 'user', text: 'Здравствуйте! Сколько стоит RF-лифтинг лица?', leadStateIndex: 1 },
-            { from: 'ai',   text: 'Здравствуйте! RF-лифтинг лица стоит от 18 000 ₸. Процедура помогает подтянуть кожу и улучшить тонус без инъекций и длительного восстановления.' },
-            { from: 'user', text: 'Дороговато. Я не уверена, что мне подойдёт.', leadStateIndex: 2 },
-            { from: 'ai',   text: 'Понимаю. Можно начать с короткой консультации: специалист посмотрит состояние кожи, объяснит, будет ли RF-лифтинг полезен именно вам, и подберёт вариант без лишних процедур.' },
-            { from: 'user', text: 'Хорошо. Есть время завтра после 17:00?', leadStateIndex: 3 },
-            { from: 'ai',   text: 'Да, есть свободное окно завтра в 18:30. Записать вас на это время?' },
-            { from: 'user', text: 'Да, запишите.', leadStateIndex: 4 },
-            { from: 'ai',   text: 'Готово, записали вас на завтра в 18:30. До встречи!' },
-            { from: 'user', text: 'Спасибо, до свидания.' },
+            { from: 'user', text: 'Можно записаться на консультацию?', leadStateIndex: 1 },
+            { from: 'ai', text: 'Конечно. Что хотите автоматизировать и когда вам удобно связаться?', leadStateIndex: 2 },
+            { from: 'user', text: 'Заявки из Instagram. Лучше после 17:00.', leadStateIndex: 3 },
           ],
           leadStates: [
             { service: '—', objection: '—', need: '—', time: '—', status: 'Новая заявка' },
-            { service: 'RF-лифтинг лица', objection: '—', need: 'Интерес к процедуре', time: '—', status: 'Консультация' },
-            { service: 'RF-лифтинг лица', objection: 'Цена / сомнение', need: 'Понять, подойдёт ли процедура', time: '—', status: 'Тёплый лид' },
-            { service: 'RF-лифтинг лица', objection: 'Предложена консультация', need: 'Запрос на время после 17:00', time: 'После 17:00', status: 'Оформление записи' },
-            { service: 'RF-лифтинг лица', objection: 'Предложена консультация', need: 'Запись подтверждена', time: 'Завтра, 18:30', status: 'Записан' },
-          ],
-        },
-        {
-          id: 'education',
-          messages: [
-            { from: 'user', text: 'Здравствуйте! У вас есть английский для школьников?', leadStateIndex: 1 },
-            { from: 'ai',   text: 'Здравствуйте! Да, есть занятия для школьников: в мини-группах и индивидуально. Подбираем формат под возраст, цель и расписание ребёнка.' },
-            { from: 'user', text: 'Мы уже пробовали курсы, особого результата не было.', leadStateIndex: 2 },
-            { from: 'ai',   text: 'Понимаю. Часто проблема не в ребёнке, а в неподходящем формате или слишком общей программе. На пробном уроке преподаватель покажет, как проходят занятия, оценит сильные и слабые стороны ребёнка и объяснит, какой план даст более понятный прогресс.' },
-            { from: 'user', text: 'Хорошо. Можно на этой неделе после школы?', leadStateIndex: 3 },
-            { from: 'ai',   text: 'Да, есть пробный урок в четверг в 16:00. Записать ребёнка на это время?' },
-            { from: 'user', text: 'Да, запишите.', leadStateIndex: 4 },
-            { from: 'ai',   text: 'Готово, записали на пробный урок в четверг в 16:00. Мы отправим детали и напоминание перед занятием.' },
-            { from: 'user', text: 'Спасибо!' },
-          ],
-          leadStates: [
-            { service: '—', objection: '—', need: '—', time: '—', status: 'Новая заявка' },
-            { service: 'Английский для школьников', objection: '—', need: 'Подобрать формат обучения', time: '—', status: 'Консультация' },
-            { service: 'Английский для школьников', objection: 'Раньше не было результата', need: 'Пробный урок и понятный план', time: '—', status: 'Тёплый лид' },
-            { service: 'Английский для школьников', objection: 'Предложен пробный урок', need: 'Запись после школы', time: 'После школы', status: 'Оформление записи' },
-            { service: 'Английский для школьников', objection: 'Предложен пробный урок', need: 'Пробный урок подтверждён', time: 'Четверг, 16:00', status: 'Записан' },
+            { service: 'Алия', objection: 'Консультация', need: '—', time: '—', status: 'Новое сообщение' },
+            { service: 'Алия', objection: 'Заявки из Instagram', need: 'Telegram', time: 'После 17:00', status: 'Тёплый лид' },
+            { service: 'Алия', objection: 'Заявки из Instagram', need: 'Telegram', time: 'После 17:00', status: 'Передано команде' },
           ],
         },
       ],
     },
   },
+  pain: {
+    headline: 'Где обычно теряются заявки',
+    emphasisTitle: 'Цена медленного ответа',
+    emphasisText:
+      'Каждая неотвеченная заявка — это не просто сообщение. Это потенциальный клиент, который уже проявил интерес.',
+    items: [
+      'Клиент написал вечером, и никто не ответил.',
+      'Менеджер занят и отвечает через несколько часов.',
+      'Вопросы повторяются каждый день.',
+      'После первого ответа нет follow-up.',
+      'Заявка передаётся без контекста.',
+    ],
+    bottomLine:
+      'Проблема не в том, что команда плохо работает. Проблема в том, что ручная обработка заявок не масштабируется, когда клиенты ждут быстрый ответ.',
+  },
   howItWorks: {
-    headline: 'Как это работает',
-    subheadline: 'Запуск без лишней сложности для занятых владельцев бизнеса.',
+    headline: 'Как обращение становится заявкой',
+    subheadline: 'Путь клиента: от первого сообщения до понятной заявки для команды.',
     steps: [
       {
         number: '01',
-        icon: 'Link2',
-        title: 'Подключаем каналы',
-        description: 'Подключаем WhatsApp, Instagram, Telegram или сайт к AI-сотруднику.',
+        icon: 'MessageCircle',
+        title: 'Клиент пишет',
+        description: 'В Instagram, WhatsApp, Telegram, на сайте или через форму.',
       },
       {
         number: '02',
-        icon: 'BookOpen',
-        title: 'Обучаем AI-сотрудника',
-        description: 'Собираем базу знаний, изучаем услуги и настраиваем тон общения. AI отвечает в стиле вашей команды.',
+        icon: 'Zap',
+        title: 'AI отвечает сразу',
+        description: 'Даже вечером, ночью или когда команда занята.',
       },
       {
         number: '03',
-        icon: 'Users',
-        title: 'Получаете квалифицированные лиды',
-        description: 'AI отвечает на вопросы, квалифицирует лиды, делает follow-up и передаёт тёплые заявки.',
+        icon: 'ListChecks',
+        title: 'AI уточняет потребность',
+        description: 'Задаёт нужные вопросы и собирает детали.',
+      },
+      {
+        number: '04',
+        icon: 'Phone',
+        title: 'AI собирает контакт',
+        description: 'Имя, телефон, мессенджер или удобное время связи.',
+      },
+      {
+        number: '05',
+        icon: 'ClipboardList',
+        title: 'Команда получает сводку',
+        description: 'Кто написал, что нужно, когда удобно связаться и какой следующий шаг.',
       },
     ],
   },
+  vsChatbot: {
+    headline: 'Это не обычный чат-бот',
+    description1:
+      'Чат-бот отвечает по сценарию. AI-сотрудник ведёт диалог.',
+    description2:
+      'AI-сотрудник понимает свободный текст, задаёт уточняющие вопросы, собирает данные и передаёт заявку команде в понятном виде.',
+    chatbotCard: {
+      title: 'Чат-бот',
+      items: ['Ждёт кнопок', 'Теряется в свободном тексте', 'Часто слишком рано зовёт человека'],
+    },
+    aiCard: {
+      title: 'AI-сотрудник',
+      items: ['Понимает вопрос', 'Уточняет детали', 'Собирает контакт', 'Передаёт заявку'],
+    },
+  },
+  automate: {
+    headline: 'Что можно автоматизировать',
+    actionLabel: 'Что делает AI',
+    outcomeLabel: 'Что получает бизнес',
+    exampleLabel: 'Пример',
+    items: [
+      { title: 'Заявки', description: 'Уточняет потребность, контакт и удобное время.', outcome: 'Менеджер получает тёплую заявку, а не сырой диалог.', example: 'Клиент хочет консультацию, удобно после 17:00, контакт Telegram.' },
+      { title: 'Ответы', description: 'Отвечает на повторяющиеся вопросы про услуги, цену, условия, расписание, доставку или доступы.', outcome: 'Команда меньше тратит время на рутину.', example: 'AI объясняет программу, старт потока, варианты оплаты и что входит.' },
+      { title: 'Follow-up', description: 'Мягко напоминает клиенту, если он пропал после первого ответа.', outcome: 'Тёплые заявки не пропадают после одной переписки.', example: '«Хотите, я отправлю доступные времена для консультации?»' },
+      { title: 'Передача', description: 'Собирает ключевые детали и отправляет короткую сводку команде.', outcome: 'Команда видит контекст и следующий шаг в одном месте.', example: 'Имя, задача, канал, удобное время и статус лида.' },
+      { title: 'Интеграции', description: 'Подключается к CRM, таблицам, Telegram, WhatsApp или внутренним инструментам, если это нужно.', outcome: 'AI встраивается в процесс, а не создаёт ещё одно место, куда команде нужно заходить.', example: 'Готовая заявка автоматически уходит в Telegram и Google Sheets.' },
+    ],
+    bottomLine: 'Формат запуска подбирается после короткого разбора задач.',
+  },
+  whatWeNeed: {
+    headline: 'Что нужно от вас для запуска',
+    items: [
+      { number: '01', title: 'Список услуг и условий', description: 'Что вы продаёте, какие есть ограничения, цены, расписание или правила.' },
+      { number: '02', title: 'Частые вопросы клиентов', description: 'Что люди обычно спрашивают перед покупкой или записью.' },
+      { number: '03', title: 'Каналы общения', description: 'Где приходят заявки: сайт, Instagram, Telegram, WhatsApp.' },
+      { number: '04', title: 'Куда передавать заявки', description: 'Менеджеру, администратору, в таблицу или CRM.' },
+    ],
+    bottomLine: 'Вам не нужно разбираться в AI. Мы берём настройку на себя. Если чего-то нет — поможем собрать в процессе разбора.',
+  },
+  trust: {
+    headline: 'AI работает в рамках правил бизнеса',
+    description1:
+      'AI-сотрудник не принимает сложные решения за человека. Он отвечает на типовые вопросы, собирает данные и передаёт заявку команде.',
+    description2:
+      'Если вопрос сложный, спорный или требует специалиста, AI передаёт диалог человеку.',
+    cards: [
+      'Не даёт медицинских, юридических или финансовых заключений',
+      'Не обещает то, чего нет в базе знаний',
+      'Не называет условия, которые вы не подтвердили',
+      'Передаёт сложные случаи команде',
+    ],
+  },
   demo: {
-    headline: 'Выберите демо',
+    headline: 'Попробуйте AI-сотрудника вживую',
     subheadline:
-      'Сначала попробуйте DamiWorks-консультанта, затем посмотрите примеры AI-сотрудников для разных ниш.',
+      'Задайте вопрос в чат, пройдите короткий подбор или посмотрите пример AI-сотрудника для конкретной ниши.',
     scenarios: [
       {
         id: 'damiworks',
-        label: 'DamiWorks',
+        label: 'DamiWorks-консультант',
         agentName: 'Консультант DamiWorks',
         messages: [
           { from: 'user', text: 'Что может ваш AI для моего бизнеса?' },
@@ -1237,54 +1402,48 @@ const ru: Dict = {
     },
   },
   capabilities: {
-    headline: 'Что может AI-сотрудник',
+    headline: 'С чего можно начать',
     subheadline:
-      'Подбираем уровень автоматизации под текущие процессы: от ответов и передачи заявок до квалификации, follow-up, интеграций и контроля качества.',
-    cta: 'Не знаете, что нужно именно вам? Пройдите короткий подбор в DamiWorks-чате.',
-    ctaLink: 'Подобрать пакет →',
+      'Не нужно сразу строить сложную систему. Обычно мы начинаем с одного понятного сценария и расширяем AI-сотрудника после первых реальных диалогов.',
+    cta: 'Не знаете, какой формат нужен? Пройдите короткий подбор в DamiWorks-чате.',
+    ctaLink: 'Пройти подбор →',
     tiers: [
       {
         id: 'start',
         number: '01',
-        name: 'Pilot / Start',
-        tagline: 'Базовый AI-сотрудник',
+        name: 'Стартовый AI-сотрудник',
+        tagline: 'Для проверки на реальных диалогах.',
         features: [
           { name: 'Ответы на частые вопросы', description: 'Товары, услуги, цены, доставка, запись и условия.' },
-          { name: 'База знаний / FAQ', description: 'Собираем основную информацию о бизнесе: прайс, услуги, частые вопросы.' },
           { name: 'Сбор контакта', description: 'Имя, телефон, интересующий товар или услуга.' },
           { name: 'Передача заявки', description: 'Менеджеру, в WhatsApp/Telegram или Google Sheets.' },
           { name: '1 канал', description: 'WhatsApp, Instagram, Telegram или сайт.' },
-          { name: 'Первые правки', description: 'Корректировки после реальных диалогов.' },
         ],
         footerText: 'Чтобы быстро проверить AI-сотрудника на реальных диалогах без сложной интеграции.',
       },
       {
         id: 'sales',
         number: '02',
-        name: 'Sales Assistant',
-        tagline: 'Включает всё из Pilot / Start + помогает продавать',
+        name: 'AI-сотрудник для продаж',
+        tagline: 'Когда нужно не только отвечать, но и квалифицировать лидов.',
         features: [
           { name: 'Квалификация лидов', description: 'Понимает, кто готов купить, а кто просто спрашивает.' },
           { name: 'Сбор интереса и потребности', description: 'Товар, бюджет, потребность и удобное время связи.' },
-          { name: 'Передача тёплых заявок', description: 'Менеджеру, в Google Sheets или CRM с краткой сводкой.' },
           { name: 'Follow-up', description: 'Мягкие напоминания, если клиент не ответил.' },
-          { name: '2–3 канала', description: 'Например WhatsApp + Instagram + сайт.' },
-          { name: 'Регулярные улучшения', description: 'Правки базы знаний и сценариев после запуска.' },
+          { name: 'Передача тёплых заявок', description: 'Менеджеру, в Google Sheets или CRM с краткой сводкой.' },
         ],
         footerText: 'Когда AI должен не просто отвечать, а отличать тёплых клиентов от тех, кто пока просто интересуется.',
       },
       {
         id: 'integrated',
         number: '03',
-        name: 'Integrated AI Employee',
-        tagline: 'Включает всё из Sales Assistant + интеграции',
+        name: 'AI-сотрудник с интеграциями',
+        tagline: 'Когда нужно подключить CRM, таблицы, статусы, маршрутизацию и бизнес-правила.',
         features: [
           { name: 'CRM/API', description: 'Подключение к внутренним системам бизнеса.' },
           { name: 'Склад, заказы, статусы', description: 'Наличие, этап заказа, доставка или другие данные.' },
           { name: 'Маршрутизация', description: 'Разные менеджеры, отделы или сценарии.' },
           { name: 'Индивидуальные бизнес-правила', description: 'Правила под реальные процессы компании.' },
-          { name: 'Несколько каналов', description: 'Расширение на разные точки контакта.' },
-          { name: 'Расширенный мониторинг', description: 'Контроль качества, стабильности и сложных сценариев.' },
         ],
         footerText:
           'Когда AI должен работать не только в переписке, но и с данными, правилами и командами внутри бизнеса.',
@@ -1292,7 +1451,7 @@ const ru: Dict = {
     ],
   },
   valueProp: {
-    headline: 'Не просто доступ к AI-агентам',
+    headline: 'Как мы внедряем AI-сотрудника',
     description:
       'Платформа даёт доступ к инструменту. DamiWorks берёт на себя внедрение под ключ: разбираем процессы, собираем базу знаний, проектируем сценарии, подключаем каналы, тестируем ответы и дорабатываем систему после запуска. Клиент получает не пустой кабинет, а настроенного AI-сотрудника, готового работать в реальных диалогах.',
     items: [
@@ -1322,13 +1481,13 @@ const ru: Dict = {
       'Прозрачные пакеты под разные задачи: от первого запуска до квалификации лидов, интеграций и сложных сценариев.',
     note: 'Итоговая стоимость зависит от объёма и сложности проекта.',
     pilotOffer: {
-      eyebrow: 'Пилот для школ',
-      title: 'Пилотный запуск AI-администратора',
+      eyebrow: 'Пример пилота',
+      title: 'Пример пилота: курсы и образовательные проекты',
       subtitle:
-        'Для школ, курсов, марафонов и образовательных проектов',
+        'Для онлайн-курсов, школ, наставничества, клубов, марафонов и программ по саморазвитию.',
       body:
-        'DamiWorks помогает обрабатывать входящие заявки из WhatsApp, Telegram, Instagram и сайта: отвечает на первые вопросы, объясняет программы и условия, собирает контакт и передаёт тёплую заявку вашей команде.\n\nСначала показываем демо, разбираем ваши программы, цены, каналы и типичные вопросы клиентов. После этого предлагаем формат пилота: от простого AI-чата на сайте до связки с мессенджерами и передачей заявок администратору или менеджеру.',
-      includesTitle: 'Что входит в пилот',
+        'AI-администратор отвечает на вопросы о программе, расписании, оплате, доступе к урокам, закрытым каналам и материалам, собирает контакт и передаёт заявку команде.',
+      includesTitle: 'Где помогает AI',
       bullets: [
         'AI отвечает на первые вопросы клиентов',
         'Объясняет программы, цены, расписание и условия',
@@ -1336,8 +1495,15 @@ const ru: Dict = {
         'Собирает контакт и ключевую информацию по заявке',
         'Передаёт тёплую заявку вашей команде',
       ],
+      cards: [
+        { label: 'Заявки', title: 'Вопросы до покупки', text: 'AI объясняет программу, формат, расписание, стоимость, старт потока и кому подойдёт курс.' },
+        { label: 'Доступы', title: 'Каналы и материалы', text: 'AI отвечает, как получить доступ после оплаты, где уроки, записи, задания и закрытый канал.' },
+        { label: 'Передача', title: 'Понятный следующий шаг', text: 'AI собирает контакт, цель, интересующий формат и передаёт команде готовую заявку.' },
+      ],
       pricingLine:
         'Формат пилота подбираем после короткого разбора вашего проекта.',
+      adaptNote:
+        'По такому же принципу AI-сотрудника можно адаптировать под клиники, салоны, локальные услуги, онлайн-магазины и B2B-сервисы.',
       ctaPrimary: 'Обсудить пилот',
       ctaSecondary: 'Посмотреть демо',
     },
@@ -1420,14 +1586,23 @@ const ru: Dict = {
   },
   contact: {
     headline: 'Обсудим, где AI-сотрудник\nбыстрее всего даст эффект',
-    description: 'Расскажите о бизнесе, и мы покажем, как DamiWorks может помочь.',
+    description:
+      'За 20 минут разберём ваши входящие заявки, каналы общения и покажем, какие задачи можно автоматизировать первыми.',
     note: '',
-    calendlyButton: '📅 Забронировать 20-минутный звонок',
-    calendlySubtext: 'или заполните форму, и мы вам напишем',
+    highlights: [
+      'разберём текущие заявки и каналы общения',
+      'найдём первый сценарий автоматизации',
+      'оценим, где AI даст самый быстрый эффект',
+    ],
+    formTitle: 'Оставьте заявку',
+    formSubtitle: 'Мы напишем вам в WhatsApp или Telegram.',
+    calendlyButton: 'Забронировать 20-минутный разбор',
+    calendlySubtext: 'Или заполните форму, и мы напишем вам сами.',
     placeholderName: 'Ваше имя',
     placeholderContact: 'WhatsApp / Telegram',
     placeholderBusinessType: 'Выберите тип бизнеса',
-    placeholderMessage: 'Что хотите автоматизировать? Например: ответы в WhatsApp, заявки, запись, follow-up. (необязательно)',
+    placeholderMessage: 'Например: заявки из Instagram, ответы в WhatsApp, запись клиентов, повторяющиеся вопросы. (необязательно)',
+    messageHelp: 'Можно коротко — мы уточним детали сами.',
     submitButton: 'Отправить заявку',
     successMessage: 'Спасибо! Скоро свяжемся с вами.',
     errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
@@ -1497,7 +1672,7 @@ const ru: Dict = {
     resetLabel: 'Сброс',
     inputPlaceholder: 'Задайте вопрос...',
     sendAriaLabel: 'Отправить',
-    onlineLabel: 'Online',
+    onlineLabel: 'Онлайн',
     leadSentChipLabel: '✅ Отправлено',
     contactClosedPill: '✅ Заявка отправлена. Мы свяжемся с вами в WhatsApp/Telegram.',
     contactClosedInputPlaceholder: 'Заявка отправлена',
@@ -1513,7 +1688,7 @@ const ru: Dict = {
     resetTitle: 'Сбросить',
     resetLabel: 'Сброс',
     sendAriaLabel: 'Отправить',
-    onlineLabel: 'Online',
+    onlineLabel: 'Онлайн',
     attachAriaLabel: 'Прикрепить файл',
     removeFileAriaLabel: 'Убрать файл',
     fileTooBig: 'Файл слишком большой (макс. 5 МБ)',
