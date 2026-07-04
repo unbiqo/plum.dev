@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from .english_school_guardrails import build_safe_fallback, validate_answer
 from .english_school_kb import get_full_kb_context
-from .english_school_planner import plan_conversation_turn
+from .english_school_planner import plan_conversation_turn, reclassify_general_question
 from .english_school_state import ConversationState, apply_planner_updates, build_conversation_state
 from .english_school_writer import write_response
 from .schemas import ChatHistoryMessage, ChatResponse, Route
@@ -62,6 +62,7 @@ _INTENT_TO_CONV_STATUS: dict[str, str] = {
     "qualify":                "exploring",
     "correction":             "exploring",
     "answer_question":        "exploring",
+    "ask_general_advice":     "exploring",
     "smalltalk":              "exploring",
     "unknown":                "exploring",
 }
@@ -206,6 +207,12 @@ async def handle_english_school_chat(
                 "english_school_chat: planner timed out (message=%r)", message[:60]
             )
             planner = _safe_planner_fallback(message)
+
+        # Deterministic safety net: a general "how fast can I go A2 -> B2" type
+        # question must never sit in a price intent (the price guardrail would
+        # force the admin fallback). Covers planner misclassification, planner
+        # fallback and planner timeout alike.
+        planner = reclassify_general_question(message, planner)
 
         state = apply_planner_updates(state, planner)
 

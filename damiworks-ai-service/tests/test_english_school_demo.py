@@ -27,7 +27,7 @@ from app.english_school_kb import (
     format_kb_context,
     get_full_kb_context,
 )
-from app.english_school_planner import plan_conversation_turn
+from app.english_school_planner import plan_conversation_turn, reclassify_general_question
 from app.english_school_state import (
     ConversationState,
     apply_planner_updates,
@@ -799,6 +799,183 @@ def test_repair_timeout_returns_safe_fallback_no_crash() -> None:
     assert "100 000" not in resp.answer  # safe fallback used instead
     assert resp.metadata.get("repair_timeout") is True
     assert resp.metadata["repaired_answer"] is True
+
+
+# ---------------------------------------------------------------------------
+# General educational questions (ask_general_advice)
+# ---------------------------------------------------------------------------
+
+_ADMIN_FALLBACK_MARKER = "уточню точную информацию у администратора"
+
+
+def test_reclassifier_turns_misfiled_timeline_question_into_general_advice() -> None:
+    # Planner misfiles "за сколько ... уровень A2 -> B2" as ask_price with a
+    # contact push — the deterministic net must retag it.
+    plan = _default_planner(
+        current_intent="ask_price",
+        recommended_next_step="ask_contact",
+        handoff_recommended=True,
+    )
+    out = reclassify_general_question("за сколько я смогу поднять уровень с А2 до Б2?", plan)
+    assert out["current_intent"] == "ask_general_advice"
+    assert out["handoff_recommended"] is False
+    assert out["recommended_next_step"] == "none"
+
+
+def test_reclassifier_fires_for_how_fast_phrasing() -> None:
+    plan = _default_planner(current_intent="answer_question", handoff_recommended=True)
+    out = reclassify_general_question("как быстро я смогу поднять уровень языка с А2 до Б2?", plan)
+    assert out["current_intent"] == "ask_general_advice"
+    assert out["handoff_recommended"] is False
+
+
+def test_reclassifier_leaves_real_price_questions_alone() -> None:
+    for msg in (
+        "сколько стоит IELTS?",
+        "сколько стоят индивидуальные занятия?",
+        "за сколько тенге можно поднять уровень?",
+        "что по ценам?",
+    ):
+        plan = reclassify_general_question(msg, _default_planner(current_intent="ask_price"))
+        assert plan["current_intent"] == "ask_price", msg
+
+
+def test_reclassifier_leaves_program_duration_company_specific() -> None:
+    # Duration of a specific school program stays in the KB-protected lane
+    # (no level/progress marker in the message).
+    plan = reclassify_general_question(
+        "за сколько месяцев можно пройти ваш курс IELTS Foundation?",
+        _default_planner(current_intent="ask_program", handoff_recommended=True),
+    )
+    assert plan["current_intent"] == "ask_program"
+    assert plan["handoff_recommended"] is True
+
+
+def test_reclassifier_never_touches_protected_intents() -> None:
+    for intent in ("price_objection", "contact", "wants_trial", "offensive", "correction"):
+        plan = reclassify_general_question(
+            "как быстро подниму уровень с A2 до B2?",
+            _default_planner(current_intent=intent),
+        )
+        assert plan["current_intent"] == intent
+
+
+def test_a2_b2_timeline_gets_general_answer_not_admin_fallback() -> None:
+    general_answer = (
+        "В среднем переход с A2 до B2 занимает примерно 9–18 месяцев при регулярных занятиях "
+        "2–3 раза в неделю и домашней практике. Точный срок зависит от стартового уровня и "
+        "регулярности. Хотите, подберём программу после короткой диагностики?"
+    )
+    # Planner misclassifies as ask_price — without the fix the price guardrail
+    # would reject this answer (no ₸) and force the admin fallback.
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_price", handoff_recommended=True),
+        writer_texts=[general_answer],
+    )
+    resp = _run(handle_english_school_chat(gem, _request("за сколько я смогу поднять уровень с А2 до Б2?")))
+    assert resp.metadata["current_intent"] == "ask_general_advice"
+    assert resp.answer == general_answer
+    assert gem.writer_calls == 1  # no repair needed
+    assert _ADMIN_FALLBACK_MARKER not in resp.answer
+
+
+def test_repeated_a2_b2_question_does_not_repeat_admin_fallback() -> None:
+    from app.english_school_guardrails import _FALLBACK_PRICE_FORMAT
+
+    history = [
+        _msg("user", "за сколько я смогу поднять уровень с А2 до Б2?"),
+        _msg("assistant", _FALLBACK_PRICE_FORMAT),  # the old bad turn
+    ]
+    general_answer = (
+        "Обычно переход с A2 до B2 занимает 9–18 месяцев при занятиях 2–3 раза в неделю. "
+        "Точнее скажем после короткой диагностики уровня."
+    )
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_price"),
+        writer_texts=[general_answer],
+    )
+    resp = _run(handle_english_school_chat(
+        gem, _request("как быстро я смогу поднять уровень языка с А2 до Б2?", history=history)
+    ))
+    assert resp.answer == general_answer
+    assert _ADMIN_FALLBACK_MARKER not in resp.answer
+
+
+def test_speaking_advice_question_gets_useful_answer() -> None:
+    advice = (
+        "Барьер обычно уходит с регулярной разговорной практикой: короткие сессии 2–3 раза в "
+        "неделю, простые темы, без страха ошибок. Помогает и разговорный клуб — там тренируют "
+        "именно живое общение. Хотите, расскажу про наш Speaking Club?"
+    )
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_general_advice"),
+        writer_texts=[advice],
+    )
+    resp = _run(handle_english_school_chat(gem, _request("как перестать бояться говорить на английском?")))
+    assert resp.answer == advice
+    assert resp.metadata["validation_result"]["failed"] is False
+    assert resp.metadata.get("handoff_recommended") is False
+
+
+def test_general_advice_still_cannot_invent_prices() -> None:
+    res = validate_answer(
+        "Обычно это занимает около года. Кстати, наш курс стоит 100 000 ₸ в месяц.",
+        ConversationState(),
+        _default_planner(current_intent="ask_general_advice"),
+    )
+    assert res.failed and not res.checks["no_invented_prices"]
+
+
+def test_general_advice_can_mention_real_kb_prices() -> None:
+    res = validate_answer(
+        "Регулярная разговорная практика решает. У нас для этого есть Speaking Club — 15 000 ₸/мес.",
+        ConversationState(),
+        _default_planner(current_intent="ask_general_advice"),
+    )
+    assert res.checks["no_invented_prices"] is True
+
+
+def test_general_advice_still_cannot_invent_promotions() -> None:
+    res = validate_answer(
+        "Можно ускориться: оформите рассрочку и получите скидку 30%.",
+        ConversationState(),
+        _default_planner(current_intent="ask_general_advice"),
+    )
+    assert res.failed and not res.checks["no_invented_promotion"]
+
+
+def test_general_advice_still_cannot_guarantee_results() -> None:
+    res = validate_answer(
+        "Гарантируем уровень B2 за 6 месяцев занятий.",
+        ConversationState(),
+        _default_planner(current_intent="ask_general_advice"),
+    )
+    assert res.failed and not res.checks["no_guarantees"]
+
+
+def test_general_advice_exempt_from_word_limit_but_not_lists() -> None:
+    long_answer = " ".join(["совет"] * 130)
+    res = validate_answer(
+        long_answer, ConversationState(), _default_planner(current_intent="ask_general_advice")
+    )
+    assert res.checks["compact_length_ok"] is True
+    # Bullet-list compactness still applies.
+    bullets = "• раз\n• два\n• три\n• четыре\n• пять"
+    res2 = validate_answer(
+        bullets, ConversationState(), _default_planner(current_intent="ask_general_advice")
+    )
+    assert res2.failed and not res2.checks["no_verbose_list"]
+
+
+def test_safe_fallback_for_general_advice_has_no_admin_or_contact_push() -> None:
+    fb = build_safe_fallback(_default_planner(current_intent="ask_general_advice"))
+    low = fb.casefold()
+    assert "администратор" not in low
+    assert "whatsapp" not in low and "telegram" not in low and "оставьте" not in low
+    assert "₸" not in fb
+    # The fallback itself passes the guardrail.
+    res = validate_answer(fb, ConversationState(), _default_planner(current_intent="ask_general_advice"))
+    assert not res.failed, res.fix
 
 
 def test_orchestrator_repairs_when_writer_violates_do_not_ask_location() -> None:

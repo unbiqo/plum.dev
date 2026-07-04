@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from .english_school_state import ConversationState
@@ -34,6 +35,7 @@ INTENTS = (
     "ask_comparison",       # direct format/option comparison question
     "compare_options",
     "answer_question",
+    "ask_general_advice",   # general language-learning question, not a school fact
     "objection",
     "price_objection",      # "дороговато", "дорого", "недешево"
     "compare_competitor",   # user mentions a competitor price or compares schools
@@ -163,6 +165,20 @@ _PLANNER_SYSTEM = """\
   могут подходить. Если цель не указана явно, включи оба варианта в must_mention и не выбирай
   одну программу молча. Ориентир из базы: «хочет говорить/кино → High School Speaking;
   нужна школа/оценки → Teen English».
+- ask_general_advice: ОБЩИЙ вопрос об изучении английского, а НЕ о фактах школы. Примеры:
+  сроки перехода между уровнями («за сколько можно подняться с A2 до B2»), «как быстрее выучить
+  английский», «сколько слов нужно для B1», «почему я понимаю, но не могу говорить», «как
+  перестать бояться speaking», «сложный ли IELTS», «чем A2 отличается от B1», «сколько раз в
+  неделю лучше заниматься», «можно ли ребёнку 7 лет учить английский онлайн», «как подготовиться
+  к пробному уроку».
+  * «за сколько…», «как быстро…», «сколько времени…» + уровень/выучить — это вопрос о ВРЕМЕНИ,
+    а НЕ о цене. НЕ ставь ask_price для таких вопросов.
+  * handoff_recommended = false — живой администратор для этого не нужен.
+  * should_pause_qualification = true.
+  * response_goal = «дать честный общий ориентир с оговорками (частота занятий, домашняя
+    практика, стартовый уровень) и мягко предложить диагностику или подходящую программу».
+  * Вопросы о ФАКТАХ ШКОЛЫ (точные цены, расписание, свободные группы, адреса, преподаватели,
+    скидки, длительность конкретной программы школы) — это НЕ ask_general_advice.
 - ask_language_availability: пользователь спрашивает про другой язык (французский, испанский,
   немецкий, китайский и т.д.).
   * response_goal = «сообщить, что в базе только английский; посоветовать уточнить у администратора»
@@ -195,6 +211,63 @@ _PLANNER_SYSTEM = """\
 - НЕ придумывай факты. Ты только классифицируешь и планируешь.
 Верни только JSON по схеме.\
 """
+
+
+# ---------------------------------------------------------------------------
+# Deterministic reclassifier — safety net for general educational questions
+# ---------------------------------------------------------------------------
+# «За сколько поднять уровень с A2 до B2?» is a question about TIME, not price.
+# If the planner (or its fallback) files such a question under a price/program/
+# generic intent, the price guardrail would demand a ₸ amount and force the
+# admin fallback. Retag it here so the turn stays a normal educational answer.
+
+_GENERAL_TIME_RE = re.compile(
+    r"как быстро|сколько времени|за какое время|за сколько", re.IGNORECASE
+)
+_GENERAL_PROGRESS_RE = re.compile(
+    r"уров(?:ень|ня|не|нем)|выуч|подн[яи]|заговор|прогресс|\b[abcабс][12]\b",
+    re.IGNORECASE,
+)
+# Money/company words that keep the question in the protected KB lane.
+_COMPANY_TOPIC_RE = re.compile(
+    r"сто[ия]т|стоимост|\bцен[аыеу]|прайс|тенге|₸|оплат|скидк|рассрочк",
+    re.IGNORECASE,
+)
+_RECLASSIFIABLE_INTENTS = frozenset({
+    "ask_price", "ask_relevant_price", "ask_all_prices",
+    "ask_program", "answer_question", "qualify", "unknown",
+})
+
+
+def reclassify_general_question(message: str, plan: dict) -> dict:
+    """Deterministically retag a general timeline/progress question.
+
+    Fires only when the message clearly asks about learning speed / level
+    progress and contains no money/discount vocabulary. Never touches
+    company-fact intents (schedule, contact, objections, ...).
+    """
+    text = message or ""
+    if plan.get("current_intent") == "ask_general_advice":
+        plan["handoff_recommended"] = False
+        return plan
+    if plan.get("current_intent") not in _RECLASSIFIABLE_INTENTS:
+        return plan
+    if not (_GENERAL_TIME_RE.search(text) and _GENERAL_PROGRESS_RE.search(text)):
+        return plan
+    if _COMPANY_TOPIC_RE.search(text):
+        return plan
+
+    plan["current_intent"] = "ask_general_advice"
+    plan["handoff_recommended"] = False
+    if plan.get("recommended_next_step") == "ask_contact":
+        plan["recommended_next_step"] = "none"
+    plan["response_goal"] = (
+        "Дать честный общий ориентир по срокам/методике изучения английского с оговорками "
+        "(частота занятий, домашняя практика, стартовый уровень), без обещаний школы; "
+        "затем мягко предложить диагностику или подходящую программу."
+    )
+    plan["reason"] = ((plan.get("reason") or "") + " | general_advice_reclassified").strip(" |")
+    return plan
 
 
 def _format_history(history: list[ChatHistoryMessage], limit: int = 10) -> str:

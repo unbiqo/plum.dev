@@ -60,7 +60,11 @@ _FORBIDDEN_PHRASES = (
 _PRICE_INTENTS = frozenset({"ask_price", "ask_all_prices", "ask_relevant_price"})
 
 # Intents exempt from the word-count compact check (need more room by design).
-_WORDCOUNT_EXEMPT_INTENTS = frozenset({"ask_all_prices", "ask_comparison", "compare_options"})
+# ask_general_advice: an honest educational answer (estimate + caveats + soft
+# bridge) legitimately runs longer; all other checks still apply to it.
+_WORDCOUNT_EXEMPT_INTENTS = frozenset({
+    "ask_all_prices", "ask_comparison", "compare_options", "ask_general_advice",
+})
 # Only ask_all_prices is allowed a long bullet list.
 _LISTCOUNT_EXEMPT_INTENTS = frozenset({"ask_all_prices"})
 _WORD_LIMIT = 100
@@ -273,6 +277,13 @@ _FALLBACK_LANGUAGE = (
     "По материалам, которые у меня есть, указаны программы по английскому языку. "
     "Для уточнения других языков лучше написать администратору напрямую."
 )
+# General educational question — never the admin/contact push: an honest
+# generic answer plus a soft diagnostic bridge.
+_FALLBACK_GENERAL_ADVICE = (
+    "Скорость прогресса в английском зависит от стартового уровня, регулярности занятий и "
+    "практики между уроками — при 2–3 занятиях в неделю результат обычно заметен уже через "
+    "несколько месяцев. Точнее сориентирует короткая бесплатная диагностика на пробном уроке."
+)
 
 
 def build_safe_fallback(planner: dict) -> str:
@@ -282,6 +293,8 @@ def build_safe_fallback(planner: dict) -> str:
         return _FALLBACK_OFFENSIVE
     if intent == "ask_language_availability":
         return _FALLBACK_LANGUAGE
+    if intent == "ask_general_advice":
+        return _FALLBACK_GENERAL_ADVICE
     if intent in (
         "ask_price", "ask_all_prices", "ask_relevant_price",
         "ask_format", "ask_program", "ask_comparison", "compare_options",
