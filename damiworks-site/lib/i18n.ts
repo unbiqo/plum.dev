@@ -824,9 +824,9 @@ const en: Dict = {
   contact: {
     headline: "Let's discuss where an AI employee\ndelivers impact fastest",
     description: "Tell us a few details and we'll show you how DamiWorks can help.",
-    note: 'We usually reply within a few hours.',
+    note: '',
     calendlyButton: '📅 Book a 20-minute call',
-    calendlySubtext: 'or leave your contact — I will reach out to you myself',
+    calendlySubtext: "or fill out the form and we'll get back to you",
     placeholderName: 'Your name',
     placeholderContact: 'WhatsApp / Telegram',
     placeholderBusinessType: 'Select your business type',
@@ -1421,9 +1421,9 @@ const ru: Dict = {
   contact: {
     headline: 'Обсудим, где AI-сотрудник\nбыстрее всего даст эффект',
     description: 'Расскажите о бизнесе — покажем, как DamiWorks может помочь.',
-    note: 'Обычно отвечаем в течение нескольких часов.',
+    note: '',
     calendlyButton: '📅 Забронировать 20-минутный звонок',
-    calendlySubtext: 'или оставьте контакт — я сам напишу вам',
+    calendlySubtext: 'или заполните форму, и мы вам напишем',
     placeholderName: 'Ваше имя',
     placeholderContact: 'WhatsApp / Telegram',
     placeholderBusinessType: 'Выберите тип бизнеса',
