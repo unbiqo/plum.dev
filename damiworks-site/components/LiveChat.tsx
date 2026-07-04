@@ -23,6 +23,11 @@ import {
   type LeadSummary,
   type PackageId,
 } from '@/lib/intake'
+import {
+  extractFreeformIntake,
+  filterUnusedChips,
+  mergeFreeformIntake,
+} from '@/lib/freeform'
 import type { DictLiveChat, DictIntake, DictIntakeQuestion } from '@/lib/i18n'
 
 // ---------------------------------------------------------------------------
@@ -313,6 +318,7 @@ type Props = {
 export default function LiveChat({ dict, intake: intakeDict, locale, onStateChange }: Props) {
   const MESSAGES_SESSION_KEY = `damiworks_messages_${locale}`
   const INTAKE_SESSION_KEY = `damiworks_intake_state_${locale}`
+  const USED_CHIPS_SESSION_KEY = `damiworks_used_chips_${locale}`
   const intakeQuestions = intakeDict.questions
   const requiredStepCount = intakeQuestions.filter((q) => !q.optional).length
 
@@ -337,6 +343,8 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
   const [leadSent, setLeadSent] = useState(false)
   const [contactClosed, setContactClosed] = useState(false)
   const [leadStatus, setLeadStatus] = useState<string | null>(null)
+  // Clicked predefined quick replies disappear for the rest of the session.
+  const [usedChips, setUsedChips] = useState<string[]>([])
 
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -370,8 +378,19 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       // the user starts clean instead of resuming an abandoned intake.
       sessionStorage.removeItem(MESSAGES_SESSION_KEY)
       sessionStorage.removeItem(INTAKE_SESSION_KEY)
+      sessionStorage.removeItem(USED_CHIPS_SESSION_KEY)
       localStorage.removeItem(LEAD_SENT_KEY)
       localStorage.removeItem(LEAD_CONTACT_KEY)
+    }
+
+    const storedChips = sessionStorage.getItem(USED_CHIPS_SESSION_KEY)
+    if (storedChips) {
+      try {
+        const parsedChips = JSON.parse(storedChips) as string[]
+        if (Array.isArray(parsedChips)) setUsedChips(parsedChips)
+      } catch {
+        // ignore corrupt storage
+      }
     }
 
     if (localStorage.getItem(LEAD_CONTACT_KEY) === id) {
@@ -389,16 +408,30 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
 
           // Restore intake so post-intake chips show and intake_context is sent after reload
           const storedIntake = sessionStorage.getItem(INTAKE_SESSION_KEY)
+          let restoredCompleted = false
           if (storedIntake) {
             try {
               const si = JSON.parse(storedIntake) as { intake: IntakeState; recPkg: PackageId; score: number }
               if (si?.intake?.completed) {
+                restoredCompleted = true
                 setIntake(si.intake)
                 setRecPkg(si.recPkg ?? 'Start')
                 setScore(si.score ?? 0)
               }
             } catch {
               // ignore corrupt storage
+            }
+          }
+
+          if (!restoredCompleted) {
+            // Rebuild the free-form summary from restored user messages.
+            const userTexts = parsed
+              .filter((m): m is TextMessage => m.kind === 'text' && !m.isIntake && m.from === 'user')
+              .map((m) => m.text)
+            if (userTexts.length > 0) {
+              const merged = mergeFreeformIntake(INITIAL_INTAKE, extractFreeformIntake(userTexts))
+              setIntake(merged)
+              setRecPkg(recommendPackage(merged))
             }
           }
 
@@ -426,6 +459,12 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       sessionStorage.setItem(INTAKE_SESSION_KEY, JSON.stringify({ intake, recPkg, score }))
     }
   }, [intake, recPkg, score])
+
+  useEffect(() => {
+    if (usedChips.length > 0) {
+      sessionStorage.setItem(USED_CHIPS_SESSION_KEY, JSON.stringify(usedChips))
+    }
+  }, [usedChips])
 
   // ------------ auto-scroll — scrolls only the message container, not the page ------------
 
@@ -655,6 +694,21 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       ...prev,
       { kind: 'text', from: 'user', text: userText, isIntake: false },
     ])
+
+    // Free-form summary: extract channels/tasks/CRM/business from natural
+    // messages so the package summary fills without the questionnaire.
+    if (!intakeRef.current.completed) {
+      const allUserTexts = [
+        ...messages
+          .filter((m): m is TextMessage => m.kind === 'text' && !m.isIntake && m.from === 'user')
+          .map((m) => m.text),
+        userText,
+      ]
+      const merged = mergeFreeformIntake(intakeRef.current, extractFreeformIntake(allUserTexts))
+      setIntake(merged)
+      setRecPkg(recommendPackage(merged))
+    }
+
     setLoading(true)
 
     try {
@@ -680,14 +734,16 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       const aiMsg: Message = { kind: 'text', from: 'ai', text: data.answer, isIntake: false }
       setMessages((prev) => [...prev, aiMsg])
 
-      if (intake.completed) {
-        const currentChatId = chatIdRef.current || chatId
-        if (data.lead_status) setLeadStatus(data.lead_status)
-        if (data.lead_status === 'contact_collected') {
-          setContactClosed(true)
-          setLeadSent(true)
-          localStorage.setItem(LEAD_CONTACT_KEY, currentChatId)
-        } else if (localStorage.getItem(LEAD_SENT_KEY) !== currentChatId) {
+      // Lead status applies on both paths — free-form conversations collect
+      // contacts too, not only the questionnaire flow.
+      const currentChatId = chatIdRef.current || chatId
+      if (data.lead_status) setLeadStatus(data.lead_status)
+      if (data.lead_status === 'contact_collected') {
+        setContactClosed(true)
+        setLeadSent(true)
+        localStorage.setItem(LEAD_CONTACT_KEY, currentChatId)
+      } else if (intake.completed) {
+        if (localStorage.getItem(LEAD_SENT_KEY) !== currentChatId) {
           // Intake data not yet sent — score and send if warm/hot. Idempotent.
           const allUserTexts = [
             ...messages
@@ -730,6 +786,8 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
   }
 
   const handleIntroChip = (chip: string) => {
+    // A clicked predefined quick reply disappears for the rest of the session.
+    setUsedChips((prev) => (prev.includes(chip) ? prev : [...prev, chip]))
     // First chip in introChips is always the "start intake" action
     if (chip === dict.introChips[0]) {
       startIntake()
@@ -763,6 +821,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
     localStorage.removeItem(LEAD_CONTACT_KEY)
     sessionStorage.removeItem(MESSAGES_SESSION_KEY)
     sessionStorage.removeItem(INTAKE_SESSION_KEY)
+    sessionStorage.removeItem(USED_CHIPS_SESSION_KEY)
     setChatId(newId)
     setMessages([{ kind: 'text', from: 'ai', text: dict.introMessage, isIntake: false }])
     setIntakeStep(0)
@@ -778,6 +837,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
     setScore(0)
     setRecPkg('Start')
     setSummaryCollapsed(false)
+    setUsedChips([])
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -790,7 +850,13 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
   // ------------ derived ------------
 
   const showIntakeChips = chatMode === 'intake' && !intake.completed && !transitioning
-  const showPreIntakeChips = !intake.completed && chatMode !== 'intake'
+  const visibleIntroChips = filterUnusedChips(dict.introChips, usedChips)
+  const showPreIntakeChips =
+    !intake.completed &&
+    chatMode !== 'intake' &&
+    visibleIntroChips.length > 0 &&
+    !contactClosed &&
+    leadStatus !== 'contact_requested'
   // Hide chips once the user expressed intent (contact_requested) or contact is collected.
   const showPostIntakeChips = intake.completed && !contactClosed && leadStatus !== 'contact_requested'
   const showInput = chatMode === 'chat' || chatMode === 'intro' || intake.completed
@@ -885,13 +951,13 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       {showPreIntakeChips && (
         <div className="px-4 py-3 border-t border-border-col space-y-2">
           <div className="flex flex-wrap gap-1.5">
-            {dict.introChips.map((chip, idx) => (
+            {visibleIntroChips.map((chip) => (
               <button
                 key={chip}
                 onClick={() => handleIntroChip(chip)}
                 disabled={loading}
                 className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all disabled:opacity-50 ${
-                  idx === 0
+                  chip === dict.introChips[0]
                     ? 'bg-accent text-white border-accent hover:opacity-90'
                     : 'bg-bg border-border-col text-primary hover:border-accent/50 hover:text-accent'
                 }`}
@@ -971,7 +1037,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       {/* Contact requested — assistant asked for contact info. Offer booking a
           call as the primary path; the secondary button focuses the input so the
           user can type their contact as before. Never changes lead state. */}
-      {intake.completed && !contactClosed && leadStatus === 'contact_requested' && CALENDLY_URL && (
+      {!contactClosed && leadStatus === 'contact_requested' && CALENDLY_URL && (
         <div className="px-4 py-3 border-t border-border-col">
           <div className="flex flex-wrap gap-1.5">
             <a
@@ -993,7 +1059,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       )}
 
       {/* Lead closed — contact collected. Show only a status pill. */}
-      {intake.completed && contactClosed && (
+      {contactClosed && (
         <div className="px-4 py-3 border-t border-border-col">
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600 border border-green-500/30">
             <CheckCircle2 size={12} className="flex-shrink-0" />

@@ -140,7 +140,7 @@ _PRICE_QUESTION_RE = re.compile(
 )
 
 _ALREADY_ANSWERED_RE = re.compile(
-    r"я\s+(?:же|уже)\s+(?:выбрал|ответил|указал|заполнил)|"
+    r"я\s+(?:же|уже)\s+(?:выбрал|ответил|указал|заполнил|сказал|говорил|писал)|"
     r"это\s+уже\s+было\s+в\s+анкете|"
     r"в\s+анкете\s+(?:я|уже)|"
     r"вы\s+(?:уже|же)\s+спросили|"
@@ -382,13 +382,17 @@ def pre_intake_faq_answer(
     intent: PreIntakeFaqIntent,
     *,
     last_assistant_message: str = "",
+    suppress_cta: bool = False,
 ) -> str:
     """Curated pre-intake answer for a known FAQ intent + one soft guided-intake CTA.
 
-    Never asks for contact details. The CTA varies turn-to-turn via the
-    repetition guard.
+    Never asks for contact details. ``suppress_cta=True`` (the questionnaire was
+    already offered earlier in the conversation) returns the body only — the
+    guided intake is suggested at most once per conversation.
     """
     body = _FAQ_BODIES[intent]
+    if suppress_cta:
+        return body
     cta = pick_guided_intake_cta(last_assistant_message)
     return f"{body}\n\n{cta}"
 
@@ -1026,6 +1030,252 @@ def post_intake_response(
         return neutral_ack_answer()
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Pre-intake free-form profile — deterministic extraction from natural chat.
+#
+# The guided questionnaire is path A; this section makes path B (free-form
+# conversation) first-class: the same channels/tasks/CRM/business facts are
+# extracted from normal user messages, so the consultant can move to the
+# Calendly/contact step without forcing the questionnaire, and the frontend
+# summary can fill in real time.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FreeformProfile:
+    channels: list[str] = field(default_factory=list)
+    tasks: list[str] = field(default_factory=list)
+    crm: str | None = None
+    business_type: str | None = None
+
+
+_FF_CHANNEL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"whats\s*app|ватсап|вотсап|воцап", re.IGNORECASE), "WhatsApp"),
+    (re.compile(r"instagram|инстаграм", re.IGNORECASE), "Instagram"),
+    (re.compile(r"telegram|телеграм|\bтг\b", re.IGNORECASE), "Telegram"),
+    (re.compile(r"2\s*(?:гис|gis)|дубль\s*гис", re.IGNORECASE), "2GIS"),
+    (re.compile(r"\bсайт\w*|website", re.IGNORECASE), "Website"),
+)
+
+_FF_TASK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"отвеча\w+|ответы\s+(?:клиент|на\s+вопрос)|консультир", re.IGNORECASE),
+        "Отвечать на вопросы",
+    ),
+    (
+        re.compile(r"запис\w+|appointment|назнача\w+\s+(?:при[её]м|встреч)|бронир", re.IGNORECASE),
+        "Запись клиентов",
+    ),
+    (re.compile(r"собира\w+\s+контакт|сбор\s+контакт", re.IGNORECASE), "Собирать контакты"),
+    (re.compile(r"квалифи", re.IGNORECASE), "Квалифицировать лидов"),
+    (
+        re.compile(r"передава\w+\s+заявк|передача\s+заявок", re.IGNORECASE),
+        "Передавать заявки менеджеру",
+    ),
+    (re.compile(r"follow[\s-]?up|фоллоу", re.IGNORECASE), "Делать follow-up"),
+)
+
+_FF_CRM_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b1[сc]\b", re.IGNORECASE), "1С"),
+    (re.compile(r"amo\s*crm|амосрм", re.IGNORECASE), "amoCRM"),
+    (re.compile(r"битрикс|bitrix", re.IGNORECASE), "Bitrix24"),
+    (re.compile(r"google\s*sheets|гугл\s*табл", re.IGNORECASE), "Google Sheets"),
+)
+
+_FF_BUSINESS_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"стоматолог", re.IGNORECASE), "Стоматология"),
+    (re.compile(r"клиник|медцентр|мед\.?\s*центр", re.IGNORECASE), "Клиника/салон"),
+    (re.compile(r"салон|барбершоп", re.IGNORECASE), "Клиника/салон"),
+    (re.compile(r"магазин", re.IGNORECASE), "Онлайн-магазин"),
+    (re.compile(r"школ\w+|курс\w+|репетит|обучени", re.IGNORECASE), "Обучение"),
+    (re.compile(r"кафе|ресторан|доставк\w+\s+еды", re.IGNORECASE), "Услуги"),
+)
+
+
+def extract_freeform_profile(user_texts: list[str]) -> FreeformProfile:
+    """Deterministically extract channels/tasks/CRM/business from user messages."""
+    profile = FreeformProfile()
+    combined = "\n".join(t for t in (user_texts or []) if t)
+    for pattern, label in _FF_CHANNEL_PATTERNS:
+        if pattern.search(combined) and label not in profile.channels:
+            profile.channels.append(label)
+    for pattern, label in _FF_TASK_PATTERNS:
+        if pattern.search(combined) and label not in profile.tasks:
+            profile.tasks.append(label)
+    for pattern, label in _FF_CRM_PATTERNS:
+        if pattern.search(combined):
+            profile.crm = label
+            break
+    for pattern, label in _FF_BUSINESS_PATTERNS:
+        if pattern.search(combined):
+            profile.business_type = label
+            break
+    return profile
+
+
+def has_enough_freeform_context(profile: FreeformProfile) -> bool:
+    """Enough for a first scoping call: at least one channel and one task."""
+    return bool(profile.channels and profile.tasks)
+
+
+def profile_to_intake_context(profile: FreeformProfile) -> IntakeContext:
+    """Map a free-form profile onto IntakeContext so lead rows/notifications work."""
+    qualifying = {"Квалифицировать лидов", "Передавать заявки менеджеру", "Делать follow-up"}
+    pkg = "Sales Assistant" if qualifying & set(profile.tasks) else "Start"
+    return IntakeContext(
+        exists=True,
+        channels=list(profile.channels),
+        tasks=list(profile.tasks),
+        handoff=profile.crm,
+        business_type=profile.business_type,
+        recommended_package=pkg,
+    )
+
+
+# User asks whether/how to leave THEIR contact ("контакт будешь брать?",
+# "куда номер оставить?"). This is DamiWorks conversion intent — never a
+# question about collecting end-customer contacts.
+_CONTACT_OFFER_RE = re.compile(
+    r"контакт\w*\s+(?:будешь|будете|возьм[её]шь|возьм[её]те|брать|бер[её]те|нужен)|"
+    r"куда\s+(?:номер|контакт|телефон|заявку)\s*(?:оставить|остав\w*|писать|скинуть|отправить)?|"
+    r"как\s+(?:с\s+вами\s+)?связаться|"
+    r"как\s+(?:мне\s+)?(?:оставить|отправить)\s+(?:заявку|контакт|номер)|"
+    r"как\s+(?:мне\s+)?(?:заявку|контакт|номер)\s+(?:оставить|отправить)|"
+    r"(?:номер|контакт)\s+оставить\b|"
+    r"хотите\s+мой\s+(?:номер|контакт)|"
+    r"взять\s+(?:мой\s+)?(?:номер|контакт)",
+    re.IGNORECASE,
+)
+
+# User dismisses the current question ("это не важно") — stop asking, move on.
+_DISMISSAL_RE = re.compile(
+    r"^\s*(?:это\s+)?не\s*важно[\s.!]*$|без\s+разницы|какая\s+разница|\bневажно\b",
+    re.IGNORECASE,
+)
+
+# Price/objection vocabulary — those turns belong to the FAQ/price branches,
+# not the free-form close.
+_FF_PRICE_VOCAB_RE = re.compile(
+    r"сто[ия]т|стоимост|цен[аыуе]|дорог|дешев|скидк|тариф|прайс", re.IGNORECASE
+)
+
+_FREEFORM_CLOSE_MARKER = "достаточно для первичного разбора"
+
+_PREINTAKE_CLOSED_ANSWER = (
+    "Заявка уже отправлена — команда свяжется с вами в WhatsApp/Telegram "
+    "и уточнит детали запуска."
+)
+
+
+def is_contact_offer_question(user_message: str) -> bool:
+    msg = (user_message or "").casefold().replace("ё", "е")
+    return bool(_CONTACT_OFFER_RE.search(msg))
+
+
+def contact_offer_answer(*, calendly_enabled: bool = False) -> str:
+    if calendly_enabled:
+        return (
+            "Да. Удобнее всего — сразу выбрать время для короткого звонка. "
+            "Или оставьте WhatsApp/Telegram, и я передам заявку команде."
+        )
+    return (
+        "Да. Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram — "
+        "передам заявку команде, и с вами свяжутся."
+    )
+
+
+def freeform_close_answer(profile: FreeformProfile, *, calendly_enabled: bool = False) -> str:
+    """Transition to the scoping call once free-form context is sufficient.
+
+    Careful wording for integrations: we discuss HOW to hand data over — never
+    promise a specific automatic integration.
+    """
+    bits: list[str] = []
+    if profile.channels:
+        bits.append(", ".join(profile.channels))
+    if profile.crm:
+        bits.append(f"как передавать заявки в {profile.crm} — напрямую, через API или таблицу")
+    scope = "посмотрим " + "; ".join(bits) if bits else "разберём ваши каналы и задачи"
+    tail = (
+        "Можете забронировать время для звонка или оставить WhatsApp/Telegram — как удобнее."
+        if calendly_enabled
+        else "Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram — мы свяжемся и предложим формат запуска."
+    )
+    return (
+        f"Этого уже достаточно для первичного разбора. Лучше всего обсудить сценарий "
+        f"на коротком 20-минутном звонке: {scope}.\n\n{tail}"
+    )
+
+
+@dataclass
+class PreintakeTurn:
+    answer: str | None
+    lead_status: str | None = None  # "contact_requested" | "contact_collected"
+    contact: ParsedContact | None = None
+
+
+def resolve_preintake_turn(
+    user_message: str,
+    profile: FreeformProfile,
+    last_assistant_message: str = "",
+    *,
+    calendly_enabled: bool = False,
+    lead_closed: bool = False,
+) -> PreintakeTurn:
+    """Deterministic pre-intake turn for the free-form conversation path.
+
+    Order: closed → contact reply → contact-offer question → friction
+    (already-said / dismissal) → enough-context close on short low-info
+    messages. Returns answer=None when the LLM should handle the turn.
+    """
+    msg = (user_message or "").strip()
+    if not msg:
+        return PreintakeTurn(None)
+    if lead_closed:
+        return PreintakeTurn(_PREINTAKE_CLOSED_ANSWER, "contact_collected")
+
+    contact = parse_contact(msg, last_assistant_message)
+    if contact.kind == "telegram":
+        # A bare "клиенты пишут в телеграм" is channel info, not the user's own
+        # contact — require an actual handle/link or a preceding contact ask.
+        if not re.search(r"@[A-Za-z0-9_]{3,}|t\.me/", msg) and not assistant_asked_for_contact(
+            last_assistant_message
+        ):
+            contact = ParsedContact(None, raw=msg)
+    if contact.kind:
+        return PreintakeTurn(contact_close_answer(msg), "contact_collected", contact)
+
+    low = msg.casefold().replace("ё", "е")
+    if _CONTACT_OFFER_RE.search(low):
+        return PreintakeTurn(
+            contact_offer_answer(calendly_enabled=calendly_enabled), "contact_requested"
+        )
+
+    # Friction: the user says they already answered, or dismisses the question.
+    # Stop the loop and move to the scoping-call close.
+    if _ALREADY_ANSWERED_RE.search(low) or _DISMISSAL_RE.search(low):
+        return PreintakeTurn(
+            freeform_close_answer(profile, calendly_enabled=calendly_enabled),
+            "contact_requested",
+        )
+
+    # Enough context + a short low-info reply ("1с", "срм", "да") → close.
+    # Never on questions or price/objection turns, and never twice in a row.
+    if (
+        has_enough_freeform_context(profile)
+        and "?" not in msg
+        and len(msg.split()) <= 6
+        and not _FF_PRICE_VOCAB_RE.search(low)
+        and _FREEFORM_CLOSE_MARKER not in (last_assistant_message or "")
+    ):
+        return PreintakeTurn(
+            freeform_close_answer(profile, calendly_enabled=calendly_enabled),
+            "contact_requested",
+        )
+
+    return PreintakeTurn(None)
 
 
 # ---------------------------------------------------------------------------

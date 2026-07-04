@@ -8,6 +8,7 @@ import CustomDemoChat from '@/components/CustomDemoChat'
 import EnglishSchoolChat, { type SchoolMessage, type SchoolBackendState } from '@/components/EnglishSchoolChat'
 import EnglishSchoolSummaryPanel from '@/components/EnglishSchoolSummaryPanel'
 import type { IntakeField, PackageId } from '@/lib/intake'
+import { hasFreeformSummary } from '@/lib/freeform'
 
 // Functional identifiers — not copy, not locale-specific
 const DAMIWORKS_TAB_ID = 'damiworks'
@@ -135,6 +136,9 @@ function PackageSelectionPanel({
   const intakeState = snapshot?.intake
   const completed = intakeState?.completed ?? false
   const contactClosed = snapshot?.contactClosed ?? false
+  // Free-form conversations fill the summary too — once channels + tasks are
+  // known from normal chat, show the recommendation and the conversion step.
+  const freeformReady = !completed && intakeState != null && hasFreeformSummary(intakeState)
 
   const displayValues = (field: IntakeField, values: string[] | null | undefined) => {
     if (!values || values.length === 0) return summary.empty
@@ -157,13 +161,13 @@ function PackageSelectionPanel({
 
   const status = contactClosed
     ? summary.status.leadSubmitted
-    : completed
+    : completed || freeformReady
       ? summary.status.packageSelected
       : summary.status.beforeIntake
 
   const nextStep = contactClosed
     ? summary.nextStep.leadSubmitted
-    : completed
+    : completed || freeformReady
       ? summary.nextStep.leaveContact
       : summary.nextStep.completeAssessment
 
@@ -190,7 +194,7 @@ function PackageSelectionPanel({
         <div>
           <dt className="text-xs text-secondary uppercase tracking-wider mb-0.5">{summary.recommendation}</dt>
           <dd className="text-sm text-primary font-medium">
-            {completed ? packageLabel(snapshot?.recommendedPackage) : summary.empty}
+            {completed || freeformReady ? packageLabel(snapshot?.recommendedPackage) : summary.empty}
           </dd>
         </div>
         <div>

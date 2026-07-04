@@ -842,6 +842,54 @@ def _last_assistant_message_text(history: list["ChatHistoryMessage"]) -> str:
             return getattr(item, "content", "") or ""
     return ""
 
+
+def _intake_cta_offered_in_history(history: list["ChatHistoryMessage"]) -> bool:
+    """True if any earlier assistant message already nudged toward the guided
+    intake (including the intro message's «пройти короткий подбор»). The
+    questionnaire is suggested at most once per conversation."""
+    for item in history or []:
+        if getattr(item, "role", None) == "assistant" and _WEB_GUIDED_INTAKE_CTA_RE.search(
+            getattr(item, "content", "") or ""
+        ):
+            return True
+    return False
+
+
+def _history_user_texts(history: list["ChatHistoryMessage"]) -> list[str]:
+    return [
+        getattr(item, "content", "") or ""
+        for item in history or []
+        if getattr(item, "role", None) == "user"
+    ]
+
+
+# Free-form discovery questions that must stop once enough context is known
+# (channels + tasks already stated in normal chat). Includes the rigid
+# "какие именно функции…" and "какой модуль 1С…" style questions.
+_WEB_FREEFORM_DISCOVERY_Q_RE = re.compile(
+    r"какие\s+(?:именно\s+)?функци|"
+    r"какой\s+(?:именно\s+)?модуль|"
+    r"как(?:ой|ую|ая)\s+(?:у\s+вас\s+)?(?:crm|срм)|"
+    r"какой\s+(?:у\s+вас\s+)?(?:основной\s+)?канал|"
+    r"сколько\s+(?:обращений|заявок|запросов)\s+в\s+день|"
+    r"что\s+должен\s+(?:делать|выполнять)\s+(?:ai|ии)[\s-]*сотрудник",
+    re.IGNORECASE,
+)
+
+# Overconfident integration promises ("настроим автоматическую передачу прямо в
+# вашу 1С") — replaced with a safe scoping line. The exact exchange mechanism is
+# discussed on the call, not promised in chat.
+_WEB_INTEGRATION_OVERPROMISE_RE = re.compile(
+    r"(?:настро\w+|сделаем|подключим|организуем)\s+[^.!?]{0,90}автоматическ\w+\s+передач|"
+    r"автоматическ\w+\s+передач\w+\s+[^.!?]{0,60}(?:1с|1c|crm|срм|в\s+ваш\w*\s+систем)",
+    re.IGNORECASE,
+)
+
+_WEB_SAFE_INTEGRATION_LINE = (
+    "Как лучше передавать заявки в вашу систему — напрямую, через API или "
+    "таблицу — обсудим отдельно: зависит от конфигурации."
+)
+
 _WEB_SCOPE_TERMS_RE = re.compile(
     r"отвечал\s+на\s+вопросы|передавал\s+контакты|прогретых\s+лидов|в\s+таблице|историей\s+переписки",
     re.IGNORECASE,
@@ -863,6 +911,9 @@ from .web_site_intake_policy import (  # noqa: E402
     answer_has_guided_intake_cta as _answer_has_guided_intake_cta,
     detect_intent as _detect_post_intake_intent,
     detect_pre_intake_faq_intent as _detect_pre_intake_faq_intent,
+    extract_freeform_profile as _extract_freeform_profile,
+    freeform_close_answer as _freeform_close_answer,
+    has_enough_freeform_context as _has_enough_freeform_context,
     is_start_intent as _is_post_intake_start_intent,
     parse_message as _parse_intake_message,
     pick_contact_ask as _pick_contact_ask,
@@ -871,10 +922,13 @@ from .web_site_intake_policy import (  # noqa: E402
     pre_intake_faq_answer as _pre_intake_faq_answer,
     price_objection_answer as _intake_price_objection,
     price_question_answer as _intake_price_question,
+    profile_to_intake_context as _profile_to_intake_context,
     remove_known_field_reasks as _remove_known_field_reasks,
+    resolve_preintake_turn as _resolve_preintake_turn,
 )
 from .web_site_lead import (  # noqa: E402
     LeadStage,
+    PostIntakeTurn,
     assistant_proposed_next_step as _assistant_proposed_next_step,
     is_affirmation as _is_affirmation_post_intake,
     resolve_post_intake_turn,
@@ -889,6 +943,9 @@ def _sanitize_damiworks_web_answer(
     last_assistant_message: str = "",
     lead_closed: bool = False,
     calendly_enabled: bool = False,
+    intake_cta_already_offered: bool = False,
+    freeform_enough_context: bool = False,
+    freeform_close_fallback: str | None = None,
 ) -> str:
     """Final output guard for web_site / damiworks_site channel.
 
@@ -1073,13 +1130,58 @@ def _sanitize_damiworks_web_answer(
     ):
         normalized = f"Отлично. {_pick_contact_ask(last_assistant_message, calendly_enabled=calendly_enabled)}"
 
-    # Step 8: Ensure exactly one soft guided-intake CTA before intake is completed.
-    # Never doubled (skip if the answer already nudges to the intake) and never
-    # repeated back-to-back (skip if the previous assistant message already did).
+    # Step 7e: Free-form pre-intake — once the conversation already contains
+    # channels + tasks, stop discovery questions ("какие именно функции…",
+    # "какой модуль 1С…"). If stripping empties the answer, fall back to the
+    # deterministic scoping-call close.
+    if not _ctx.exists and freeform_enough_context:
+        paragraphs = [p.strip() for p in normalized.split("\n\n") if p.strip()]
+        kept_ff: list[str] = []
+        for para in paragraphs:
+            sentences = re.split(r"(?<=[.!?])\s+", para)
+            kept = [
+                s
+                for s in sentences
+                if not _WEB_FREEFORM_DISCOVERY_Q_RE.search(s)
+                and not _WEB_POST_INTAKE_BADQ_RE.search(s)
+            ]
+            clean = " ".join(kept).strip().rstrip(",;")
+            if clean:
+                kept_ff.append(clean)
+        normalized = "\n\n".join(kept_ff)
+        if not normalized and freeform_close_fallback:
+            return freeform_close_fallback
+
+    # Step 7f: Never overpromise integration mechanics ("настроим автоматическую
+    # передачу прямо в вашу 1С") — replace the sentence with a safe scoping line.
+    if _WEB_INTEGRATION_OVERPROMISE_RE.search(normalized):
+        paragraphs = [p.strip() for p in normalized.split("\n\n") if p.strip()]
+        rewritten: list[str] = []
+        replaced = False
+        for para in paragraphs:
+            sentences = re.split(r"(?<=[.!?])\s+", para)
+            kept = []
+            for s in sentences:
+                if _WEB_INTEGRATION_OVERPROMISE_RE.search(s):
+                    if not replaced:
+                        kept.append(_WEB_SAFE_INTEGRATION_LINE)
+                        replaced = True
+                else:
+                    kept.append(s)
+            clean = " ".join(kept).strip()
+            if clean:
+                rewritten.append(clean)
+        normalized = "\n\n".join(rewritten)
+
+    # Step 8: Ensure at most one soft guided-intake CTA per conversation, before
+    # intake is completed. Never doubled (skip if the answer already nudges to
+    # the intake) and never repeated (skip once any earlier assistant message —
+    # including the intro — already offered the questionnaire).
     if (
         not close_intent
         and not _ctx.exists
         and normalized
+        and not intake_cta_already_offered
         and not _answer_has_guided_intake_cta(normalized)
         and not _answer_has_guided_intake_cta(last_assistant_message)
     ):
@@ -1945,11 +2047,92 @@ async def chat(
                         _pre_intake_faq_answer(
                             _faq_intent,
                             last_assistant_message=_last_assistant_message_text(effective_history),
+                            suppress_cta=_intake_cta_offered_in_history(effective_history),
                         )
                     ),
                     checkout=False,
                     metadata={
                         "pre_intake_faq": _faq_intent,
+                        "intelligence_shadow": shadow_debug,
+                        "rag_context_found": False,
+                        "tenant_found": bool(tenant_settings),
+                        "client_facts": client_facts,
+                        "server_history_used": bool(logged_history),
+                        "logged_history_messages": len(logged_history),
+                        "payload_history_messages": len(payload.chat_history),
+                        "effective_history_messages": len(effective_history),
+                    },
+                )
+                await supabase.log_chat(
+                    channel=payload.channel,
+                    chat_id=payload.chat_id,
+                    instance_id=payload.instance_id,
+                    message=payload.message,
+                    ai_response=response.answer,
+                    routes=response.routes,
+                    metadata=_build_log_metadata(response),
+                )
+                return response
+
+        # Consultant pre-intake free-form turn: contact replies, "контакт будешь
+        # брать?"-style conversion intent, loop-breaking after "я же сказал"/"это
+        # не важно", and the scoping-call close once channels + tasks are known
+        # from normal chat. Mirrors the post-intake deterministic layer for the
+        # free-form path — the user never has to click the questionnaire.
+        if (
+            _is_consultant_instance(payload)
+            and not roleplay_demo.get("active")
+            and "[WEBSITE INTAKE CONTEXT" not in payload.message
+        ):
+            _ff_profile = _extract_freeform_profile(
+                _history_user_texts(effective_history) + [payload.message]
+            )
+            _pre_turn = _resolve_preintake_turn(
+                payload.message,
+                _ff_profile,
+                _last_assistant_message_text(effective_history),
+                calendly_enabled=payload.calendly_enabled,
+                lead_closed=bool(dialog_state.get("lead_closed")),
+            )
+            if _pre_turn.answer:
+                _pre_lead_status: str | None = _pre_turn.lead_status
+                _pre_lead_sent = False
+                if _pre_turn.lead_status in ("contact_requested", "contact_collected"):
+                    _pre_stage = (
+                        LeadStage.contact_collected
+                        if _pre_turn.lead_status == "contact_collected"
+                        else LeadStage.contact_requested
+                    )
+                    _pre_lead_status, _pre_lead_sent = await _apply_consultant_lead_side_effects(
+                        payload=payload,
+                        ctx=_profile_to_intake_context(_ff_profile),
+                        turn=PostIntakeTurn(_pre_stage, _pre_turn.answer, _pre_turn.contact),
+                        dialog_state=dialog_state,
+                        supabase=supabase,
+                        settings=gemini.settings,
+                    )
+                    session_metadata[DIALOG_STATE_KEY] = dialog_state
+                    await supabase.upsert_chat_session_metadata(
+                        instance_id=payload.instance_id,
+                        channel=payload.channel,
+                        chat_id=payload.chat_id,
+                        metadata=session_metadata,
+                    )
+                response = ChatResponse(
+                    route=Route.general,
+                    routes=[Route.general],
+                    answer=_format_messenger_answer(_pre_turn.answer),
+                    checkout=False,
+                    lead_status=_pre_lead_status,
+                    lead_sent=_pre_lead_sent,
+                    metadata={
+                        "preintake_freeform": True,
+                        "freeform_profile": {
+                            "channels": _ff_profile.channels,
+                            "tasks": _ff_profile.tasks,
+                            "crm": _ff_profile.crm,
+                            "business_type": _ff_profile.business_type,
+                        },
                         "intelligence_shadow": shadow_debug,
                         "rag_context_found": False,
                         "tenant_found": bool(tenant_settings),
@@ -2492,6 +2675,11 @@ async def chat(
         consultant_lead_status: str | None = None
         consultant_lead_sent = False
         if _is_consultant_instance(payload) and not roleplay_output_active:
+            _san_real_msg, _san_ctx = _parse_intake_message(payload.message)
+            _san_profile = _extract_freeform_profile(
+                _history_user_texts(effective_history) + [_san_real_msg]
+            )
+            _san_ff_enough = not _san_ctx.exists and _has_enough_freeform_context(_san_profile)
             answer = _sanitize_damiworks_web_answer(
                 answer=answer,
                 user_message=payload.message,
@@ -2499,6 +2687,13 @@ async def chat(
                 last_assistant_message=_last_assistant_message_text(effective_history),
                 lead_closed=_consultant_lead_closed,
                 calendly_enabled=payload.calendly_enabled,
+                intake_cta_already_offered=_intake_cta_offered_in_history(effective_history),
+                freeform_enough_context=_san_ff_enough,
+                freeform_close_fallback=(
+                    _freeform_close_answer(_san_profile, calendly_enabled=payload.calendly_enabled)
+                    if _san_ff_enough
+                    else None
+                ),
             )
         dialog_state = _update_dialog_state_after_answer(
             dialog_state=dialog_state,
