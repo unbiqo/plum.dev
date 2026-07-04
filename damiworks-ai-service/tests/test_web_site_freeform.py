@@ -51,12 +51,57 @@ def _dental_profile() -> FreeformProfile:
 
 def test_extraction_from_dental_transcript() -> None:
     p = _dental_profile()
-    assert set(p.channels) >= {"WhatsApp", "Instagram", "2GIS", "Website"}
+    assert set(p.channels) >= {"WhatsApp", "Instagram", "2ГИС", "Website"}
     assert "Отвечать на вопросы" in p.tasks
     assert "Запись клиентов" in p.tasks
     assert p.crm == "1С"
     assert p.business_type == "Стоматология"
     assert has_enough_freeform_context(p)
+
+
+def test_extraction_survives_user_typo_in_business() -> None:
+    # «стоматологи» (typo) still maps to the canonical label.
+    p = extract_freeform_profile(["у меня своя стоматологи"])
+    assert p.business_type == "Стоматология"
+
+
+# ---------------------------------------------------------------------------
+# Negation handling — "нет CRM" / "не используем WhatsApp" must not register
+# ---------------------------------------------------------------------------
+
+def test_no_crm_is_not_extracted_as_crm() -> None:
+    p = extract_freeform_profile(["У нас нет CRM, всё ведём вручную, но есть 1с? нет, 1с тоже нет"])
+    assert p.crm is None
+
+    p2 = extract_freeform_profile(["У нас нет CRM, всё ведём вручную"])
+    assert p2.crm is None
+
+
+def test_negated_channel_is_not_extracted() -> None:
+    p = extract_freeform_profile(["Мы не используем WhatsApp"])
+    assert "WhatsApp" not in p.channels
+
+
+def test_negation_keeps_the_positive_alternative() -> None:
+    p = extract_freeform_profile(["у нас нет ватсапа, только инстаграм"])
+    assert "WhatsApp" not in p.channels
+    assert "Instagram" in p.channels
+
+
+def test_trailing_negation_refers_to_previous_clause() -> None:
+    p = extract_freeform_profile(["Instagram раньше был, сейчас не работает"])
+    assert "Instagram" not in p.channels
+
+
+# ---------------------------------------------------------------------------
+# Close threshold — one weak signal must not trigger the scoping-call close
+# ---------------------------------------------------------------------------
+
+def test_single_channel_without_tasks_is_not_enough_for_close() -> None:
+    p = extract_freeform_profile(["у меня бизнес, клиенты пишут в ватсап"])
+    assert not has_enough_freeform_context(p)
+    turn = resolve_preintake_turn("клиенты пишут в ватсап", p, "", calendly_enabled=True)
+    assert turn.answer is None  # the LLM asks its one clarifying question instead
 
 
 def test_extraction_empty_for_smalltalk() -> None:

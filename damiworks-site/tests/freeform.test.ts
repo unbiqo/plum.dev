@@ -31,8 +31,8 @@ console.log('\nextractFreeformIntake')
 {
   const ex = extractFreeformIntake(DENTAL_TEXTS)
   check(
-    'dental transcript extracts channels WhatsApp/Instagram/2GIS/Website',
-    ['WhatsApp', 'Instagram', '2GIS', 'Website'].every((c) => ex.channels.includes(c)),
+    'dental transcript extracts channels WhatsApp/Instagram/2ГИС/Website',
+    ['WhatsApp', 'Instagram', '2ГИС', 'Website'].every((c) => ex.channels.includes(c)),
   )
   check('dental transcript extracts answering + booking tasks',
     ex.tasks.includes('Отвечать на вопросы') && ex.tasks.includes('Запись клиентов'))
@@ -41,6 +41,19 @@ console.log('\nextractFreeformIntake')
 
   const empty = extractFreeformIntake(['привет', 'как дела?'])
   check('smalltalk extracts nothing', empty.channels.length === 0 && empty.tasks.length === 0)
+}
+
+console.log('\nnegation handling')
+{
+  check('"нет CRM" is not extracted as CRM',
+    extractFreeformIntake(['У нас нет CRM, всё ведём вручную']).handoff === null)
+  check('"не используем WhatsApp" does not add the channel',
+    !extractFreeformIntake(['Мы не используем WhatsApp']).channels.includes('WhatsApp'))
+  const alt = extractFreeformIntake(['у нас нет ватсапа, только инстаграм'])
+  check('negated channel dropped, positive alternative kept',
+    !alt.channels.includes('WhatsApp') && alt.channels.includes('Instagram'))
+  check('trailing negation drops the previous clause',
+    !extractFreeformIntake(['Instagram раньше был, сейчас не работает']).channels.includes('Instagram'))
 }
 
 console.log('\nmergeFreeformIntake')

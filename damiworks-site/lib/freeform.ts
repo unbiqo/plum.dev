@@ -18,7 +18,7 @@ const CHANNEL_PATTERNS: Array<[RegExp, string]> = [
   [/whats\s*app|ватсап|вотсап|воцап/i, 'WhatsApp'],
   [/instagram|инстаграм/i, 'Instagram'],
   [/telegram|телеграм|(?:^|[^а-яёa-z0-9_])тг(?![а-яёa-z0-9_])/i, 'Telegram'],
-  [/2\s*(?:гис|gis)|дубль\s*гис/i, '2GIS'],
+  [/2\s*(?:гис|gis)|дубль\s*гис/i, '2ГИС'],
   [/сайт|website/i, 'Website'],
 ]
 
@@ -49,9 +49,39 @@ const BUSINESS_PATTERNS: Array<[RegExp, string]> = [
   [/кафе|ресторан|доставк\w+\s+еды/i, 'Услуги'],
 ]
 
+// Negation guard — mirrors _ff_positive_text in web_site_intake_policy.py:
+// "у нас нет CRM", "не используем WhatsApp", "Instagram раньше был, сейчас не
+// работает" must not register facts.
+const NEGATION_RE = /(?:^|[^а-яёa-z0-9_])(?:нет|не|без)(?![а-яёa-z0-9_])/i
+
+const ALL_PATTERNS: RegExp[] = [
+  ...CHANNEL_PATTERNS,
+  ...TASK_PATTERNS,
+  ...HANDOFF_PATTERNS,
+  ...BUSINESS_PATTERNS,
+].map(([re]) => re)
+
+function clauseHasKeyword(clause: string): boolean {
+  return ALL_PATTERNS.some((re) => re.test(clause))
+}
+
+function positiveText(text: string): string {
+  const kept: string[] = []
+  for (const clause of text.split(/[.,;!?\n]+/)) {
+    if (NEGATION_RE.test(clause)) {
+      // A negation clause without its own keyword refers back to the previous
+      // clause ("Instagram раньше был, сейчас не работает") — drop it too.
+      if (kept.length > 0 && !clauseHasKeyword(clause)) kept.pop()
+      continue
+    }
+    kept.push(clause)
+  }
+  return kept.join(' . ')
+}
+
 /** Extract channels/tasks/CRM/business type from free-form user messages. */
 export function extractFreeformIntake(userTexts: string[]): FreeformExtract {
-  const combined = userTexts.filter(Boolean).join('\n')
+  const combined = userTexts.filter(Boolean).map(positiveText).join('\n')
   const channels = CHANNEL_PATTERNS.filter(([re]) => re.test(combined)).map(([, label]) => label)
   const tasks = TASK_PATTERNS.filter(([re]) => re.test(combined)).map(([, label]) => label)
   const handoff = HANDOFF_PATTERNS.find(([re]) => re.test(combined))?.[1] ?? null

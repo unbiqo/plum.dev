@@ -1526,7 +1526,7 @@ const ru: Dict = {
       {
         id: 'channels',
         text: 'Где вам пишут клиенты? Можно выбрать несколько.',
-        options: ['WhatsApp', 'Instagram', 'Telegram', 'Website', 'Другое'],
+        options: ['WhatsApp', 'Instagram', 'Telegram', 'Сайт', 'Другое'],
         values: ['WhatsApp', 'Instagram', 'Telegram', 'Website', 'Другое'],
         multi: true,
       },

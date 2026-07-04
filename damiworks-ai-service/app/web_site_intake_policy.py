@@ -1055,7 +1055,7 @@ _FF_CHANNEL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"whats\s*app|ватсап|вотсап|воцап", re.IGNORECASE), "WhatsApp"),
     (re.compile(r"instagram|инстаграм", re.IGNORECASE), "Instagram"),
     (re.compile(r"telegram|телеграм|\bтг\b", re.IGNORECASE), "Telegram"),
-    (re.compile(r"2\s*(?:гис|gis)|дубль\s*гис", re.IGNORECASE), "2GIS"),
+    (re.compile(r"2\s*(?:гис|gis)|дубль\s*гис", re.IGNORECASE), "2ГИС"),
     (re.compile(r"\bсайт\w*|website", re.IGNORECASE), "Website"),
 )
 
@@ -1094,10 +1094,46 @@ _FF_BUSINESS_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# Negation guard: "у нас нет CRM", "не используем WhatsApp", "Instagram раньше
+# был, сейчас не работает" must not register facts. Clauses containing a
+# negation are dropped; a negation clause without its own keyword refers back
+# to the previous clause and drops it too.
+_FF_NEGATION_RE = re.compile(r"\b(?:нет|не|без)\b", re.IGNORECASE)
+
+_FF_ALL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    p
+    for p, _ in (
+        *_FF_CHANNEL_PATTERNS,
+        *_FF_TASK_PATTERNS,
+        *_FF_CRM_PATTERNS,
+        *_FF_BUSINESS_PATTERNS,
+    )
+)
+
+
+def _ff_clause_has_keyword(clause: str) -> bool:
+    return any(p.search(clause) for p in _FF_ALL_PATTERNS)
+
+
+def _ff_positive_text(text: str) -> str:
+    """Return only the clauses of ``text`` that are not negated."""
+    kept: list[str] = []
+    for clause in re.split(r"[.,;!?\n]+", text or ""):
+        if _FF_NEGATION_RE.search(clause):
+            if kept and not _ff_clause_has_keyword(clause):
+                kept.pop()
+            continue
+        kept.append(clause)
+    return " . ".join(kept)
+
+
 def extract_freeform_profile(user_texts: list[str]) -> FreeformProfile:
-    """Deterministically extract channels/tasks/CRM/business from user messages."""
+    """Deterministically extract channels/tasks/CRM/business from user messages.
+
+    Negated clauses never contribute facts (see ``_ff_positive_text``).
+    """
     profile = FreeformProfile()
-    combined = "\n".join(t for t in (user_texts or []) if t)
+    combined = "\n".join(_ff_positive_text(t) for t in (user_texts or []) if t)
     for pattern, label in _FF_CHANNEL_PATTERNS:
         if pattern.search(combined) and label not in profile.channels:
             profile.channels.append(label)
