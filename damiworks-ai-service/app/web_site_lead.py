@@ -86,7 +86,7 @@ def assistant_proposed_next_step(last_assistant_message: str) -> bool:
 
 
 _CLOSED_TERMINAL_ANSWER = (
-    "Заявка уже отправлена — команда свяжется с вами в WhatsApp/Telegram "
+    "Заявка уже отправлена. Команда свяжется с вами в WhatsApp/Telegram "
     "и уточнит детали запуска."
 )
 

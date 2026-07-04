@@ -271,6 +271,33 @@ def test_sanitizer_softens_integration_overpromise() -> None:
     assert "обсудим отдельно" in low
 
 
+def test_high_frequency_damiworks_templates_avoid_em_dashes() -> None:
+    # Production-polish guard: the most frequently shown deterministic
+    # DamiWorks templates must not reintroduce AI-sounding em dashes.
+    # Deliberately NOT a global ban — Russian copy may use a dash naturally.
+    from app.web_site_intake_policy import (
+        CALENDLY_CONTACT_ASK,
+        CONTACT_ASKS,
+        GUIDED_INTAKE_CTAS,
+        contact_close_answer,
+        phone_handoff_ack,
+    )
+
+    samples = [
+        CALENDLY_CONTACT_ASK,
+        *CONTACT_ASKS,
+        *GUIDED_INTAKE_CTAS,
+        phone_handoff_ack(),
+        contact_close_answer("+7 777 282 88 22"),
+        contact_offer_answer(calendly_enabled=True),
+        contact_offer_answer(calendly_enabled=False),
+        freeform_close_answer(_dental_profile(), calendly_enabled=True),
+        freeform_close_answer(_dental_profile(), calendly_enabled=False),
+    ]
+    for text in samples:
+        assert "—" not in text, text
+
+
 def test_freeform_answers_never_reintroduce_damiworks_prices() -> None:
     for text in (
         freeform_close_answer(_dental_profile(), calendly_enabled=True),

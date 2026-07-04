@@ -314,9 +314,9 @@ def detect_pre_intake_faq_intent(user_message: str) -> PreIntakeFaqIntent | None
 # present in the previous assistant message so the same CTA is never used twice
 # in a row.
 GUIDED_INTAKE_CTAS: tuple[str, ...] = (
-    "Если хотите, я могу подобрать подходящий вариант за 1 минуту — нажмите «Подобрать AI-сотрудника».",
+    "Если хотите, я могу подобрать подходящий вариант за 1 минуту: нажмите «Подобрать AI-сотрудника».",
     "Чтобы понять, какой формат подойдёт именно вам, можно пройти короткий подбор.",
-    "Лучше всего начать с короткого подбора — он займёт около минуты.",
+    "Лучше всего начать с короткого подбора: он займёт около минуты.",
     "Могу помочь быстро сориентироваться: ответьте на несколько вопросов, и я покажу подходящий вариант.",
 )
 
@@ -352,7 +352,7 @@ _FAQ_VS_CHATBOT_BODY = (
 )
 
 _FAQ_HOW_IT_WORKS_BODY = (
-    "DamiWorks подключает AI-сотрудника к вашему каналу — например WhatsApp, Instagram, "
+    "DamiWorks подключает AI-сотрудника к вашему каналу: WhatsApp, Instagram, "
     "Telegram или сайту.\n\n"
     "Мы настраиваем базу знаний, сценарии ответов, сбор контактов, квалификацию заявок "
     "и передачу менеджеру или в Google Sheets/CRM.\n\n"
@@ -517,7 +517,7 @@ def price_objection_answer(ctx: IntakeContext) -> str | None:
             f"Стоимость {_pkg_label(pkg)} под ваши задачи ({tasks}, каналы: {channels}) "
             f"зависит от объёма работ и интеграций.\n\n"
             f"После короткого разбора предложим конкретный формат и объём запуска. "
-            f"Если нужен вариант проще — можно начать с {_START_LABEL}: "
+            f"Если нужен вариант проще, можно начать с {_START_LABEL}: "
             f"базовые ответы + сбор контактов, без сложной квалификации.\n\n"
             f"Хотите обсудить варианты?"
         )
@@ -589,10 +589,10 @@ def price_question_answer(ctx: IntakeContext) -> str | None:
 
     if HIDE_DAMIWORKS_PUBLIC_PRICES:
         return (
-            f"Для вашего набора задач — {tasks} — подойдёт {_pkg_label(pkg)}.\n\n"
+            f"Под ваши задачи ({tasks}) подойдёт {_pkg_label(pkg)}.\n\n"
             f"Точную стоимость лучше назвать после короткого разбора: важны каналы, "
             f"объём заявок, интеграции и глубина автоматизации. "
-            f"Оставьте контакт — мы свяжемся и предложим конкретный формат запуска."
+            f"Оставьте контакт, и мы свяжемся и предложим конкретный формат запуска."
         )
 
     price = ctx.shown_price or ""
@@ -625,18 +625,18 @@ def already_answered_acknowledgment(ctx: IntakeContext) -> str | None:
     tasks = _tasks_str(ctx)
     biz = (ctx.business_type or "").strip().lower()
     next_step = (
-        f"Следующий шаг — подготовить короткое ТЗ по вашему {biz} и примерам вопросов клиентов."
+        f"Следующий шаг: подготовить короткое ТЗ по вашему {biz} и примерам вопросов клиентов."
         if biz and biz not in _SKIP_BIZ else
-        "Следующий шаг — подготовить короткое ТЗ и примеры вопросов клиентов."
+        "Следующий шаг: подготовить короткое ТЗ и примеры вопросов клиентов."
     )
     if HIDE_DAMIWORKS_PUBLIC_PRICES:
         return (
-            f"Да, вы правы — вы уже выбрали: {channels}, {tasks}.\n\n"
+            f"Да, вы правы, вы уже выбрали: {channels}, {tasks}.\n\n"
             f"Ориентируюсь на {_pkg_label(pkg)}. {next_step}"
         )
     price = ctx.shown_price or ""
     return (
-        f"Да, вы правы — вы уже выбрали: {channels}, {tasks}.\n\n"
+        f"Да, вы правы, вы уже выбрали: {channels}, {tasks}.\n\n"
         f"Поэтому ориентируюсь на {_pkg_label(pkg)}: {price}. {next_step}"
     )
 
@@ -649,19 +649,19 @@ def already_answered_acknowledgment(ctx: IntakeContext) -> str | None:
 # present in the previous assistant message so the same one is never used twice
 # in a row.
 CONTACT_ASKS: tuple[str, ...] = (
-    "Оставьте, пожалуйста, имя и номер WhatsApp/Telegram — мы свяжемся, уточним детали и предложим следующий шаг.",
-    "Можете оставить номер WhatsApp/Telegram — мы передадим заявку команде.",
+    "Оставьте, пожалуйста, имя и номер WhatsApp/Telegram, и мы свяжемся, уточним детали и предложим следующий шаг.",
+    "Можете оставить номер WhatsApp/Telegram, и мы передадим заявку команде.",
     "Если хотите продолжить, оставьте контакт, и мы обсудим запуск.",
-    "Для следующего шага оставьте имя и номер — мы свяжемся и уточним детали.",
+    "Для следующего шага оставьте имя и номер, мы свяжемся и уточним детали.",
 )
 
 # Calendly-preferred contact ask — used only when the frontend reports that a
 # booking CTA is visible (ChatRequest.calendly_enabled). Presents the call as
 # the preferred next step while keeping WhatsApp/Telegram as an equal option.
 CALENDLY_CONTACT_ASK = (
-    "Лучший следующий шаг — выбрать удобное время для короткого 20-минутного звонка. "
+    "Лучший следующий шаг: выбрать удобное время для короткого 20-минутного звонка. "
     "Так я смогу быстро понять вашу воронку, каналы и где AI-сотрудник даст больше пользы.\n\n"
-    "Можете забронировать звонок или просто оставить WhatsApp/Telegram — как удобнее."
+    "Можете забронировать звонок или просто оставить WhatsApp/Telegram, как удобнее."
 )
 
 # Soft, non-contact next steps for informational post-intake answers — never a
@@ -757,7 +757,7 @@ def start_handoff_answer(last_assistant_message: str = "", *, calendly_enabled: 
 def phone_handoff_ack() -> str:
     """Acknowledge a provided phone number without a fake SLA (PART 8)."""
     return (
-        "Отлично, номер записал. Передам заявку команде — "
+        "Отлично, номер записал. Передам заявку команде: "
         "с вами свяжутся в WhatsApp/Telegram и уточнят детали запуска."
     )
 
@@ -967,11 +967,11 @@ def has_contact_like_reply(user_message: str, last_assistant_message: str = "") 
 
 
 _CONTACT_CLOSE_GENERIC = (
-    "Отлично, контакт получил. Передам заявку команде — "
+    "Отлично, контакт получил. Передам заявку команде: "
     "с вами свяжутся в WhatsApp/Telegram и уточнят детали запуска."
 )
 _CONTACT_CLOSE_TELEGRAM = (
-    "Отлично, Telegram получил. Передам заявку команде — "
+    "Отлично, Telegram получил. Передам заявку команде: "
     "с вами свяжутся и уточнят детали запуска."
 )
 
@@ -1200,7 +1200,7 @@ _FF_PRICE_VOCAB_RE = re.compile(
 _FREEFORM_CLOSE_MARKER = "достаточно для первичного разбора"
 
 _PREINTAKE_CLOSED_ANSWER = (
-    "Заявка уже отправлена — команда свяжется с вами в WhatsApp/Telegram "
+    "Заявка уже отправлена. Команда свяжется с вами в WhatsApp/Telegram "
     "и уточнит детали запуска."
 )
 
@@ -1213,12 +1213,12 @@ def is_contact_offer_question(user_message: str) -> bool:
 def contact_offer_answer(*, calendly_enabled: bool = False) -> str:
     if calendly_enabled:
         return (
-            "Да. Удобнее всего — сразу выбрать время для короткого звонка. "
+            "Да. Удобнее всего сразу выбрать время для короткого звонка. "
             "Или оставьте WhatsApp/Telegram, и я передам заявку команде."
         )
     return (
-        "Да. Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram — "
-        "передам заявку команде, и с вами свяжутся."
+        "Да. Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram. "
+        "Передам заявку команде, и с вами свяжутся."
     )
 
 
@@ -1232,12 +1232,12 @@ def freeform_close_answer(profile: FreeformProfile, *, calendly_enabled: bool = 
     if profile.channels:
         bits.append(", ".join(profile.channels))
     if profile.crm:
-        bits.append(f"как передавать заявки в {profile.crm} — напрямую, через API или таблицу")
+        bits.append(f"как передавать заявки в {profile.crm} (напрямую, через API или таблицу)")
     scope = "посмотрим " + "; ".join(bits) if bits else "разберём ваши каналы и задачи"
     tail = (
-        "Можете забронировать время для звонка или оставить WhatsApp/Telegram — как удобнее."
+        "Можете забронировать время для звонка или оставить WhatsApp/Telegram, как удобнее."
         if calendly_enabled
-        else "Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram — мы свяжемся и предложим формат запуска."
+        else "Оставьте, пожалуйста, ваше имя и WhatsApp/Telegram, и мы свяжемся и предложим формат запуска."
     )
     return (
         f"Этого уже достаточно для первичного разбора. Лучше всего обсудить сценарий "

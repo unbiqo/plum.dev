@@ -431,7 +431,7 @@ const en: Dict = {
             { from: 'user', text: 'Okay. Do you have any time tomorrow after 5 PM?', leadStateIndex: 3 },
             { from: 'ai',   text: "Yes, there's an opening tomorrow at 6:30 PM. Would you like me to book you for that time?" },
             { from: 'user', text: 'Yes, please book me.', leadStateIndex: 4 },
-            { from: 'ai',   text: "Done — you're booked for tomorrow at 6:30 PM. See you then!" },
+            { from: 'ai',   text: "Done! You're booked for tomorrow at 6:30 PM. See you then!" },
             { from: 'user', text: 'Thank you, goodbye.' },
           ],
           leadStates: [
@@ -452,7 +452,7 @@ const en: Dict = {
             { from: 'user', text: 'Okay. Is there any time this week after school?', leadStateIndex: 3 },
             { from: 'ai',   text: "Yes, there's a trial lesson on Thursday at 4:00 PM. Would you like me to book it?" },
             { from: 'user', text: 'Yes, please book it.', leadStateIndex: 4 },
-            { from: 'ai',   text: "Done — the trial lesson is booked for Thursday at 4:00 PM. We'll send the details and a reminder before the lesson." },
+            { from: 'ai',   text: "Done! The trial lesson is booked for Thursday at 4:00 PM. We'll send the details and a reminder before the lesson." },
             { from: 'user', text: 'Thank you!' },
           ],
           leadStates: [
@@ -522,7 +522,7 @@ const en: Dict = {
           { from: 'user', text: 'Do you have English courses?' },
           {
             from: 'ai',
-            text: 'Yes! We have groups for children, teens, and adults — offline and online. I can help find the right format.',
+            text: 'Yes! We have groups for children, teens, and adults, offline and online. I can help find the right format.',
           },
         ],
         leadSummary: {
@@ -598,7 +598,7 @@ const en: Dict = {
     },
     customSummary: {
       title: 'Your demo',
-      text: 'Describe your business or upload materials — the AI will show how it could respond to your customers.',
+      text: 'Describe your business or upload materials, and the AI will show how it could respond to your customers.',
       status: 'Demo uses your data',
     },
     schoolChat: {
@@ -697,7 +697,7 @@ const en: Dict = {
   valueProp: {
     headline: 'Not just access to AI agents',
     description:
-      'A platform gives you access to a tool. DamiWorks handles the implementation end to end: we analyze your process, build the knowledge base, design scenarios, connect channels, test responses, and improve the system after launch. You get a configured AI employee ready for real customer conversations — not an empty dashboard.',
+      'A platform gives you access to a tool. DamiWorks handles the implementation end to end: we analyze your process, build the knowledge base, design scenarios, connect channels, test responses, and improve the system after launch. You get a configured AI employee ready for real customer conversations, not an empty dashboard.',
     items: [
       {
         number: '01',
@@ -730,7 +730,7 @@ const en: Dict = {
       subtitle:
         'We are currently selecting a small number of online schools and education centers for pilot AI administrator deployments.',
       body:
-        'We first show a demo, review your programs, prices, and common customer questions, then suggest a pilot format — from a simple website AI chat to WhatsApp/Telegram handoff for qualified leads.',
+        'We first show a demo, review your programs, prices, and common customer questions, then suggest a pilot format: from a simple website AI chat to WhatsApp/Telegram handoff for qualified leads.',
       includesTitle: 'What is included in the pilot',
       bullets: [
         'AI answers first questions from parents and students',
@@ -832,7 +832,7 @@ const en: Dict = {
     placeholderBusinessType: 'Select your business type',
     placeholderMessage: 'What do you want to automate? (optional)',
     submitButton: 'Send request',
-    successMessage: "Thanks — we'll contact you soon.",
+    successMessage: "Thanks! We'll contact you soon.",
     errorMessage: 'Something went wrong. Please try again.',
     businessTypes: [
       'Beauty / Wellness',
@@ -890,7 +890,7 @@ const en: Dict = {
     sentConfirmation: 'Summary sent to Damir. You can ask questions below.',
     editAnswersButton: '← Edit answers',
     intakeStartMessage: "Great, I'll ask 5 short questions and find the right package.",
-    intakeCompleteMessage: "Great! Based on your answers — here's my recommendation:",
+    intakeCompleteMessage: "Great! Here's my recommendation based on your answers:",
     errorMessage: 'Something went wrong. Please try again.',
     resetTitle: 'Reset',
     resetLabel: 'Reset',
@@ -905,7 +905,7 @@ const en: Dict = {
   },
   customDemoChat: {
     introMessage:
-      "Upload business materials — a proposal, presentation, price list, catalog, FAQ, or service description. If you don't have a file, describe what you sell, your prices, terms, and common customer questions.\n\nThen ask a question as if you were a customer — I'll show how an AI employee could respond using those materials.",
+      "Upload business materials: a proposal, presentation, price list, catalog, FAQ, or service description. If you don't have a file, describe what you sell, your prices, terms, and common customer questions.\n\nThen ask a question as if you were a customer, and I'll show how an AI employee could respond using those materials.",
     headerTitle: 'Custom demo',
     inputPlaceholder: 'Describe your business or write a question as a customer...',
     errorMessage: 'Something went wrong. Please try again.',
@@ -1078,7 +1078,7 @@ const ru: Dict = {
         number: '02',
         icon: 'BookOpen',
         title: 'Обучаем AI-сотрудника',
-        description: 'Собираем базу знаний, изучаем услуги и настраиваем тон общения — AI отвечает в стиле вашей команды.',
+        description: 'Собираем базу знаний, изучаем услуги и настраиваем тон общения. AI отвечает в стиле вашей команды.',
       },
       {
         number: '03',
@@ -1119,7 +1119,7 @@ const ru: Dict = {
           { from: 'user', text: 'У вас есть курсы английского?' },
           {
             from: 'ai',
-            text: 'Да! Есть группы для детей, подростков и взрослых — офлайн и онлайн. Помогу подобрать подходящий формат.',
+            text: 'Да! Есть группы для детей, подростков и взрослых, офлайн и онлайн. Помогу подобрать подходящий формат.',
           },
         ],
         leadSummary: {
@@ -1195,7 +1195,7 @@ const ru: Dict = {
     },
     customSummary: {
       title: 'Своё демо',
-      text: 'Опишите бизнес или загрузите материалы — AI покажет, как мог бы отвечать вашим клиентам.',
+      text: 'Опишите бизнес или загрузите материалы, и AI покажет, как мог бы отвечать вашим клиентам.',
       status: 'Демо строится на ваших данных',
     },
     schoolChat: {
@@ -1420,7 +1420,7 @@ const ru: Dict = {
   },
   contact: {
     headline: 'Обсудим, где AI-сотрудник\nбыстрее всего даст эффект',
-    description: 'Расскажите о бизнесе — покажем, как DamiWorks может помочь.',
+    description: 'Расскажите о бизнесе, и мы покажем, как DamiWorks может помочь.',
     note: '',
     calendlyButton: '📅 Забронировать 20-минутный звонок',
     calendlySubtext: 'или заполните форму, и мы вам напишем',
@@ -1429,7 +1429,7 @@ const ru: Dict = {
     placeholderBusinessType: 'Выберите тип бизнеса',
     placeholderMessage: 'Что хотите автоматизировать? Например: ответы в WhatsApp, заявки, запись, follow-up. (необязательно)',
     submitButton: 'Отправить заявку',
-    successMessage: 'Спасибо — скоро свяжемся с вами.',
+    successMessage: 'Спасибо! Скоро свяжемся с вами.',
     errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
     businessTypes: [
       'Красота / Оздоровление',
@@ -1491,7 +1491,7 @@ const ru: Dict = {
     sentConfirmation: 'Сводка отправлена команде. Можно задать вопрос ниже.',
     editAnswersButton: '← Изменить ответы',
     intakeStartMessage: 'Отлично, задам 5 коротких вопросов и подберу подходящий пакет.',
-    intakeCompleteMessage: 'Отлично! На основе ваших ответов — вот что рекомендую:',
+    intakeCompleteMessage: 'Отлично! Вот что рекомендую на основе ваших ответов:',
     errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
     resetTitle: 'Сбросить',
     resetLabel: 'Сброс',
@@ -1506,7 +1506,7 @@ const ru: Dict = {
   },
   customDemoChat: {
     introMessage:
-      'Загрузите материалы о бизнесе — КП, презентацию, прайс, каталог, FAQ или описание услуг. Если файла нет, опишите, что продаёте, цены, условия и частые вопросы клиентов.\n\nЗатем напишите вопрос как будто вы клиент — я покажу, как AI-сотрудник ответит на основе этих материалов.',
+      'Загрузите материалы о бизнесе: КП, презентацию, прайс, каталог, FAQ или описание услуг. Если файла нет, опишите, что продаёте, цены, условия и частые вопросы клиентов.\n\nЗатем напишите вопрос как будто вы клиент, и я покажу, как AI-сотрудник ответит на основе этих материалов.',
     headerTitle: 'Custom demo',
     inputPlaceholder: 'Опишите бизнес или напишите вопрос как клиент...',
     errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
@@ -1519,7 +1519,7 @@ const ru: Dict = {
     fileTooBig: 'Файл слишком большой (макс. 5 МБ)',
     fileTypeError: 'Поддерживаемые форматы: .txt, .pdf, .csv, .md',
     fileUploadError: 'Не удалось загрузить файл. Попробуйте другой документ.',
-    materialsUploadedMessage: 'Материалы загружены. Теперь задайте вопрос как клиент — я отвечу с учетом этих материалов.',
+    materialsUploadedMessage: 'Материалы загружены. Теперь задайте вопрос как клиент, и я отвечу с учетом этих материалов.',
   },
   intake: {
     questions: [
