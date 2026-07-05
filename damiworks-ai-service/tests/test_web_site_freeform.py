@@ -153,9 +153,13 @@ def test_dismissal_does_not_reask() -> None:
 
 
 def test_close_not_repeated_twice_in_a_row() -> None:
+    # "хорошо" right after the close is acceptance: move to the contact ask,
+    # never repeat the "этого достаточно..." close verbatim.
     prev = freeform_close_answer(_dental_profile(), calendly_enabled=True)
     turn = resolve_preintake_turn("хорошо", _dental_profile(), prev, calendly_enabled=True)
-    assert turn.answer is None  # falls through to the LLM instead of re-closing
+    assert turn.answer is not None
+    assert turn.lead_status == "contact_requested"
+    assert "достаточно для первичного разбора" not in turn.answer
 
 
 def test_contact_offer_question_is_damiworks_conversion_intent() -> None:
@@ -296,6 +300,179 @@ def test_high_frequency_damiworks_templates_avoid_em_dashes() -> None:
     ]
     for text in samples:
         assert "—" not in text, text
+
+
+# ---------------------------------------------------------------------------
+# Round 8: generalized sales policy across niches
+# ---------------------------------------------------------------------------
+
+_SCHOOL_TEXTS = ["У меня онлайн-школа, заявки из Instagram, надо отвечать и записывать на пробный урок."]
+_TG_CHANNEL_TEXTS = [
+    "Трафик из TikTok в Telegram-бота, бот должен продавать закрытый канал "
+    "и сохранять клиентов в Google Sheets."
+]
+
+
+def test_extraction_online_school() -> None:
+    p = extract_freeform_profile(_SCHOOL_TEXTS)
+    assert "Instagram" in p.channels
+    assert "Отвечать на вопросы" in p.tasks and "Запись клиентов" in p.tasks
+    assert p.business_type == "Обучение"
+    assert has_enough_freeform_context(p)
+
+
+def test_extraction_paid_telegram_channel() -> None:
+    p = extract_freeform_profile(_TG_CHANNEL_TEXTS)
+    assert "TikTok" in p.channels and "Telegram" in p.channels
+    assert "Продажа доступа" in p.tasks
+    assert "Собирать контакты" in p.tasks
+    assert p.crm == "Google Sheets"
+    assert has_enough_freeform_context(p)
+
+
+def test_enough_context_close_generalizes_across_niches() -> None:
+    # Same close policy for school and paid-channel niches, not only dentistry:
+    # a short low-info reply with enough context moves to the call, and an
+    # explicit "да" converts directly.
+    for texts in (_SCHOOL_TEXTS, _TG_CHANNEL_TEXTS):
+        profile = extract_freeform_profile(texts)
+        short = resolve_preintake_turn("ага, всё так", profile, "Какой у вас объём заявок?",
+                                       calendly_enabled=True)
+        assert short.answer is not None, texts
+        assert "достаточно для первичного разбора" in short.answer.casefold()
+        assert short.lead_status == "contact_requested"
+
+        yes = resolve_preintake_turn("да", profile, "Какой у вас объём заявок?", calendly_enabled=True)
+        assert yes.answer is not None and yes.lead_status == "contact_requested"
+        assert "звонк" in yes.answer.casefold() or "whatsapp" in yes.answer.casefold()
+
+
+def test_business_plus_tasks_is_enough_without_channel() -> None:
+    # "Салон красоты, хочу чтобы бот отвечал и записывал клиентов." — 2 signals.
+    p = extract_freeform_profile(["Салон красоты, хочу чтобы бот отвечал и записывал клиентов"])
+    assert has_enough_freeform_context(p)
+
+
+def test_weak_context_never_closes_early() -> None:
+    for msg in ("Нужен бот", "Хочу автоматизацию", "Клиенты пишут"):
+        p = extract_freeform_profile([msg])
+        assert not has_enough_freeform_context(p), msg
+        turn = resolve_preintake_turn(msg, p, "")
+        # Falls through to the LLM (one useful question), except explicit
+        # conversion intents, which may offer the call.
+        if turn.answer is not None:
+            assert "достаточно для первичного разбора" not in turn.answer.casefold(), msg
+
+
+def test_dalshe_chto_after_enough_context_converts() -> None:
+    turn = resolve_preintake_turn("дальше что?", _dental_profile(), "", calendly_enabled=True)
+    assert turn.answer is not None
+    assert turn.lead_status == "contact_requested"
+    low = turn.answer.casefold()
+    assert "звонк" in low or "whatsapp" in low
+
+
+def test_kak_nachat_converts() -> None:
+    turn = resolve_preintake_turn("как начать?", _dental_profile(), "", calendly_enabled=True)
+    assert turn.answer is not None
+    assert turn.lead_status == "contact_requested"
+
+
+def test_ok_after_proposal_converts_not_requalifies() -> None:
+    prev = freeform_close_answer(_dental_profile(), calendly_enabled=True)
+    for msg in ("ок", "да", "хорошо", "давайте"):
+        turn = resolve_preintake_turn(msg, _dental_profile(), prev, calendly_enabled=True)
+        assert turn.answer is not None, msg
+        assert turn.lead_status == "contact_requested", msg
+        assert "?" not in turn.answer or "какой" not in turn.answer.casefold(), msg
+
+
+def test_gibberish_is_not_treated_as_confirmation() -> None:
+    for msg in ("lf", "asdf", "qwe"):
+        turn = resolve_preintake_turn(msg, _dental_profile(), "", calendly_enabled=True)
+        assert turn.answer is not None, msg
+        assert "не совсем понял" in turn.answer.casefold(), msg
+        assert turn.lead_status is None, msg  # never a lead-state change
+    # Known short words are not gibberish.
+    from app.web_site_intake_policy import is_gibberish_message
+
+    for word in ("ok", "crm", "api"):
+        assert not is_gibberish_message(word), word
+
+
+def test_refusals_break_loop() -> None:
+    for msg in ("не знаю", "не хочу отвечать", "давай дальше"):
+        turn = resolve_preintake_turn(msg, _dental_profile(), "Какой именно модуль 1С?",
+                                      calendly_enabled=True)
+        assert turn.answer is not None, msg
+        assert turn.lead_status == "contact_requested", msg
+        assert "модуль" not in turn.answer.casefold(), msg
+
+
+def test_no_internal_package_names_in_discovery_templates() -> None:
+    from app.web_site_intake_policy import (
+        IntakeContext,
+        already_answered_acknowledgment,
+        business_details_answer,
+        cheaper_answer,
+        price_objection_answer,
+        price_question_answer,
+    )
+
+    ctx = IntakeContext(
+        exists=True, channels=["WhatsApp"], tasks=["Отвечать на вопросы"],
+        business_type="Стоматология", recommended_package="Sales Assistant",
+    )
+    answers = [
+        price_objection_answer(ctx),
+        price_question_answer(ctx),
+        already_answered_acknowledgment(ctx),
+        cheaper_answer(ctx),
+        business_details_answer(ctx),
+        freeform_close_answer(_dental_profile(), calendly_enabled=True),
+        contact_offer_answer(calendly_enabled=True),
+    ]
+    for text in answers:
+        assert text is not None
+        for label in ("Pilot / Start", "Sales Assistant", "Integrated AI Employee"):
+            assert label not in text, (label, text)
+        assert not _PRICE_RE.search(text)
+
+
+def test_sanitizer_replaces_internal_labels_in_llm_answers() -> None:
+    out = _sanitize_damiworks_web_answer(
+        answer="Вам подойдёт Sales Assistant, а дешевле — Pilot / Start или Integrated AI Employee.",
+        user_message="что посоветуете?",
+        close_intent=False,
+        intake_cta_already_offered=True,
+    )
+    for label in ("Pilot / Start", "Sales Assistant", "Integrated AI Employee"):
+        assert label not in out
+
+
+def test_sanitizer_softens_absolute_promises() -> None:
+    out = _sanitize_damiworks_web_answer(
+        answer="Это абсолютно реализуемо, мы точно настроим и автоматически всё сделаем.",
+        user_message="а сложно ли это?",
+        close_intent=False,
+        intake_cta_already_offered=True,
+    )
+    low = out.casefold()
+    assert "абсолютно реализуемо" not in low
+    assert "точно настроим" not in low
+    assert "автоматически всё сделаем" not in low and "автоматически все сделаем" not in low
+
+
+def test_sanitizer_softens_automatic_access_granting() -> None:
+    out = _sanitize_damiworks_web_answer(
+        answer="Бот будет автоматически выдавать доступ в закрытый канал после оплаты.",
+        user_message="как выдаётся доступ?",
+        close_intent=False,
+        intake_cta_already_offered=True,
+    )
+    low = out.casefold()
+    assert "автоматически выдавать доступ" not in low
+    assert "обсудим отдельно" in low
 
 
 def test_freeform_answers_never_reintroduce_damiworks_prices() -> None:

@@ -112,7 +112,9 @@ class TestPriceQuestionAnswer:
     def test_mentions_package_name(self):
         ctx = _make_ctx("Sales Assistant")
         answer = price_question_answer(ctx)
-        assert "Sales Assistant" in (answer or "")
+        # Discovery mode: internal package names never appear in public answers.
+        assert "Sales Assistant" not in (answer or "")
+        assert "формат запуска" in (answer or "")
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +131,8 @@ class TestPriceObjectionAnswer:
     def test_mentions_start_as_cheaper(self):
         ctx = _make_ctx("Sales Assistant")
         answer = price_objection_answer(ctx)
-        assert "Pilot / Start" in (answer or "")
+        assert "Pilot / Start" not in (answer or "")
+        assert "стартового формата" in (answer or "")
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +148,8 @@ class TestCheaperAnswer:
     def test_mentions_start_label(self):
         ctx = _make_ctx()
         answer = cheaper_answer(ctx)
-        assert "Pilot / Start" in answer
+        assert "Pilot / Start" not in answer
+        assert "стартового формата" in answer
 
 
 # ---------------------------------------------------------------------------

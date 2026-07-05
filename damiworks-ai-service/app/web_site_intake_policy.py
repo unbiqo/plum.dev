@@ -514,10 +514,10 @@ def price_objection_answer(ctx: IntakeContext) -> str | None:
 
     if HIDE_DAMIWORKS_PUBLIC_PRICES:
         return (
-            f"Стоимость {_pkg_label(pkg)} под ваши задачи ({tasks}, каналы: {channels}) "
+            f"Стоимость под ваши задачи ({tasks}, каналы: {channels}) "
             f"зависит от объёма работ и интеграций.\n\n"
             f"После короткого разбора предложим конкретный формат и объём запуска. "
-            f"Если нужен вариант проще, можно начать с {_START_LABEL}: "
+            f"Если нужен вариант проще, можно начать со стартового формата: "
             f"базовые ответы + сбор контактов, без сложной квалификации.\n\n"
             f"Хотите обсудить варианты?"
         )
@@ -589,7 +589,7 @@ def price_question_answer(ctx: IntakeContext) -> str | None:
 
     if HIDE_DAMIWORKS_PUBLIC_PRICES:
         return (
-            f"Под ваши задачи ({tasks}) подойдёт {_pkg_label(pkg)}.\n\n"
+            f"Под ваши задачи ({tasks}) можно собрать подходящий формат запуска.\n\n"
             f"Точную стоимость лучше назвать после короткого разбора: важны каналы, "
             f"объём заявок, интеграции и глубина автоматизации. "
             f"Оставьте контакт, и мы свяжемся и предложим конкретный формат запуска."
@@ -632,7 +632,7 @@ def already_answered_acknowledgment(ctx: IntakeContext) -> str | None:
     if HIDE_DAMIWORKS_PUBLIC_PRICES:
         return (
             f"Да, вы правы, вы уже выбрали: {channels}, {tasks}.\n\n"
-            f"Ориентируюсь на {_pkg_label(pkg)}. {next_step}"
+            f"Этого достаточно, чтобы двигаться дальше. {next_step}"
         )
     price = ctx.shown_price or ""
     return (
@@ -786,12 +786,12 @@ def cheaper_answer(ctx: IntakeContext, last_assistant_message: str = "") -> str:
     """Downgrade explanation for 'можно начать дешевле?' (PART 4)."""
     if HIDE_DAMIWORKS_PUBLIC_PRICES:
         return (
-            f"Да, можно начать с {_START_LABEL}. Это проще: AI-сотрудник будет отвечать "
-            f"на частые вопросы, собирать контакты и передавать заявки менеджеру. Без сложной "
-            f"квалификации, follow-up и интеграций на первом этапе.\n\n"
-            f"Если после теста будет понятно, что нужно больше автоматизации, можно расширить до "
-            f"{_SALES_LABEL}.\n\n"
-            f"Хотите начать с {_START_LABEL}?"
+            "Да, можно начать со стартового формата. Это проще: AI-сотрудник будет отвечать "
+            "на частые вопросы, собирать контакты и передавать заявки менеджеру. Без сложной "
+            "квалификации, follow-up и интеграций на первом этапе.\n\n"
+            "Если после теста будет понятно, что нужно больше автоматизации, формат можно "
+            "расширить.\n\n"
+            "Хотите начать со стартового формата?"
         )
     return (
         f"Да, можно начать с {_START_LABEL}. Это проще и дешевле: AI-сотрудник будет отвечать "
@@ -809,8 +809,8 @@ def business_details_answer(ctx: IntakeContext, last_assistant_message: str = ""
     if HIDE_DAMIWORKS_PUBLIC_PRICES:
         return (
             f"Отлично, этого уже достаточно для первичной оценки. Для вашего бизнеса можно начать "
-            f"с {_START_LABEL}: AI-сотрудник будет отвечать на вопросы клиентов, собирать контакты "
-            f"и передавать заявки менеджеру.\n\n"
+            f"со стартового формата: AI-сотрудник будет отвечать на вопросы клиентов, собирать "
+            f"контакты и передавать заявки менеджеру.\n\n"
             f"{pick_contact_ask(last_assistant_message)}"
         )
     return (
@@ -1053,8 +1053,9 @@ class FreeformProfile:
 
 _FF_CHANNEL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"whats\s*app|ватсап|вотсап|воцап", re.IGNORECASE), "WhatsApp"),
-    (re.compile(r"instagram|инстаграм", re.IGNORECASE), "Instagram"),
+    (re.compile(r"instagram|инстаграм|\bинст[аы]?\b", re.IGNORECASE), "Instagram"),
     (re.compile(r"telegram|телеграм|\bтг\b", re.IGNORECASE), "Telegram"),
+    (re.compile(r"tik\s*tok|тикток|тик[\s-]ток", re.IGNORECASE), "TikTok"),
     (re.compile(r"2\s*(?:гис|gis)|дубль\s*гис", re.IGNORECASE), "2ГИС"),
     (re.compile(r"\bсайт\w*|website", re.IGNORECASE), "Website"),
 )
@@ -1068,13 +1069,27 @@ _FF_TASK_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         re.compile(r"запис\w+|appointment|назнача\w+\s+(?:при[её]м|встреч)|бронир", re.IGNORECASE),
         "Запись клиентов",
     ),
-    (re.compile(r"собира\w+\s+контакт|сбор\s+контакт", re.IGNORECASE), "Собирать контакты"),
+    (
+        re.compile(
+            r"собира\w+\s+контакт|сбор\s+контакт|сохраня\w+\s+(?:клиент|контакт|заявк)",
+            re.IGNORECASE,
+        ),
+        "Собирать контакты",
+    ),
     (re.compile(r"квалифи", re.IGNORECASE), "Квалифицировать лидов"),
     (
         re.compile(r"передава\w+\s+заявк|передача\s+заявок", re.IGNORECASE),
         "Передавать заявки менеджеру",
     ),
     (re.compile(r"follow[\s-]?up|фоллоу", re.IGNORECASE), "Делать follow-up"),
+    (
+        re.compile(
+            r"прода\w+\s+(?:закрыт\w+|доступ\w*|подписк\w*|канал\w*|курс\w*)|продаж\w+\s+доступ",
+            re.IGNORECASE,
+        ),
+        "Продажа доступа",
+    ),
+    (re.compile(r"выда\w+\s+(?:приглашени|инвайт|доступ)", re.IGNORECASE), "Выдача приглашения"),
 )
 
 _FF_CRM_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -1089,7 +1104,12 @@ _FF_BUSINESS_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"клиник|медцентр|мед\.?\s*центр", re.IGNORECASE), "Клиника/салон"),
     (re.compile(r"салон|барбершоп", re.IGNORECASE), "Клиника/салон"),
     (re.compile(r"магазин", re.IGNORECASE), "Онлайн-магазин"),
-    (re.compile(r"школ\w+|курс\w+|репетит|обучени", re.IGNORECASE), "Обучение"),
+    (re.compile(r"школ\w+|курс\w+|марафон\w*|репетит|обучени", re.IGNORECASE), "Обучение"),
+    (
+        re.compile(r"закрыт\w+\s+канал|платн\w+\s+канал|телеграм[\s-]канал|telegram[\s-]канал", re.IGNORECASE),
+        "Telegram-канал",
+    ),
+    (re.compile(r"консалтинг|консультирую", re.IGNORECASE), "Консалтинг"),
     (re.compile(r"кафе|ресторан|доставк\w+\s+еды", re.IGNORECASE), "Услуги"),
 )
 
@@ -1152,8 +1172,18 @@ def extract_freeform_profile(user_texts: list[str]) -> FreeformProfile:
 
 
 def has_enough_freeform_context(profile: FreeformProfile) -> bool:
-    """Enough for a first scoping call: at least one channel and one task."""
-    return bool(profile.channels and profile.tasks)
+    """Enough context for initial conversion: any 2 of the 4 signal groups
+    (business/niche, channels, tasks, CRM/tool). Generalizes across SMB niches;
+    a single weak signal ("клиенты пишут в ватсап") is never enough."""
+    signals = sum(
+        (
+            bool(profile.business_type),
+            bool(profile.channels),
+            bool(profile.tasks),
+            bool(profile.crm),
+        )
+    )
+    return signals >= 2
 
 
 def profile_to_intake_context(profile: FreeformProfile) -> IntakeContext:
@@ -1185,11 +1215,53 @@ _CONTACT_OFFER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# User dismisses the current question ("это не важно") — stop asking, move on.
+# User dismisses or refuses the current question ("это не важно", "не знаю",
+# "давай дальше") — stop asking that question and move forward.
 _DISMISSAL_RE = re.compile(
-    r"^\s*(?:это\s+)?не\s*важно[\s.!]*$|без\s+разницы|какая\s+разница|\bневажно\b",
+    r"^\s*(?:это\s+)?не\s*важно[\s.!]*$|без\s+разницы|какая\s+разница|\bневажно\b|"
+    r"^\s*не\s+знаю[\s.!]*$|без\s+понятия|не\s+хочу\s+отвеча|давай\s+дальше|пропусти",
     re.IGNORECASE,
 )
+
+# Explicit call/discussion requests not covered by is_start_intent.
+_CALL_REQUEST_RE = re.compile(
+    r"созвон|давай\s+звонок|можем\s+созвониться|хочу\s+обсудить|давай\s+обсудим|"
+    r"куда\s+писать|дальше\s+что",
+    re.IGNORECASE,
+)
+
+# Bare affirmation right after we proposed a next step / asked for contact.
+# Mirrors web_site_lead.is_affirmation (kept local to avoid a circular import).
+_PREINTAKE_AFFIRM_RE = re.compile(
+    r"^(?:да|ага|угу|конечно|хорошо|ок|окей|ok|давай(?:те)?|готов[аы]?|"
+    r"поехали|погнали|го|норм|нормально)\b[\s.!]*$",
+    re.IGNORECASE,
+)
+
+# Short Latin-only fragments ("lf", "asdf") that carry no meaning. Never treat
+# them as confirmation and never hallucinate an interpretation.
+_GIBBERISH_RE = re.compile(r"^[a-z]{1,6}$", re.IGNORECASE)
+_KNOWN_SHORT_LATIN = frozenset({
+    "ok", "okay", "okey", "yes", "no", "hi", "hey", "thanks", "crm", "api",
+    "tg", "sms", "bot", "ai", "b2b", "b2c", "faq",
+})
+
+
+def is_gibberish_message(user_message: str) -> bool:
+    s = (user_message or "").strip().rstrip(".!?")
+    return bool(_GIBBERISH_RE.match(s)) and s.lower() not in _KNOWN_SHORT_LATIN
+
+
+def gibberish_answer(*, calendly_enabled: bool = False) -> str:
+    if calendly_enabled:
+        return (
+            "Не совсем понял сообщение. Если удобно, можем продолжить: забронируйте "
+            "короткий звонок или оставьте WhatsApp/Telegram."
+        )
+    return (
+        "Не совсем понял сообщение. Если удобно, можем продолжить: оставьте "
+        "WhatsApp/Telegram, и я передам заявку команде."
+    )
 
 # Price/objection vocabulary — those turns belong to the FAQ/price branches,
 # not the free-form close.
@@ -1284,16 +1356,41 @@ def resolve_preintake_turn(
         return PreintakeTurn(contact_close_answer(msg), "contact_collected", contact)
 
     low = msg.casefold().replace("ё", "е")
+
+    # Gibberish ("lf", "asdf"): never a confirmation, never hallucinated meaning.
+    if is_gibberish_message(msg):
+        return PreintakeTurn(gibberish_answer(calendly_enabled=calendly_enabled))
+
     if _CONTACT_OFFER_RE.search(low):
         return PreintakeTurn(
             contact_offer_answer(calendly_enabled=calendly_enabled), "contact_requested"
         )
 
-    # Friction: the user says they already answered, or dismisses the question.
-    # Stop the loop and move to the scoping-call close.
-    if _ALREADY_ANSWERED_RE.search(low) or _DISMISSAL_RE.search(low):
+    # Conversion intent: "что дальше", "как начать", "давай созвон", "готов",
+    # or a bare "ок/да" right after we proposed the next step. Regardless of
+    # context depth, the user is asking to proceed — offer the call/contact.
+    _last = last_assistant_message or ""
+    _proposed = _FREEFORM_CLOSE_MARKER in _last or assistant_asked_for_contact(_last)
+    if not _FF_PRICE_VOCAB_RE.search(low) and (
+        is_start_intent(msg)
+        or _CALL_REQUEST_RE.search(low)
+        or (_proposed and _PREINTAKE_AFFIRM_RE.match(low))
+    ):
         return PreintakeTurn(
-            freeform_close_answer(profile, calendly_enabled=calendly_enabled),
+            start_handoff_answer(_last, calendly_enabled=calendly_enabled),
+            "contact_requested",
+        )
+
+    # Friction: the user says they already answered, dismisses or refuses the
+    # question. Stop the loop and move forward.
+    if _ALREADY_ANSWERED_RE.search(low) or _DISMISSAL_RE.search(low):
+        if has_enough_freeform_context(profile) and _FREEFORM_CLOSE_MARKER not in _last:
+            return PreintakeTurn(
+                freeform_close_answer(profile, calendly_enabled=calendly_enabled),
+                "contact_requested",
+            )
+        return PreintakeTurn(
+            "Понял. " + pick_contact_ask(_last, calendly_enabled=calendly_enabled),
             "contact_requested",
         )
 
@@ -1304,7 +1401,7 @@ def resolve_preintake_turn(
         and "?" not in msg
         and len(msg.split()) <= 6
         and not _FF_PRICE_VOCAB_RE.search(low)
-        and _FREEFORM_CLOSE_MARKER not in (last_assistant_message or "")
+        and _FREEFORM_CLOSE_MARKER not in _last
     ):
         return PreintakeTurn(
             freeform_close_answer(profile, calendly_enabled=calendly_enabled),

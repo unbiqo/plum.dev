@@ -74,7 +74,7 @@ class TestPackageAcceptance:
         # PART 9.1 — cheaper proposes Pilot / Start, no contact yet.
         cheaper = _resolve("Можно начать дешевле?", _CONTACT_ASK)
         assert cheaper.stage == LeadStage.package_discussion
-        assert "Хотите начать с Pilot / Start?" in cheaper.answer
+        assert "Хотите начать со стартового формата?" in cheaper.answer
         assert "Оставьте" not in cheaper.answer
 
         # PART 9.2 — bare and compound affirmatives after a proposal ask for contact.

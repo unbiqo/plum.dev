@@ -43,6 +43,31 @@ console.log('\nextractFreeformIntake')
   check('smalltalk extracts nothing', empty.channels.length === 0 && empty.tasks.length === 0)
 }
 
+console.log('\npaid Telegram channel scenario')
+{
+  const ex = extractFreeformIntake([
+    'Трафик из TikTok в Telegram-бота, бот должен продавать закрытый канал и сохранять клиентов в Google Sheets.',
+  ])
+  check('extracts TikTok and Telegram channels',
+    ex.channels.includes('TikTok') && ex.channels.includes('Telegram'))
+  check('extracts access-sale task', ex.tasks.includes('Продажа доступа'))
+  check('extracts Google Sheets destination', ex.handoff === 'Google Sheets')
+  check('paid channel summary is ready',
+    hasFreeformSummary(mergeFreeformIntake(INITIAL_INTAKE, ex)))
+}
+
+console.log('\ntwo-signal readiness threshold')
+{
+  // Business + tasks without a channel is enough (salon example).
+  const salon = extractFreeformIntake(['Салон красоты, хочу чтобы бот отвечал и записывал клиентов'])
+  check('salon: business + tasks is enough',
+    hasFreeformSummary(mergeFreeformIntake(INITIAL_INTAKE, salon)))
+  // A single weak signal is not enough.
+  const weak = extractFreeformIntake(['клиенты пишут в ватсап'])
+  check('single channel alone is not enough',
+    !hasFreeformSummary(mergeFreeformIntake(INITIAL_INTAKE, weak)))
+}
+
 console.log('\nnegation handling')
 {
   check('"нет CRM" is not extracted as CRM',

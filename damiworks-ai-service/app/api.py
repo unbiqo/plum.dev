@@ -789,6 +789,11 @@ _WEB_TERMINOLOGY_SUBS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"начнём\s+с\s+(?:Start|Старт)\b(?!\s*/)", re.IGNORECASE), "начнём с Pilot / Start"),
     (re.compile(r"базов\w+\s+ассистент\w*", re.IGNORECASE), "Pilot / Start"),
     (re.compile(r"\b(?:ии|ai)[\s-]*ассистент\w*", re.IGNORECASE), "AI-сотрудник"),
+    # Absolute implementation promises → honest scoping language.
+    (re.compile(r"абсолютно\s+реализуем\w+", re.IGNORECASE), "такой сценарий можно собрать"),
+    (re.compile(r"(?:мы\s+)?точно\s+настроим", re.IGNORECASE), "сможем настроить"),
+    (re.compile(r"(?:мы\s+)?гарантированно\s+(?:настроим|реализуем|подключим)", re.IGNORECASE), "сможем настроить"),
+    (re.compile(r"автоматически\s+вс[её]\s+сделаем", re.IGNORECASE), "многое можно автоматизировать"),
     # Internal "uncertain inputs / no made-up numbers" phrasing must never reach the user (PART 9).
     (
         re.compile(
@@ -880,14 +885,27 @@ _WEB_FREEFORM_DISCOVERY_Q_RE = re.compile(
 # вашу 1С") — replaced with a safe scoping line. The exact exchange mechanism is
 # discussed on the call, not promised in chat.
 _WEB_INTEGRATION_OVERPROMISE_RE = re.compile(
-    r"(?:настро\w+|сделаем|подключим|организуем)\s+[^.!?]{0,90}автоматическ\w+\s+передач|"
-    r"автоматическ\w+\s+передач\w+\s+[^.!?]{0,60}(?:1с|1c|crm|срм|в\s+ваш\w*\s+систем)",
+    r"(?:настро\w+|сделаем|подключим|организуем)\s+[^.!?]{0,90}автоматическ\w+\s+(?:передач|выдач)|"
+    r"автоматическ\w+\s+передач\w+\s+[^.!?]{0,60}(?:1с|1c|crm|срм|в\s+ваш\w*\s+систем)|"
+    r"автоматическ\w+\s+выда\w+\s+доступ|выда\w+\s+доступ\w*\s+автоматическ\w*",
     re.IGNORECASE,
 )
 
 _WEB_SAFE_INTEGRATION_LINE = (
-    "Как лучше передавать заявки в вашу систему (напрямую, через API или "
-    "таблицу), обсудим отдельно: зависит от конфигурации."
+    "Как лучше настроить передачу заявок или выдачу доступа (напрямую, через API "
+    "или таблицу), обсудим отдельно: зависит от текущего процесса."
+)
+
+# Discovery mode: internal package labels never appear in public chat answers.
+# The questionnaire summary card is separate site copy; chat text uses generic
+# launch-format language.
+_WEB_INTERNAL_PKG_SUBS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"пакет\w*\s+«?Pilot\s*/?\s*Start»?", re.IGNORECASE), "стартовый формат"),
+    (re.compile(r"(?:начать|начн[её]м)\s+с\s+Pilot\s*/?\s*Start", re.IGNORECASE), "начать со стартового формата"),
+    (re.compile(r"\bPilot\s*/\s*Start\b"), "стартовый формат"),
+    (re.compile(r"пакет\w*\s+«?Sales\s+Assistant»?", re.IGNORECASE), "формат с квалификацией лидов"),
+    (re.compile(r"\bSales\s+Assistant\b"), "формат с квалификацией лидов"),
+    (re.compile(r"\bIntegrated\s+AI\s+Employee\b"), "формат с интеграциями"),
 )
 
 _WEB_SCOPE_TERMS_RE = re.compile(
@@ -1198,6 +1216,12 @@ def _sanitize_damiworks_web_answer(
     # Step 9: Conservative DamiWorks terminology.
     for pattern, replacement in _WEB_TERMINOLOGY_SUBS:
         normalized = pattern.sub(replacement, normalized)
+
+    # Step 10: Discovery mode — internal package labels never reach the user in
+    # chat answers; replace with generic launch-format language.
+    if HIDE_DAMIWORKS_PUBLIC_PRICES:
+        for pattern, replacement in _WEB_INTERNAL_PKG_SUBS:
+            normalized = pattern.sub(replacement, normalized)
 
     return normalized.strip() or answer
 

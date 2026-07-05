@@ -16,8 +16,9 @@ export type FreeformExtract = {
 // lookarounds for word boundaries on Cyrillic tokens.
 const CHANNEL_PATTERNS: Array<[RegExp, string]> = [
   [/whats\s*app|ватсап|вотсап|воцап/i, 'WhatsApp'],
-  [/instagram|инстаграм/i, 'Instagram'],
+  [/instagram|инстаграм|(?:^|[^а-яёa-z0-9_])инст[аы]?(?![а-яёa-z0-9_])/i, 'Instagram'],
   [/telegram|телеграм|(?:^|[^а-яёa-z0-9_])тг(?![а-яёa-z0-9_])/i, 'Telegram'],
+  [/tik\s*tok|тикток|тик[\s-]ток/i, 'TikTok'],
   [/2\s*(?:гис|gis)|дубль\s*гис/i, '2ГИС'],
   [/сайт|website/i, 'Website'],
 ]
@@ -26,11 +27,13 @@ const CHANNEL_PATTERNS: Array<[RegExp, string]> = [
 // displayValues() maps them to localized labels; extras render verbatim.
 const TASK_PATTERNS: Array<[RegExp, string]> = [
   [/отвеча|ответы\s+(?:клиент|на\s+вопрос)|консультир/i, 'Отвечать на вопросы'],
-  [/запис\w+|appointment|назнача\w+\s+(?:при[её]м|встреч)|бронир/i, 'Запись клиентов'],
-  [/собира\w+\s+контакт|сбор\s+контакт/i, 'Собирать контакты'],
+  [/запис[а-яё]*|appointment|назнача[а-яё]*\s+(?:при[её]м|встреч)|бронир/i, 'Запись клиентов'],
+  [/собира[а-яё]*\s+контакт|сбор\s+контакт|сохраня[а-яё]*\s+(?:клиент|контакт|заявк)/i, 'Собирать контакты'],
   [/квалифи/i, 'Квалифицировать лидов'],
-  [/передава\w+\s+заявк|передача\s+заявок/i, 'Передавать заявки менеджеру'],
+  [/передава[а-яё]*\s+заявк|передача\s+заявок/i, 'Передавать заявки менеджеру'],
   [/follow[\s-]?up|фоллоу/i, 'Делать follow-up'],
+  [/прода[а-яё]*\s+(?:закрыт[а-яё]*|доступ[а-яё]*|подписк[а-яё]*|канал[а-яё]*|курс[а-яё]*)|продаж[а-яё]*\s+доступ/i, 'Продажа доступа'],
+  [/выда[а-яё]*\s+(?:приглашени|инвайт|доступ)/i, 'Выдача приглашения'],
 ]
 
 const HANDOFF_PATTERNS: Array<[RegExp, string]> = [
@@ -45,8 +48,10 @@ const BUSINESS_PATTERNS: Array<[RegExp, string]> = [
   [/клиник|медцентр/i, 'Клиника/салон'],
   [/салон|барбершоп/i, 'Клиника/салон'],
   [/магазин/i, 'Онлайн-магазин'],
-  [/школ\w+|курс\w+|репетит|обучени/i, 'Обучение'],
-  [/кафе|ресторан|доставк\w+\s+еды/i, 'Услуги'],
+  [/школ|курс|марафон|репетит|обучени/i, 'Обучение'],
+  [/закрыт[а-яё]*\s+канал|платн[а-яё]*\s+канал|телеграм[\s-]канал|telegram[\s-]канал/i, 'Telegram-канал'],
+  [/консалтинг|консультирую/i, 'Консалтинг'],
+  [/кафе|ресторан|доставк[а-яё]*\s+еды/i, 'Услуги'],
 ]
 
 // Negation guard — mirrors _ff_positive_text in web_site_intake_policy.py:
@@ -105,9 +110,15 @@ export function mergeFreeformIntake(intake: IntakeState, extracted: FreeformExtr
   }
 }
 
-/** Enough free-form context to show a recommendation and a conversion next step. */
+/** Enough free-form context to show a recommendation and a conversion next
+ * step: any 2 of the 4 signal groups (mirrors has_enough_freeform_context). */
 export function hasFreeformSummary(intake: IntakeState): boolean {
-  return intake.channels.length > 0 && intake.tasks.length > 0
+  const signals =
+    (intake.channels.length > 0 ? 1 : 0) +
+    (intake.tasks.length > 0 ? 1 : 0) +
+    (intake.handoff ? 1 : 0) +
+    (intake.businessType ? 1 : 0)
+  return signals >= 2
 }
 
 /** Quick replies: a clicked predefined chip disappears for the session. */

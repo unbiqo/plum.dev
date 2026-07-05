@@ -396,8 +396,9 @@ class TestBuildPriceObjectionAnswer:
         _, ctx = parse_message(_with_intake("x"))
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "Sales Assistant" in result
-        assert "Pilot / Start" in result  # mentions Start as cheaper option
+        # Discovery mode: no internal package labels in public answers.
+        assert "Sales Assistant" not in result and "Pilot / Start" not in result
+        assert "стартового формата" in result
 
     def test_sales_assistant_at_most_one_question(self):
         _, ctx = parse_message(_with_intake("x"))
@@ -409,7 +410,8 @@ class TestBuildPriceObjectionAnswer:
         _, ctx = parse_message(_with_intake("x", _INTAKE_START))
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "Pilot / Start" in result
+        assert "Pilot / Start" not in result
+        assert "стартового формата" in result
 
     def test_no_package_returns_none(self):
         result = price_objection_answer(IntakeContext(exists=False))
@@ -426,7 +428,8 @@ class TestBuildIntakeAcknowledgment:
         result = already_answered_acknowledgment(ctx)
         assert result is not None
         assert "WhatsApp" in result
-        assert "Sales Assistant" in result
+        assert "Sales Assistant" not in result
+        assert "двигаться дальше" in result
 
     def test_includes_next_step(self):
         _, ctx = parse_message(_with_intake("x"))
@@ -507,12 +510,13 @@ class TestPostIntakeSanitizer:
     def test_price_objection_dorogo_triggers(self):
         bad = "Стоимость объясняется функциональностью."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("почему так дорого"), close_intent=False)
-        assert "Pilot / Start" in result  # mentions cheaper option
+        assert "стартового формата" in result  # mentions cheaper option
 
     def test_price_objection_explains_sales_assistant(self):
         bad = "Это обоснованная цена."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("слишком дорого"), close_intent=False)
-        assert "Sales Assistant" in result
+        assert "Sales Assistant" not in result
+        assert "Стоимость" in result
 
     # 2. "я же выбрал в анкете" → acknowledgment, no broad re-ask
     def test_intake_reference_acknowledged(self):
@@ -525,7 +529,8 @@ class TestPostIntakeSanitizer:
     def test_intake_reference_includes_package(self):
         bad = "Понял. Уточните задачи."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("я уже выбрал в анкете"), close_intent=False)
-        assert "Sales Assistant" in result
+        assert "Sales Assistant" not in result
+        assert "вы уже выбрали" in result.lower()
 
     # 3. Re-ask phrase removal when intake context present
     def test_reask_phrase_removed_with_intake(self):
@@ -556,7 +561,8 @@ class TestPostIntakeSanitizer:
     def test_za_chto_takaya_tsena_triggers_policy(self):
         bad = "Цена обусловлена функционалом."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("за что такая цена?"), close_intent=False)
-        assert "Sales Assistant" in result  # canned objection mentions packages
+        assert "Стоимость" in result  # canned objection, no internal package names
+        assert "Sales Assistant" not in result
         assert result.count("?") <= 1
 
     # 7. Paraphrase generalization — "я уже отвечал на это в анкете"
@@ -572,7 +578,8 @@ class TestPostIntakeSanitizer:
     def test_pochemu_stolko_triggers_policy(self):
         bad = "Стоимость зависит от объема работ."
         result = _sanitize_damiworks_web_answer(bad, _with_intake("почему столько?"), close_intent=False)
-        assert "Sales Assistant" in result
+        assert "Стоимость" in result
+        assert "Sales Assistant" not in result
 
     # 9. Re-ask removal covers multiple known-field patterns (answer must not have prices)
     def test_channel_reask_removed_via_field_policy(self):
@@ -768,20 +775,20 @@ class TestPricingV11:
         ctx = _make_ctx("Sales Assistant")
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "Sales Assistant" in result
-        assert "Pilot / Start" in result  # cheaper option offered
+        assert "Sales Assistant" not in result
+        assert "стартового формата" in result  # cheaper option offered
 
     def test_price_objection_start_no_follow_up(self):
         ctx = _make_ctx("Start")
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "Pilot / Start" in result
+        assert "стартового формата" in result
 
     def test_price_objection_integrated_mentions_crm(self):
         ctx = _make_ctx("Integrated AI Employee")
         result = price_objection_answer(ctx)
         assert result is not None
-        assert "Pilot / Start" in result  # cheaper alternative mentioned
+        assert "стартового формата" in result  # cheaper alternative mentioned
 
     def test_implementation_answer_sales_assistant(self):
         ctx = _make_ctx("Sales Assistant")
@@ -817,7 +824,7 @@ class TestPricingV11:
             ctx=ctx,
             close_intent=False,
         )
-        assert "Pilot / Start" in result
+        assert "стартового формата" in result
 
     def test_kak_prokhodit_zapusk_triggers_implementation(self):
         ctx = _make_ctx("Sales Assistant")
@@ -964,14 +971,14 @@ class TestSanitizerTerminology:
             "Для старта подойдёт Базовый ассистент.", "что посоветуете", close_intent=True
         )
         assert "Базовый ассистент" not in result
-        assert "Pilot / Start" in result
+        assert "стартовый формат" in result  # Discovery: no internal label
 
     def test_replaces_package_base(self):
         result = _sanitize_damiworks_web_answer(
             "Начнём с пакета base?", "с чего начать", close_intent=True
         )
         assert "base" not in result.lower()
-        assert "Pilot / Start" in result
+        assert "стартов" in result.lower()
 
     def test_replaces_ai_assistant_term(self):
         result = _sanitize_damiworks_web_answer(
@@ -1034,7 +1041,8 @@ class TestPostIntakeCheaper:
         _, ctx = parse_message(_with_intake("x"))
         result = post_intake_response("Можно начать дешевле?", ctx)
         assert result is not None
-        assert "Pilot / Start" in result
+        assert "Pilot / Start" not in result
+        assert "стартового формата" in result
         _assert_no_internal_terms(result)
 
 
@@ -1057,7 +1065,7 @@ class TestPostIntakeBusinessDetails:
         result = post_intake_response(msg, ctx)
         assert result is not None
         assert "достаточно" in result.lower()
-        assert "Pilot / Start" in result
+        assert "стартового формата" in result
         assert answer_has_contact_ask(result)
         # Must not re-ask discovery.
         assert "какие вопросы" not in result.lower()
@@ -1127,7 +1135,9 @@ class TestSanitizerPostIntake:
         low = result.lower()
         assert "agent" not in low
         assert "без выдуманных цифр" not in low
-        assert "Sales Assistant" in result
+        # Discovery: internal labels replaced with generic launch-format language.
+        assert "Sales Assistant" not in result
+        assert "формат с квалификацией лидов" in result
 
     def test_ok_post_intake_gives_neutral_ack(self):
         # "ок" alone is a neutral ack (PART 1) — must not push through any contact ask.
@@ -1149,7 +1159,7 @@ class TestSanitizerPostIntake:
             answer, _with_intake("расскажи о вашей команде"), close_intent=False
         )
         assert "Подобрать AI-сотрудника" not in result
-        assert "Sales Assistant" in result
+        assert "формат с квалификацией лидов" in result  # label replaced in Discovery
 
     def test_ya_soglasen_post_intake_asks_contact(self):
         # PART 8.2: "я согласен" after intake → ask for contact, no discovery.
