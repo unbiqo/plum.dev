@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -24,6 +25,8 @@ class SupabaseService:
         )
         self._chat_sessions_available: bool | None = None
         self._leads_available: bool | None = None
+        self._quality_feedback_available: bool | None = None
+        self._ai_conversations_available: bool | None = None
 
     async def search_knowledge_base(
         self,
@@ -136,6 +139,112 @@ class SupabaseService:
         """
         return await asyncio.to_thread(self._upsert_lead_sync, lead)
 
+    async def create_quality_feedback(self, feedback: dict[str, Any]) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._create_quality_feedback_sync, feedback)
+
+    async def list_quality_feedback(
+        self,
+        *,
+        instance_id: str | None = None,
+        chat_id: str | None = None,
+        rating: str | None = None,
+        issue_type: str | None = None,
+        severity: str | None = None,
+        status: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._list_quality_feedback_sync,
+            instance_id,
+            chat_id,
+            rating,
+            issue_type,
+            severity,
+            status,
+            created_from,
+            created_to,
+            limit,
+        )
+
+    async def update_quality_feedback(
+        self,
+        feedback_id: str,
+        updates: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        return await asyncio.to_thread(
+            self._update_quality_feedback_sync,
+            feedback_id,
+            updates,
+        )
+
+    async def log_ai_conversation_turn(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        instance_id: str,
+        user_message: str,
+        assistant_answer: str,
+        user_message_id: str | None = None,
+        assistant_message_id: str | None = None,
+        locale: str | None = None,
+        source: str | None = None,
+        lead_status: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        await asyncio.to_thread(
+            self._log_ai_conversation_turn_sync,
+            channel,
+            chat_id,
+            instance_id,
+            user_message,
+            assistant_answer,
+            user_message_id,
+            assistant_message_id,
+            locale,
+            source,
+            lead_status,
+            metadata,
+        )
+
+    async def list_ai_conversations(
+        self,
+        *,
+        instance_id: str | None = None,
+        chat_id: str | None = None,
+        has_feedback: bool | None = None,
+        lead_status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._list_ai_conversations_sync,
+            instance_id,
+            chat_id,
+            has_feedback,
+            lead_status,
+            date_from,
+            date_to,
+            limit,
+            offset,
+        )
+
+    async def get_ai_conversation_detail(
+        self,
+        *,
+        instance_id: str,
+        chat_id: str,
+    ) -> dict[str, Any] | None:
+        return await asyncio.to_thread(
+            self._get_ai_conversation_detail_sync,
+            instance_id,
+            chat_id,
+        )
+
     async def fetch_recent_chat_history(
         self,
         *,
@@ -212,6 +321,11 @@ class SupabaseService:
         ai_response: str,
         routes: list[Route],
         metadata: dict[str, Any] | None = None,
+        user_message_id: str | None = None,
+        assistant_message_id: str | None = None,
+        locale: str | None = None,
+        source: str | None = None,
+        lead_status: str | None = None,
     ) -> None:
         await asyncio.to_thread(
             self.log_chat_sync,
@@ -222,6 +336,11 @@ class SupabaseService:
             ai_response=ai_response,
             routes=routes,
             metadata=metadata,
+            user_message_id=user_message_id,
+            assistant_message_id=assistant_message_id,
+            locale=locale,
+            source=source,
+            lead_status=lead_status,
         )
 
     def _search_knowledge_base_sync(
@@ -394,6 +513,11 @@ class SupabaseService:
         ai_response: str,
         routes: list[Route],
         metadata: dict[str, Any] | None = None,
+        user_message_id: str | None = None,
+        assistant_message_id: str | None = None,
+        locale: str | None = None,
+        source: str | None = None,
+        lead_status: str | None = None,
     ) -> None:
         route_value = ",".join(route.value for route in routes) or Route.rag_required.value
         row = {
@@ -415,10 +539,23 @@ class SupabaseService:
                 row.pop("metadata", None)
                 try:
                     self.client.table("chat_logs").insert(row).execute()
-                    return
                 except Exception:
                     pass
             logger.exception("Failed to write chat log to Supabase")
+
+        self._log_ai_conversation_turn_sync(
+            channel=channel,
+            chat_id=chat_id,
+            instance_id=instance_id,
+            user_message=message,
+            assistant_answer=ai_response,
+            user_message_id=user_message_id,
+            assistant_message_id=assistant_message_id,
+            locale=locale,
+            source=source,
+            lead_status=lead_status,
+            metadata=metadata,
+        )
 
     def _format_context(self, rows: list[dict[str, Any]]) -> str:
         blocks: list[str] = []
@@ -667,6 +804,383 @@ class SupabaseService:
         self._leads_available = True
         rows = response.data or []
         return rows[0] if rows else None
+
+    # ------------------------------------------------------------------
+    # AI message quality feedback — instance/chat/message keyed review data
+    # ------------------------------------------------------------------
+
+    def _create_quality_feedback_sync(self, feedback: dict[str, Any]) -> dict[str, Any] | None:
+        if self._quality_feedback_available is False:
+            return None
+
+        payload = {k: v for k, v in feedback.items() if v is not None}
+        payload.setdefault("status", "open")
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            response = self.client.table("ai_message_feedback").insert(payload).execute()
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._quality_feedback_available = False
+                logger.warning("ai_message_feedback table unavailable; feedback insert skipped")
+                return None
+            logger.exception("Failed to create quality feedback")
+            return None
+
+        self._quality_feedback_available = True
+        rows = response.data or []
+        if rows:
+            self._refresh_feedback_counts(
+                str(rows[0].get("instance_id") or payload.get("instance_id") or ""),
+                str(rows[0].get("chat_id") or payload.get("chat_id") or ""),
+                str(rows[0].get("message_id") or payload.get("message_id") or ""),
+            )
+        return rows[0] if rows else None
+
+    def _list_quality_feedback_sync(
+        self,
+        instance_id: str | None,
+        chat_id: str | None,
+        rating: str | None,
+        issue_type: str | None,
+        severity: str | None,
+        status: str | None,
+        created_from: str | None,
+        created_to: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if self._quality_feedback_available is False:
+            return []
+
+        try:
+            query = self.client.table("ai_message_feedback").select("*")
+            filters = {
+                "instance_id": instance_id,
+                "chat_id": chat_id,
+                "rating": rating,
+                "issue_type": issue_type,
+                "severity": severity,
+                "status": status,
+            }
+            for column, value in filters.items():
+                if value:
+                    query = query.eq(column, value)
+            if created_from:
+                query = query.gte("created_at", created_from)
+            if created_to:
+                query = query.lte("created_at", created_to)
+            response = (
+                query.order("created_at", desc=True)
+                .limit(max(1, min(limit, 500)))
+                .execute()
+            )
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._quality_feedback_available = False
+                logger.warning("ai_message_feedback table unavailable; feedback list skipped")
+                return []
+            logger.exception("Failed to list quality feedback")
+            return []
+
+        self._quality_feedback_available = True
+        return list(response.data or [])
+
+    def _update_quality_feedback_sync(
+        self,
+        feedback_id: str,
+        updates: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if self._quality_feedback_available is False:
+            return None
+
+        payload = {k: v for k, v in updates.items() if v is not None}
+        if not payload:
+            return None
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            response = (
+                self.client.table("ai_message_feedback")
+                .update(payload)
+                .eq("id", feedback_id)
+                .execute()
+            )
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._quality_feedback_available = False
+                logger.warning("ai_message_feedback table unavailable; feedback update skipped")
+                return None
+            logger.exception("Failed to update quality feedback")
+            return None
+
+        self._quality_feedback_available = True
+        rows = response.data or []
+        if rows:
+            self._refresh_feedback_counts(
+                str(rows[0].get("instance_id") or ""),
+                str(rows[0].get("chat_id") or ""),
+                str(rows[0].get("message_id") or ""),
+            )
+        return rows[0] if rows else None
+
+    def _refresh_feedback_counts(self, instance_id: str, chat_id: str, message_id: str) -> None:
+        if not instance_id or not chat_id:
+            return
+        conversation_count = self._count_feedback_for_conversation(instance_id, chat_id)
+        try:
+            self.client.table("ai_conversations").update(
+                {
+                    "feedback_count": conversation_count,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ).eq("instance_id", instance_id).eq("chat_id", chat_id).execute()
+        except Exception:
+            pass
+        if not message_id:
+            return
+        try:
+            response = (
+                self.client.table("ai_message_feedback")
+                .select("id")
+                .eq("instance_id", instance_id)
+                .eq("chat_id", chat_id)
+                .eq("message_id", message_id)
+                .limit(1000)
+                .execute()
+            )
+            message_count = len(response.data or [])
+            self.client.table("ai_conversation_messages").update(
+                {"feedback_count": message_count}
+            ).eq("instance_id", instance_id).eq("chat_id", chat_id).eq("message_id", message_id).execute()
+        except Exception:
+            pass
+
+    def _log_ai_conversation_turn_sync(
+        self,
+        channel: str,
+        chat_id: str,
+        instance_id: str,
+        user_message: str,
+        assistant_answer: str,
+        user_message_id: str | None,
+        assistant_message_id: str | None,
+        locale: str | None,
+        source: str | None,
+        lead_status: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        if self._ai_conversations_available is False:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+        user_mid = user_message_id or f"srv_user_{uuid.uuid4()}"
+        assistant_mid = assistant_message_id or f"srv_ai_{uuid.uuid4()}"
+        source_value = source or channel
+        metadata_value = metadata or {}
+
+        try:
+            self.client.table("ai_conversations").upsert(
+                {
+                    "instance_id": instance_id,
+                    "chat_id": chat_id,
+                    "channel": channel,
+                    "locale": locale,
+                    "source": source_value,
+                    "status": "active",
+                    "lead_status": lead_status,
+                    "last_message_at": now,
+                    "last_user_message": user_message,
+                    "last_assistant_message": assistant_answer,
+                    "metadata": metadata_value,
+                    "updated_at": now,
+                },
+                on_conflict="instance_id,chat_id",
+            ).execute()
+
+            self.client.table("ai_conversation_messages").upsert(
+                [
+                    {
+                        "instance_id": instance_id,
+                        "chat_id": chat_id,
+                        "message_id": user_mid,
+                        "role": "user",
+                        "content": user_message,
+                        "metadata": metadata_value.get("user_message_metadata", {}),
+                    },
+                    {
+                        "instance_id": instance_id,
+                        "chat_id": chat_id,
+                        "message_id": assistant_mid,
+                        "role": "assistant",
+                        "content": assistant_answer,
+                        "metadata": metadata_value.get("assistant_message_metadata", {}),
+                    },
+                ],
+                on_conflict="instance_id,chat_id,message_id",
+            ).execute()
+
+            message_count = self._count_conversation_messages(instance_id, chat_id)
+            feedback_count = self._count_feedback_for_conversation(instance_id, chat_id)
+            self.client.table("ai_conversations").update(
+                {
+                    "message_count": message_count,
+                    "feedback_count": feedback_count,
+                    "lead_status": lead_status,
+                    "last_message_at": now,
+                    "last_user_message": user_message,
+                    "last_assistant_message": assistant_answer,
+                    "updated_at": now,
+                }
+            ).eq("instance_id", instance_id).eq("chat_id", chat_id).execute()
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._ai_conversations_available = False
+                logger.warning("ai_conversations tables unavailable; conversation logging skipped")
+                return
+            logger.exception("Failed to log AI conversation turn")
+            return
+
+        self._ai_conversations_available = True
+
+    def _count_conversation_messages(self, instance_id: str, chat_id: str) -> int:
+        try:
+            response = (
+                self.client.table("ai_conversation_messages")
+                .select("id")
+                .eq("instance_id", instance_id)
+                .eq("chat_id", chat_id)
+                .limit(1000)
+                .execute()
+            )
+            return len(response.data or [])
+        except Exception:
+            return 0
+
+    def _count_feedback_for_conversation(self, instance_id: str, chat_id: str) -> int:
+        try:
+            response = (
+                self.client.table("ai_message_feedback")
+                .select("id")
+                .eq("instance_id", instance_id)
+                .eq("chat_id", chat_id)
+                .limit(1000)
+                .execute()
+            )
+            return len(response.data or [])
+        except Exception:
+            return 0
+
+    def _list_ai_conversations_sync(
+        self,
+        instance_id: str | None,
+        chat_id: str | None,
+        has_feedback: bool | None,
+        lead_status: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        if self._ai_conversations_available is False:
+            return []
+
+        try:
+            query = self.client.table("ai_conversations").select("*")
+            if instance_id:
+                query = query.eq("instance_id", instance_id)
+            if chat_id:
+                query = query.eq("chat_id", chat_id)
+            if lead_status:
+                query = query.eq("lead_status", lead_status)
+            if has_feedback is True:
+                query = query.gt("feedback_count", 0)
+            elif has_feedback is False:
+                query = query.eq("feedback_count", 0)
+            if date_from:
+                query = query.gte("last_message_at", date_from)
+            if date_to:
+                query = query.lte("last_message_at", date_to)
+            start = max(0, offset)
+            end = start + max(1, min(limit, 500)) - 1
+            response = query.order("last_message_at", desc=True).range(start, end).execute()
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._ai_conversations_available = False
+                logger.warning("ai_conversations table unavailable; conversation list skipped")
+                return []
+            logger.exception("Failed to list AI conversations")
+            return []
+
+        self._ai_conversations_available = True
+        return list(response.data or [])
+
+    def _get_ai_conversation_detail_sync(
+        self,
+        instance_id: str,
+        chat_id: str,
+    ) -> dict[str, Any] | None:
+        if self._ai_conversations_available is False:
+            return None
+
+        try:
+            conv_response = (
+                self.client.table("ai_conversations")
+                .select("*")
+                .eq("instance_id", instance_id)
+                .eq("chat_id", chat_id)
+                .limit(1)
+                .execute()
+            )
+            conversation = (conv_response.data or [None])[0]
+            if not conversation:
+                return None
+
+            messages_response = (
+                self.client.table("ai_conversation_messages")
+                .select("*")
+                .eq("instance_id", instance_id)
+                .eq("chat_id", chat_id)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            feedback_response = (
+                self.client.table("ai_message_feedback")
+                .select("*")
+                .eq("instance_id", instance_id)
+                .eq("chat_id", chat_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._ai_conversations_available = False
+                logger.warning("ai_conversations table unavailable; conversation detail skipped")
+                return None
+            logger.exception("Failed to get AI conversation detail")
+            return None
+
+        feedback = list(feedback_response.data or [])
+        feedback_by_message: dict[str, list[dict[str, Any]]] = {}
+        for item in feedback:
+            mid = str(item.get("message_id") or "")
+            if mid:
+                feedback_by_message.setdefault(mid, []).append(item)
+
+        messages: list[dict[str, Any]] = []
+        for message in list(messages_response.data or []):
+            mid = str(message.get("message_id") or "")
+            messages.append(
+                {
+                    **message,
+                    "feedback": feedback_by_message.get(mid, []),
+                    "feedback_count": len(feedback_by_message.get(mid, [])),
+                }
+            )
+
+        self._ai_conversations_available = True
+        return {
+            "conversation": conversation,
+            "messages": messages,
+            "feedback": feedback,
+        }
 
     def _fetch_recent_chat_history_sync(
         self,

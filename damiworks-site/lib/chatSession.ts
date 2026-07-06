@@ -16,6 +16,7 @@
 
 export const DAMIWORKS_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 export const ENGLISH_SCHOOL_SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+export const MEDICAL_CENTER_SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 export const BEAUTY_SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 const SESSION_KEY_PREFIX = 'damiworks_chat_session_v1'

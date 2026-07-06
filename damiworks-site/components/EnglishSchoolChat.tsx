@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Send, RotateCcw } from 'lucide-react'
 import type { DictSchoolChatLabels } from '@/lib/i18n'
+import MessageFeedback from '@/components/MessageFeedback'
+import { createMessageId, ensureMessageIds } from '@/lib/qualityFeedback'
 import {
   ENGLISH_SCHOOL_SESSION_TTL_MS,
   loadChatSession,
@@ -21,7 +23,7 @@ import {
 const SCHOOL_INSTANCE_ID = 'damiworks_english_school_demo'
 const MESSAGES_SESSION_KEY = 'damiworks_english_school_messages'
 
-export type SchoolMessage = { from: 'user' | 'ai'; text: string }
+export type SchoolMessage = { id?: string; from: 'user' | 'ai'; text: string }
 
 export type SchoolBackendState = {
   leadStatus: 'open' | 'contact_requested' | 'contact_collected' | 'closed' | null
@@ -61,7 +63,7 @@ export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateU
     const stored = expired ? null : sessionStorage.getItem(MESSAGES_SESSION_KEY)
     if (stored) {
       try {
-        const parsed = JSON.parse(stored) as SchoolMessage[]
+        const parsed = ensureMessageIds(JSON.parse(stored) as SchoolMessage[], 'school')
         if (parsed.length > 0) {
           setMessages(parsed)
           return
@@ -70,7 +72,7 @@ export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateU
         // ignore corrupt storage
       }
     }
-    setMessages([{ from: 'ai', text: dict.introMessage }])
+    setMessages([{ id: createMessageId('school'), from: 'ai', text: dict.introMessage }])
   }, [dict.introMessage])
 
   // ------------ sessionStorage persistence ------------
@@ -107,8 +109,10 @@ export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateU
       role: m.from === 'user' ? ('user' as const) : ('assistant' as const),
       content: m.text,
     }))
+    const userMessageId = createMessageId('school')
+    const assistantMessageId = createMessageId('school')
 
-    setMessages((prev) => [...prev, { from: 'user', text: userText }])
+    setMessages((prev) => [...prev, { id: userMessageId, from: 'user', text: userText }])
     setLoading(true)
 
     try {
@@ -119,6 +123,9 @@ export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateU
           message: userText,
           chat_id: chatId,
           instance_id: SCHOOL_INSTANCE_ID,
+          message_id: userMessageId,
+          response_message_id: assistantMessageId,
+          source: 'web_chat',
           chat_history: priorHistory,
           reset_context: false,
         }),
@@ -137,7 +144,7 @@ export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateU
           conversation_status_label?: string | null
         }
       }
-      setMessages((prev) => [...prev, { from: 'ai', text: data.answer }])
+      setMessages((prev) => [...prev, { id: assistantMessageId, from: 'ai', text: data.answer }])
       if (onStateUpdate) {
         const s = data.metadata?.state ?? {}
         onStateUpdate({
@@ -166,7 +173,7 @@ export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateU
     const session = resetChatSession(SCHOOL_INSTANCE_ID)
     sessionStorage.removeItem(MESSAGES_SESSION_KEY)
     setChatId(session.chat_id)
-    setMessages([{ from: 'ai', text: dict.introMessage }])
+    setMessages([{ id: createMessageId('school'), from: 'ai', text: dict.introMessage }])
     setInput('')
     setError(null)
   }
@@ -211,14 +218,25 @@ export default function EnglishSchoolChat({ dict, onConversationUpdate, onStateU
       >
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`text-sm px-4 py-2.5 rounded-2xl max-w-[78%] leading-relaxed whitespace-pre-wrap ${
-                msg.from === 'user'
-                  ? 'bg-accent-soft text-primary rounded-tr-sm'
-                  : 'bg-bg border border-border-col text-primary rounded-tl-sm'
-              }`}
-            >
-              {msg.text}
+            <div className="max-w-[78%]">
+              <div
+                className={`text-sm px-4 py-2.5 rounded-2xl leading-relaxed whitespace-pre-wrap ${
+                  msg.from === 'user'
+                    ? 'bg-accent-soft text-primary rounded-tr-sm'
+                    : 'bg-bg border border-border-col text-primary rounded-tl-sm'
+                }`}
+              >
+                {msg.text}
+              </div>
+              {msg.from === 'ai' && (
+                <MessageFeedback
+                  instanceId={SCHOOL_INSTANCE_ID}
+                  chatId={chatId}
+                  message={msg}
+                  messages={messages}
+                  metadata={{ component: 'EnglishSchoolChat' }}
+                />
+              )}
             </div>
           </div>
         ))}

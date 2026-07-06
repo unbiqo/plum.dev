@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Send, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { SHOW_DAMIWORKS_CHAT_PRICES } from '@/lib/constants'
 import { CALENDLY_URL } from '@/lib/calendly'
+import MessageFeedback from '@/components/MessageFeedback'
 import {
   DAMIWORKS_SESSION_TTL_MS,
   loadChatSession,
@@ -28,13 +29,14 @@ import {
   filterUnusedChips,
   mergeFreeformIntake,
 } from '@/lib/freeform'
+import { createMessageId, ensureMessageIds } from '@/lib/qualityFeedback'
 import type { DictLiveChat, DictIntake, DictIntakeQuestion } from '@/lib/i18n'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TextMessage = { kind: 'text'; from: 'user' | 'ai'; text: string; isIntake: boolean }
+type TextMessage = { kind: 'text'; id?: string; from: 'user' | 'ai'; text: string; isIntake: boolean }
 type SummaryMessage = { kind: 'summary' }
 type Message = TextMessage | SummaryMessage
 
@@ -54,6 +56,20 @@ function formatToken(pattern: string, tokens: Record<string, string | number>): 
     (s, [k, v]) => s.replace(`{${k}}`, String(v)),
     pattern,
   )
+}
+
+function normalizeMessages(messages: Message[]): Message[] {
+  const textMessages = ensureMessageIds(
+    messages.filter((m): m is TextMessage => m.kind === 'text'),
+    'site',
+  )
+  let textIndex = 0
+  return messages.map((message) => {
+    if (message.kind !== 'text') return message
+    const normalized = textMessages[textIndex]
+    textIndex += 1
+    return normalized
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +417,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
     const storedMessages = sessionStorage.getItem(MESSAGES_SESSION_KEY)
     if (storedMessages) {
       try {
-        const parsed = JSON.parse(storedMessages) as Message[]
+        const parsed = normalizeMessages(JSON.parse(storedMessages) as Message[])
         if (parsed.length > 0) {
           setMessages(parsed)
           setChatMode('chat')
@@ -442,7 +458,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       }
     }
     setMessages([
-      { kind: 'text', from: 'ai', text: dict.introMessage, isIntake: false },
+      { kind: 'text', id: createMessageId('site'), from: 'ai', text: dict.introMessage, isIntake: false },
     ])
   }, [dict.introMessage])
 
@@ -591,7 +607,10 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       setMultiBuffer([])
 
       const userText = answers.join(', ')
-      setMessages((prev) => [...prev, { kind: 'text', from: 'user', text: userText, isIntake: true }])
+      setMessages((prev) => [
+        ...prev,
+        { kind: 'text', id: createMessageId('site'), from: 'user', text: userText, isIntake: true },
+      ])
 
       const nextStep = intakeStep + 1
 
@@ -600,7 +619,13 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
           setIntakeStep(nextStep)
           setMessages((prev) => [
             ...prev,
-            { kind: 'text', from: 'ai', text: intakeQuestions[nextStep].text, isIntake: true },
+            {
+              kind: 'text',
+              id: createMessageId('site'),
+              from: 'ai',
+              text: intakeQuestions[nextStep].text,
+              isIntake: true,
+            },
           ])
           setTransitioning(false)
         } else {
@@ -615,6 +640,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
             ...prev,
             {
               kind: 'text',
+              id: createMessageId('site'),
               from: 'ai',
               text: dict.intakeCompleteMessage,
               isIntake: true,
@@ -643,7 +669,13 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
         setIntakeStep(nextStep)
         setMessages((prev) => [
           ...prev,
-          { kind: 'text', from: 'ai', text: intakeQuestions[nextStep].text, isIntake: true },
+          {
+            kind: 'text',
+            id: createMessageId('site'),
+            from: 'ai',
+            text: intakeQuestions[nextStep].text,
+            isIntake: true,
+          },
         ])
         setTransitioning(false)
       } else {
@@ -658,6 +690,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
           ...prev,
           {
             kind: 'text',
+            id: createMessageId('site'),
             from: 'ai',
             text: dict.intakeCompleteMessage,
             isIntake: true,
@@ -689,10 +722,12 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
         role: m.from === 'user' ? ('user' as const) : ('assistant' as const),
         content: m.text,
       }))
+    const userMessageId = createMessageId('site')
+    const assistantMessageId = createMessageId('site')
 
     setMessages((prev) => [
       ...prev,
-      { kind: 'text', from: 'user', text: userText, isIntake: false },
+      { kind: 'text', id: userMessageId, from: 'user', text: userText, isIntake: false },
     ])
 
     // Free-form summary: extract channels/tasks/CRM/business from natural
@@ -718,6 +753,10 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
         body: JSON.stringify({
           message: userText,
           chat_id: chatId,
+          message_id: userMessageId,
+          response_message_id: assistantMessageId,
+          locale,
+          source: 'web_chat',
           chat_history: priorHistory,
           reset_context: false,
           intake_context: intake.completed ? buildIntakeContextString(intake, !SHOW_DAMIWORKS_CHAT_PRICES) : undefined,
@@ -731,7 +770,13 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
         lead_sent?: boolean
       }
 
-      const aiMsg: Message = { kind: 'text', from: 'ai', text: data.answer, isIntake: false }
+      const aiMsg: Message = {
+        kind: 'text',
+        id: assistantMessageId,
+        from: 'ai',
+        text: data.answer,
+        isIntake: false,
+      }
       setMessages((prev) => [...prev, aiMsg])
 
       // Lead status applies on both paths — free-form conversations collect
@@ -777,11 +822,18 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       ...prev,
       {
         kind: 'text',
+        id: createMessageId('site'),
         from: 'ai',
         text: dict.intakeStartMessage,
         isIntake: true,
       },
-      { kind: 'text', from: 'ai', text: intakeQuestions[0].text, isIntake: true },
+      {
+        kind: 'text',
+        id: createMessageId('site'),
+        from: 'ai',
+        text: intakeQuestions[0].text,
+        isIntake: true,
+      },
     ])
   }
 
@@ -823,7 +875,9 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
     sessionStorage.removeItem(INTAKE_SESSION_KEY)
     sessionStorage.removeItem(USED_CHIPS_SESSION_KEY)
     setChatId(newId)
-    setMessages([{ kind: 'text', from: 'ai', text: dict.introMessage, isIntake: false }])
+    setMessages([
+      { kind: 'text', id: createMessageId('site'), from: 'ai', text: dict.introMessage, isIntake: false },
+    ])
     setIntakeStep(0)
     setIntake(INITIAL_INTAKE)
     setMultiBuffer([])
@@ -910,19 +964,31 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
               />
             )
           }
+          const feedbackMessages = messages.filter((m): m is TextMessage => m.kind === 'text')
           return (
             <div
               key={i}
               className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              <div
-                className={`text-sm px-4 py-2.5 rounded-2xl max-w-[78%] leading-relaxed whitespace-pre-wrap ${
-                  msg.from === 'user'
-                    ? 'bg-accent-soft text-primary rounded-tr-sm'
-                    : 'bg-bg border border-border-col text-primary rounded-tl-sm'
-                }`}
-              >
-                {msg.text}
+              <div className="max-w-[78%]">
+                <div
+                  className={`text-sm px-4 py-2.5 rounded-2xl leading-relaxed whitespace-pre-wrap ${
+                    msg.from === 'user'
+                      ? 'bg-accent-soft text-primary rounded-tr-sm'
+                      : 'bg-bg border border-border-col text-primary rounded-tl-sm'
+                  }`}
+                >
+                  {msg.text}
+                </div>
+                {msg.from === 'ai' && (
+                  <MessageFeedback
+                    instanceId={SITE_INSTANCE_ID}
+                    chatId={chatId}
+                    message={msg}
+                    messages={feedbackMessages}
+                    metadata={{ component: 'LiveChat', is_intake: msg.isIntake }}
+                  />
+                )}
               </div>
             </div>
           )

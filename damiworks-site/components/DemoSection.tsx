@@ -7,12 +7,15 @@ import LiveChat, { type LiveChatSnapshot } from '@/components/LiveChat'
 import CustomDemoChat from '@/components/CustomDemoChat'
 import EnglishSchoolChat, { type SchoolMessage, type SchoolBackendState } from '@/components/EnglishSchoolChat'
 import EnglishSchoolSummaryPanel from '@/components/EnglishSchoolSummaryPanel'
+import MedicalCenterChat, { type MedicalMessage, type MedicalBackendState } from '@/components/MedicalCenterChat'
+import MedicalCenterSummaryPanel from '@/components/MedicalCenterSummaryPanel'
 import type { IntakeField, PackageId } from '@/lib/intake'
 import { hasFreeformSummary } from '@/lib/freeform'
 
 // Functional identifiers — not copy, not locale-specific
 const DAMIWORKS_TAB_ID = 'damiworks'
 const ENGLISH_SCHOOL_TAB_ID = 'english'
+const MEDICAL_TAB_ID = 'medical'
 const SELECTED_DEMO_TAB_SESSION_KEY = 'damiworks_selected_demo_tab'
 
 function StaticChatWindow({
@@ -240,6 +243,8 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
   const [liveSnapshot, setLiveSnapshot] = useState<LiveChatSnapshot | null>(null)
   const [schoolMessages, setSchoolMessages] = useState<SchoolMessage[]>([])
   const [schoolState, setSchoolState] = useState<SchoolBackendState | null>(null)
+  const [medicalMessages, setMedicalMessages] = useState<MedicalMessage[]>([])
+  const [medicalState, setMedicalState] = useState<MedicalBackendState | null>(null)
   const handleLiveStateChange = useCallback((state: LiveChatSnapshot) => {
     setLiveSnapshot(state)
   }, [])
@@ -249,8 +254,15 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
   const handleSchoolStateUpdate = useCallback((state: SchoolBackendState) => {
     setSchoolState(state)
   }, [])
+  const handleMedicalConversationUpdate = useCallback((messages: MedicalMessage[]) => {
+    setMedicalMessages(messages)
+  }, [])
+  const handleMedicalStateUpdate = useCallback((state: MedicalBackendState) => {
+    setMedicalState(state)
+  }, [])
   const isConsultant = selectedId === DAMIWORKS_TAB_ID
   const isEnglishSchool = selectedId === ENGLISH_SCHOOL_TAB_ID
+  const isMedical = selectedId === MEDICAL_TAB_ID
   const isCustomDemo = selectedId === dict.customDemoTab.id
   const scenario = dict.scenarios.find((s) => s.id === selectedId)
 
@@ -313,6 +325,12 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
               onConversationUpdate={handleSchoolConversationUpdate}
               onStateUpdate={handleSchoolStateUpdate}
             />
+          ) : isMedical ? (
+            <MedicalCenterChat
+              dict={dict.medicalChat}
+              onConversationUpdate={handleMedicalConversationUpdate}
+              onStateUpdate={handleMedicalStateUpdate}
+            />
           ) : isCustomDemo ? (
             <CustomDemoChat dict={customDemoChat} />
           ) : (
@@ -327,6 +345,12 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
               messages={schoolMessages}
               dict={dict.schoolSummary}
               backendState={schoolState}
+            />
+          ) : isMedical ? (
+            <MedicalCenterSummaryPanel
+              messages={medicalMessages}
+              dict={dict.medicalSummary}
+              backendState={medicalState}
             />
           ) : isCustomDemo ? (
             <CustomDemoSummaryPanel dict={dict} />

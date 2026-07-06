@@ -33,6 +33,10 @@ class ChatRequest(BaseModel):
     message: str = ""
     chat_history: list[ChatHistoryMessage] = Field(default_factory=list)
     reset_context: bool = False
+    message_id: str | None = None
+    response_message_id: str | None = None
+    locale: str | None = None
+    source: str | None = None
     attachments: list[ChatAttachment] = Field(default_factory=list)
     # Frontend signal: a Calendly booking CTA is visible in the UI, so contact
     # asks may present booking a call as the preferred next step.
@@ -87,3 +91,45 @@ class ContactFormRequest(BaseModel):
     contact: str = Field(..., min_length=1, max_length=200)
     business_type: str | None = None
     message: str | None = None
+
+
+class QualityFeedbackCreateRequest(BaseModel):
+    """Instance-agnostic quality feedback for one assistant message."""
+
+    instance_id: str = Field(..., min_length=1, max_length=200)
+    chat_id: str = Field(..., min_length=1, max_length=200)
+    message_id: str = Field(..., min_length=1, max_length=200)
+    rating: Literal["positive", "negative"] = "negative"
+    issue_type: str = Field(default="other", min_length=1, max_length=100)
+    severity: Literal["low", "medium", "high", "critical"] = "medium"
+    status: Literal["open", "reviewed", "fixed", "ignored", "added_to_evals"] = "open"
+    user_message: str | None = None
+    assistant_answer: str = Field(..., min_length=1)
+    corrected_answer: str | None = None
+    comment: str | None = None
+    reviewer_note: str | None = None
+    transcript_json: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tenant_id: str | None = None
+    client_id: str | None = None
+    reviewer_id: str | None = None
+    source: str | None = "web_chat"
+    environment: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class QualityFeedbackUpdateRequest(BaseModel):
+    issue_type: str | None = Field(default=None, min_length=1, max_length=100)
+    severity: Literal["low", "medium", "high", "critical"] | None = None
+    status: Literal["open", "reviewed", "fixed", "ignored", "added_to_evals"] | None = None
+    corrected_answer: str | None = None
+    comment: str | None = None
+    reviewer_note: str | None = None
+    metadata: dict[str, Any] | None = None
+    reviewer_id: str | None = None
+    tags: list[str] | None = None
+
+
+class QualityFeedbackListResponse(BaseModel):
+    items: list[dict[str, Any]]
+    count: int | None = None

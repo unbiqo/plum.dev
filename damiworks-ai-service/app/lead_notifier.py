@@ -102,6 +102,31 @@ def format_english_school_lead(lead: dict) -> str:
     )
 
 
+def format_medical_center_lead(lead: dict) -> str:
+    """Contact collected from the Medical Center demo chat (MedNova Clinic)."""
+    state = lead.get("_clinic_state") or {}
+    urgency = str(state.get("urgency_flag") or "normal")
+    header = "🏥 Demo лид — MedNova Clinic"
+    if urgency != "normal":
+        header = f"⚠️ {header}"
+    return "\n".join(
+        [
+            header,
+            "",
+            f"Контакт: {_fmt(lead.get('contact_raw'))}",
+            f"Пациент: {_fmt(state.get('patient_name'))}",
+            f"Имя контакта: {_fmt(state.get('contact_name'))}",
+            f"Возраст: {_fmt(state.get('age'))}",
+            f"Направление: {_fmt(state.get('specialty'))}",
+            f"Жалоба/цель: {_fmt(state.get('symptoms_or_goal'))}",
+            f"Удобное время: {_fmt(state.get('preferred_time'))}",
+            f"Срочность: {_fmt(urgency)}",
+            "",
+            f"Статус: {_fmt(lead.get('status'))}",
+        ]
+    )
+
+
 def format_contact_form_lead(lead: dict) -> str:
     """Contact-section footer form submission."""
     return "\n".join(

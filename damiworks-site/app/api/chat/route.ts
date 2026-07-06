@@ -18,7 +18,18 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
-  const { message, chat_id, chat_history, reset_context, intake_context, instance_id } =
+  const {
+    message,
+    chat_id,
+    chat_history,
+    reset_context,
+    intake_context,
+    instance_id,
+    message_id,
+    response_message_id,
+    locale,
+    source,
+  } =
     body as Record<string, unknown>
 
   if (typeof message !== 'string' || message.trim().length === 0)
@@ -30,9 +41,14 @@ export async function POST(req: NextRequest) {
   if (chat_history !== undefined && !Array.isArray(chat_history))
     return NextResponse.json({ error: 'chat_history_invalid' }, { status: 400 })
 
-  // Allowlist the instance: DamiWorks consultant (default), the Custom demo roleplay
-  // instance, or the English school live demo. The backend separates behavior by instance_id.
-  const ALLOWED_INSTANCES = ['damiworks_site', 'damiworks_custom_demo', 'damiworks_english_school_demo'] as const
+  // Allowlist the instance: DamiWorks consultant (default), the Custom demo roleplay,
+  // English school, or medical center live demos. The backend separates behavior by instance_id.
+  const ALLOWED_INSTANCES = [
+    'damiworks_site',
+    'damiworks_custom_demo',
+    'damiworks_english_school_demo',
+    'damiworks_medical_center_demo',
+  ] as const
   const resolvedInstanceId =
     typeof instance_id === 'string' && (ALLOWED_INSTANCES as readonly string[]).includes(instance_id)
       ? instance_id
@@ -68,6 +84,10 @@ export async function POST(req: NextRequest) {
         chat_id,
         instance_id: resolvedInstanceId,
         message: effectiveMessage,
+        message_id: typeof message_id === 'string' ? message_id : undefined,
+        response_message_id: typeof response_message_id === 'string' ? response_message_id : undefined,
+        locale: typeof locale === 'string' ? locale : undefined,
+        source: typeof source === 'string' ? source : 'web_chat',
         chat_history: effectiveHistory,
         reset_context: Boolean(reset_context),
         // Calendly booking CTA is visible in the UI — the backend uses this to
@@ -82,11 +102,13 @@ export async function POST(req: NextRequest) {
       answer: string
       lead_status?: string | null
       lead_sent?: boolean
+      metadata?: Record<string, unknown> | null
     }
     return NextResponse.json({
       answer: data.answer,
       lead_status: data.lead_status ?? null,
       lead_sent: Boolean(data.lead_sent),
+      metadata: data.metadata ?? null,
     })
   } catch {
     return NextResponse.json({ error: 'unreachable' }, { status: 503 })

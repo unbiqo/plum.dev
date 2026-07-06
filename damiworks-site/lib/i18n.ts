@@ -211,6 +211,41 @@ export interface DictSchoolSummaryLabels {
   pillContact: string
 }
 
+export interface DictMedicalChatLabels {
+  headerTitle: string
+  onlineLabel: string
+  inputPlaceholder: string
+  sendAriaLabel: string
+  resetTitle: string
+  resetLabel: string
+  errorMessage: string
+  introMessage: string
+  quickReplies: string[]
+}
+
+export interface DictMedicalSummaryLabels {
+  title: string
+  specialty: string
+  complaint: string
+  time: string
+  status: string
+  statusValues: {
+    consultation: string
+    exploring: string
+    intent_detected: string
+    objection: string
+    agreed_next_step: string
+    contact_requested: string
+    contact_collected: string
+    off_topic: string
+    emergency: string
+  }
+  pillReady: string
+  pillAwaiting: string
+  pillContact: string
+  pillEmergency: string
+}
+
 export interface DictDemo {
   headline: string
   subheadline: string
@@ -222,6 +257,8 @@ export interface DictDemo {
   customSummary: DictCustomSummaryLabels
   schoolChat: DictSchoolChatLabels
   schoolSummary: DictSchoolSummaryLabels
+  medicalChat: DictMedicalChatLabels
+  medicalSummary: DictMedicalSummaryLabels
 }
 
 export interface DictTierFeature {
@@ -638,6 +675,24 @@ const en: Dict = {
         },
       },
       {
+        id: 'medical',
+        label: 'Medical center',
+        agentName: 'MedNova Clinic',
+        messages: [
+          { from: 'user', text: 'How much is a cardiologist consultation?' },
+          {
+            from: 'ai',
+            text: 'A primary cardiologist visit is 16,000 KZT. I can also help choose a specialist or pass your contact to the administrator.',
+          },
+        ],
+        leadSummary: {
+          service: 'Medical consultation',
+          need: 'Specialist selection',
+          time: 'This week',
+          status: 'Appointment lead',
+        },
+      },
+      {
         id: 'beauty',
         label: 'Beauty salon',
         agentName: 'Beauty salon AI',
@@ -742,6 +797,46 @@ const en: Dict = {
       pillReady: 'Lead ready for handoff',
       pillAwaiting: 'Awaiting contact',
       pillContact: 'Contact received',
+    },
+    medicalChat: {
+      headerTitle: 'MedNova Clinic',
+      onlineLabel: 'Online',
+      inputPlaceholder: 'Type a message...',
+      sendAriaLabel: 'Send',
+      resetTitle: 'Reset chat',
+      resetLabel: 'Reset',
+      errorMessage: 'Something went wrong. Please try again.',
+      introMessage:
+        'Hello! I am the AI administrator for MedNova Clinic. I can help choose a doctor, check prices, explain visit preparation, and pass your appointment request to the administrator. Please describe what is bothering you or which specialist you want to see.',
+      quickReplies: [
+        'Book a doctor',
+        'Prices',
+        'How to choose a specialist?',
+        'Preparing for tests',
+        'Doctor schedule',
+      ],
+    },
+    medicalSummary: {
+      title: 'Medical lead',
+      specialty: 'Specialty',
+      complaint: 'Complaint',
+      time: 'Convenient time',
+      status: 'Status',
+      statusValues: {
+        consultation: 'Consultation',
+        exploring: 'Exploring request',
+        intent_detected: 'Specialty detected',
+        objection: 'Has objection',
+        agreed_next_step: 'Ready to book',
+        contact_requested: 'Contact requested',
+        contact_collected: 'Contact received',
+        off_topic: 'Off-topic',
+        emergency: 'Urgent help',
+      },
+      pillReady: 'Lead ready for handoff',
+      pillAwaiting: 'Awaiting contact',
+      pillContact: 'Contact received',
+      pillEmergency: 'Call 103/112',
     },
   },
   capabilities: {
@@ -1295,6 +1390,24 @@ const ru: Dict = {
         },
       },
       {
+        id: 'medical',
+        label: 'Медицинский центр',
+        agentName: 'MedNova Clinic',
+        messages: [
+          { from: 'user', text: 'Сколько стоит приём кардиолога?' },
+          {
+            from: 'ai',
+            text: 'Первичный приём кардиолога стоит 16 000 ₸. Могу помочь выбрать специалиста или передать контакт администратору.',
+          },
+        ],
+        leadSummary: {
+          service: 'Консультация врача',
+          need: 'Подбор специалиста',
+          time: 'На этой неделе',
+          status: 'Заявка на запись',
+        },
+      },
+      {
         id: 'beauty',
         label: 'Салон красоты',
         agentName: 'AI салона красоты',
@@ -1399,6 +1512,46 @@ const ru: Dict = {
       pillReady: 'Заявка готова к передаче',
       pillAwaiting: 'Ожидаем контакт',
       pillContact: 'Контакт получен',
+    },
+    medicalChat: {
+      headerTitle: 'MedNova Clinic',
+      onlineLabel: 'Онлайн',
+      inputPlaceholder: 'Написать сообщение...',
+      sendAriaLabel: 'Отправить',
+      resetTitle: 'Сбросить чат',
+      resetLabel: 'Сброс',
+      errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
+      introMessage:
+        'Здравствуйте! Я AI-администратор MedNova Clinic. Помогу выбрать врача, узнать стоимость, подготовку к приему и записаться на консультацию. Опишите, пожалуйста, что вас беспокоит или к какому специалисту хотите попасть.',
+      quickReplies: [
+        'Записаться к врачу',
+        'Цены',
+        'Как выбрать специалиста?',
+        'Подготовка к анализам',
+        'График врачей',
+      ],
+    },
+    medicalSummary: {
+      title: 'Сводка по заявке',
+      specialty: 'Направление',
+      complaint: 'Жалоба',
+      time: 'Удобное время',
+      status: 'Статус',
+      statusValues: {
+        consultation: 'Консультация',
+        exploring: 'Уточняет запрос',
+        intent_detected: 'Направление определено',
+        objection: 'Возражение',
+        agreed_next_step: 'Готов к записи',
+        contact_requested: 'Контакт запрошен',
+        contact_collected: 'Контакт получен',
+        off_topic: 'Не по теме',
+        emergency: 'Срочная помощь',
+      },
+      pillReady: 'Заявка готова к передаче',
+      pillAwaiting: 'Ожидаем контакт',
+      pillContact: 'Контакт получен',
+      pillEmergency: 'Позвоните 103/112',
     },
   },
   capabilities: {

@@ -12,7 +12,7 @@ from typing import Any
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from .gemini_service import GeminiService
@@ -26,6 +26,10 @@ from .custom_demo_documents import (
 from .english_school_demo import (
     ENGLISH_SCHOOL_INSTANCE_ID,
     handle_english_school_chat,
+)
+from .medical_center_demo import (
+    MEDICAL_CENTER_INSTANCE_ID,
+    handle_medical_center_chat,
 )
 from .sales_intelligence import (
     ENABLED_MODES,
@@ -49,6 +53,9 @@ from .schemas import (
     ContactFormRequest,
     LeadCreateRequest,
     ProductCard,
+    QualityFeedbackCreateRequest,
+    QualityFeedbackListResponse,
+    QualityFeedbackUpdateRequest,
     Route,
 )
 from .supabase_service import SupabaseService
@@ -118,6 +125,16 @@ WEB_START_GREETING_ANSWER = (
     "сориентирую по цене. Посмотреть, как AI отвечает клиентам вживую, можно во "
     "вкладке Custom demo слева."
 )
+
+
+def _require_quality_console_admin(request: Request, token: str | None) -> None:
+    expected = str(
+        getattr(request.app.state.gemini.settings, "quality_console_admin_token", "") or ""
+    ).strip()
+    if not expected:
+        return
+    if (token or "").strip() != expected:
+        raise HTTPException(status_code=401, detail="quality_console_admin_required")
 
 # Consultant reply to document/portfolio requests — no roleplay invite.
 WEB_DOCUMENTS_ANSWER = (
@@ -1581,6 +1598,11 @@ async def _build_and_log_roleplay_gate_response(
         ai_response=response.answer,
         routes=response.routes,
         metadata=_build_log_metadata(response),
+        user_message_id=payload.message_id,
+        assistant_message_id=payload.response_message_id,
+        locale=payload.locale,
+        source=payload.source or payload.channel,
+        lead_status=response.lead_status,
     )
     return response
 
@@ -1689,6 +1711,126 @@ async def create_contact_form_lead(
     return {"ok": True, "notified": notified}
 
 
+@router.post("/quality-feedback")
+@router.post("/message-feedback")
+async def create_quality_feedback(
+    payload: QualityFeedbackCreateRequest,
+    request: Request,
+) -> dict[str, Any]:
+    """Store quality feedback for one assistant message.
+
+    This endpoint is deliberately side-effect-free for the chat engine: it never
+    mutates prompts, KBs, state, lead status, or the current transcript.
+    """
+    supabase: SupabaseService = request.app.state.supabase
+    row = await supabase.create_quality_feedback(payload.model_dump(exclude_none=True))
+    if row is None:
+        raise HTTPException(status_code=503, detail="quality_feedback_storage_unavailable")
+    return {"ok": row is not None, "item": row}
+
+
+@router.get("/quality-feedback", response_model=QualityFeedbackListResponse)
+@router.get("/message-feedback", response_model=QualityFeedbackListResponse)
+async def list_quality_feedback(
+    request: Request,
+    instance_id: str | None = None,
+    chat_id: str | None = None,
+    rating: str | None = None,
+    issue_type: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    created_from: str | None = None,
+    created_to: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    x_admin_token: str | None = Header(default=None, alias="x-admin-token"),
+    admin_token: str | None = Query(default=None),
+) -> QualityFeedbackListResponse:
+    _require_quality_console_admin(request, x_admin_token or admin_token)
+    supabase: SupabaseService = request.app.state.supabase
+    items = await supabase.list_quality_feedback(
+        instance_id=instance_id,
+        chat_id=chat_id,
+        rating=rating,
+        issue_type=issue_type,
+        severity=severity,
+        status=status,
+        created_from=created_from,
+        created_to=created_to,
+        limit=limit,
+    )
+    return QualityFeedbackListResponse(items=items, count=len(items))
+
+
+@router.patch("/quality-feedback/{feedback_id}")
+@router.patch("/message-feedback/{feedback_id}")
+async def update_quality_feedback(
+    feedback_id: str,
+    payload: QualityFeedbackUpdateRequest,
+    request: Request,
+    x_admin_token: str | None = Header(default=None, alias="x-admin-token"),
+    admin_token: str | None = Query(default=None),
+) -> dict[str, Any]:
+    _require_quality_console_admin(request, x_admin_token or admin_token)
+    supabase: SupabaseService = request.app.state.supabase
+    updates = payload.model_dump(exclude_none=True, exclude_unset=True)
+    row = await supabase.update_quality_feedback(feedback_id, updates)
+    return {"ok": row is not None, "item": row}
+
+
+def _parse_optional_bool(value: str | None) -> bool | None:
+    if value is None or value == "":
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@router.get("/quality/conversations")
+async def list_quality_conversations(
+    request: Request,
+    instance_id: str | None = None,
+    chat_id: str | None = None,
+    has_feedback: str | None = None,
+    lead_status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    x_admin_token: str | None = Header(default=None, alias="x-admin-token"),
+    admin_token: str | None = Query(default=None),
+) -> dict[str, Any]:
+    _require_quality_console_admin(request, x_admin_token or admin_token)
+    supabase: SupabaseService = request.app.state.supabase
+    items = await supabase.list_ai_conversations(
+        instance_id=instance_id,
+        chat_id=chat_id,
+        has_feedback=_parse_optional_bool(has_feedback),
+        lead_status=lead_status,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset,
+    )
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/quality/conversations/{instance_id}/{chat_id}")
+async def get_quality_conversation(
+    instance_id: str,
+    chat_id: str,
+    request: Request,
+    x_admin_token: str | None = Header(default=None, alias="x-admin-token"),
+    admin_token: str | None = Query(default=None),
+) -> dict[str, Any]:
+    _require_quality_console_admin(request, x_admin_token or admin_token)
+    supabase: SupabaseService = request.app.state.supabase
+    detail = await supabase.get_ai_conversation_detail(
+        instance_id=instance_id,
+        chat_id=chat_id,
+    )
+    if detail is None:
+        raise HTTPException(status_code=404, detail="conversation_not_found")
+    return detail
+
+
 @router.post("/custom-demo/documents")
 async def upload_custom_demo_document(
     file: UploadFile = File(...),
@@ -1792,6 +1934,59 @@ async def _save_english_school_lead(
         logger.exception("_save_english_school_lead failed (ignored)")
 
 
+async def _save_medical_center_lead(
+    payload: "ChatRequest",
+    response: "ChatResponse",
+    supabase: "SupabaseService",
+    settings: Any,
+) -> None:
+    """Background task: persist Medical Center demo contact lead + notify owner.
+
+    Idempotent — skips if a lead with contact_raw already exists for this chat.
+    """
+    try:
+        state_meta: dict = (response.metadata or {}).get("state") or {}
+        contact = str(state_meta.get("contact") or "").strip()
+        if not contact:
+            return
+
+        chat_id = str(payload.chat_id or "").strip()
+        if not chat_id:
+            return
+
+        existing = await supabase.get_lead(
+            instance_id=str(payload.instance_id),
+            chat_id=chat_id,
+        )
+        if existing and existing.get("contact_raw"):
+            return  # already saved and notified
+
+        now = datetime.now(timezone.utc).isoformat()
+        row: dict[str, Any] = {
+            "instance_id": str(payload.instance_id),
+            "chat_id": chat_id,
+            "source": "medical_center_demo",
+            "status": str(
+                (response.metadata or {}).get("medical_lead_status")
+                or "contact_collected"
+            ),
+            "contact_raw": contact,
+            "contact_collected_at": now,
+            "closed_at": now,
+            "transcript_json": state_meta,
+            "notified_at": now,
+        }
+        await supabase.upsert_lead(row)
+
+        notif_row = dict(row, _clinic_state=state_meta)
+        text = lead_notifier.format_medical_center_lead(notif_row)
+        await lead_notifier.send_owner_notification(
+            settings.lead_telegram_bot_token, settings.lead_telegram_chat_id, text
+        )
+    except Exception:
+        logger.exception("_save_medical_center_lead failed (ignored)")
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     payload: ChatRequest,
@@ -1809,9 +2004,48 @@ async def chat(
         # English school demo has its own static KB — skip all Supabase/intelligence machinery.
         if payload.instance_id == ENGLISH_SCHOOL_INSTANCE_ID:
             response = await handle_english_school_chat(gemini, payload)
+            await supabase.log_ai_conversation_turn(
+                channel=payload.channel,
+                chat_id=payload.chat_id,
+                instance_id=payload.instance_id,
+                user_message=payload.message,
+                assistant_answer=response.answer,
+                user_message_id=payload.message_id,
+                assistant_message_id=payload.response_message_id,
+                locale=payload.locale,
+                source=payload.source or payload.channel,
+                lead_status=response.lead_status,
+                metadata=_build_log_metadata(response),
+            )
             if response.lead_status == "contact_collected":
                 background_tasks.add_task(
                     _save_english_school_lead,
+                    payload=payload,
+                    response=response,
+                    supabase=supabase,
+                    settings=gemini.settings,
+                )
+            return response
+
+        # Medical center demo (MedNova Clinic) — same self-contained pattern.
+        if payload.instance_id == MEDICAL_CENTER_INSTANCE_ID:
+            response = await handle_medical_center_chat(gemini, payload)
+            await supabase.log_ai_conversation_turn(
+                channel=payload.channel,
+                chat_id=payload.chat_id,
+                instance_id=payload.instance_id,
+                user_message=payload.message,
+                assistant_answer=response.answer,
+                user_message_id=payload.message_id,
+                assistant_message_id=payload.response_message_id,
+                locale=payload.locale,
+                source=payload.source or payload.channel,
+                lead_status=response.lead_status,
+                metadata=_build_log_metadata(response),
+            )
+            if response.lead_status == "contact_collected":
+                background_tasks.add_task(
+                    _save_medical_center_lead,
                     payload=payload,
                     response=response,
                     supabase=supabase,
@@ -1929,6 +2163,11 @@ async def chat(
                 ai_response=response.answer,
                 routes=response.routes,
                 metadata=_build_log_metadata(response),
+                user_message_id=payload.message_id,
+                assistant_message_id=payload.response_message_id,
+                locale=payload.locale,
+                source=payload.source or payload.channel,
+                lead_status=response.lead_status,
             )
             return response
 
@@ -2024,6 +2263,11 @@ async def chat(
                 ai_response=response.answer,
                 routes=response.routes,
                 metadata=_build_log_metadata(response),
+                user_message_id=payload.message_id,
+                assistant_message_id=payload.response_message_id,
+                locale=payload.locale,
+                source=payload.source or payload.channel,
+                lead_status=response.lead_status,
             )
             return response
 
@@ -2055,6 +2299,11 @@ async def chat(
                 ai_response=response.answer,
                 routes=response.routes,
                 metadata=_build_log_metadata(response),
+                user_message_id=payload.message_id,
+                assistant_message_id=payload.response_message_id,
+                locale=payload.locale,
+                source=payload.source or payload.channel,
+                lead_status=response.lead_status,
             )
             return response
 
@@ -2095,6 +2344,11 @@ async def chat(
                     ai_response=response.answer,
                     routes=response.routes,
                     metadata=_build_log_metadata(response),
+                    user_message_id=payload.message_id,
+                    assistant_message_id=payload.response_message_id,
+                    locale=payload.locale,
+                    source=payload.source or payload.channel,
+                    lead_status=response.lead_status,
                 )
                 return response
 
@@ -2175,6 +2429,11 @@ async def chat(
                     ai_response=response.answer,
                     routes=response.routes,
                     metadata=_build_log_metadata(response),
+                    user_message_id=payload.message_id,
+                    assistant_message_id=payload.response_message_id,
+                    locale=payload.locale,
+                    source=payload.source or payload.channel,
+                    lead_status=response.lead_status,
                 )
                 return response
 
@@ -2224,6 +2483,11 @@ async def chat(
                 ai_response=response.answer,
                 routes=response.routes,
                 metadata=_build_log_metadata(response),
+                user_message_id=payload.message_id,
+                assistant_message_id=payload.response_message_id,
+                locale=payload.locale,
+                source=payload.source or payload.channel,
+                lead_status=response.lead_status,
             )
             return response
 
@@ -2879,6 +3143,11 @@ async def chat(
             ai_response=response.answer,
             routes=response.routes,
             metadata=_build_log_metadata(response),
+            user_message_id=payload.message_id,
+            assistant_message_id=payload.response_message_id,
+            locale=payload.locale,
+            source=payload.source or payload.channel,
+            lead_status=response.lead_status,
         )
 
         if _should_refresh_memory(payload, gemini, is_new_session):

@@ -1,0 +1,752 @@
+"""Unit tests for the Medical Center demo agent (MedNova Clinic).
+
+These run without any API key — the Gemini service is stubbed (``FakeGemini``).
+They assert: emergency short-circuit (deterministic, pre-LLM), medical safety
+guardrails (no diagnosis / prescription / lab interpretation / slot promises /
+child contact / invented doctors & prices), lead lifecycle, metadata, and
+no-crash behavior.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+
+import pytest
+
+from app.medical_center_demo import (
+    MEDICAL_CENTER_INSTANCE_ID,
+    handle_medical_center_chat,
+)
+from app.medical_center_guardrails import (
+    EMERGENCY_ANSWER,
+    build_safe_fallback,
+    kb_doctor_names,
+    kb_price_set,
+    validate_answer,
+)
+from app.medical_center_kb import get_full_kb_context
+from app.medical_center_planner import (
+    reclassify_discount_question,
+    reclassify_medical_advice_question,
+)
+from app.medical_center_state import (
+    ConversationState,
+    apply_planner_updates,
+    build_conversation_state,
+    detect_red_flags,
+    looks_like_contact,
+)
+from app.schemas import ChatHistoryMessage, ChatRequest
+
+
+# ---------------------------------------------------------------------------
+# Test doubles
+# ---------------------------------------------------------------------------
+
+class _Settings:
+    general_model = "fake-model"
+    general_model_pool = ("fake-model",)
+
+
+class FakeGemini:
+    """Stub that returns queued planner JSON / writer text instead of calling Gemini."""
+
+    def __init__(self, planner: dict | None = None, writer_texts=None, fail_planner=False):
+        self.settings = _Settings()
+        self._planner_raw = None if fail_planner else json.dumps(planner or _default_planner())
+        self._writer_texts = list(writer_texts or [])
+        self.planner_calls = 0
+        self.writer_calls = 0
+
+    async def _generate_text(self, **kw):
+        if kw.get("response_mime_type") == "application/json":
+            self.planner_calls += 1
+            if self._planner_raw is None:
+                raise RuntimeError("planner LLM down")
+            return self._planner_raw
+        self.writer_calls += 1
+        if not self._writer_texts:
+            raise RuntimeError("writer LLM down")
+        return self._writer_texts.pop(0)
+
+    def _format_chat_prompt(self, message, history, client_facts=None):
+        return f"USER: {message}"
+
+
+def _default_planner(**overrides) -> dict:
+    plan = {
+        "current_intent": "answer_question",
+        "intent_priority": "high",
+        "answers_previous_question": False,
+        "user_shifted_topic": False,
+        "should_pause_qualification": True,
+        "user_frustration": False,
+        "correction": False,
+        "question_to_answer": "вопрос",
+        "response_goal": "ответить",
+        "must_mention": [],
+        "must_not_repeat": [],
+        "recommended_next_step": "none",
+        "do_not_ask": [],
+        "handoff_recommended": False,
+        "reason": "test",
+        "slots": {},
+    }
+    plan.update(overrides)
+    return plan
+
+
+def _msg(role: str, content: str) -> ChatHistoryMessage:
+    return ChatHistoryMessage(role=role, content=content)
+
+
+def _request(message: str, history=None) -> ChatRequest:
+    return ChatRequest(
+        channel="web_site",
+        chat_id="med1",
+        instance_id=MEDICAL_CENTER_INSTANCE_ID,
+        message=message,
+        chat_history=history or [],
+    )
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+# ---------------------------------------------------------------------------
+# KB facts
+# ---------------------------------------------------------------------------
+
+def test_instance_id() -> None:
+    assert MEDICAL_CENTER_INSTANCE_ID == "damiworks_medical_center_demo"
+
+
+def test_kb_contains_cardiologist_and_ecg_prices() -> None:
+    kb = get_full_kb_context()
+    assert "16 000" in kb  # кардиолог первичный приём
+    assert "6 000" in kb   # ЭКГ с расшифровкой
+
+
+def test_kb_price_set_is_exact() -> None:
+    assert kb_price_set() == frozenset({
+        1500, 2500, 3500, 6000, 8000, 10000, 12000, 13000,
+        14000, 15000, 16000, 18000, 29000, 32000,
+    })
+
+
+def test_kb_has_no_damiworks_branding() -> None:
+    assert "damiworks" not in get_full_kb_context().casefold()
+
+
+def test_kb_doctor_names_parsed() -> None:
+    names = kb_doctor_names()
+    for expected in ("Ким", "Омарова", "Рахимов", "Ахметов", "Панченко"):
+        assert expected in names
+    assert "Иванов" not in names
+
+
+# ---------------------------------------------------------------------------
+# Red-flag detector
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Сильная давящая боль в груди, трудно дышать",
+        "У бабушки перекосило лицо и невнятная речь",
+        "Ребенок вялый, трудно разбудить",
+        "У жены начались судороги",
+        "Сильное кровотечение, кровь не останавливается",
+        "Беременна, началось кровотечение и сильная боль в животе",
+        "После укуса осы отек горла, задыхаюсь",
+        "Температура у младенца, ему 2 месяца",
+        "Муж потерял сознание сегодня утром",
+    ],
+)
+def test_red_flag_detected(message: str) -> None:
+    assert detect_red_flags(message) is not None, message
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Иногда побаливает в груди при нагрузке, сколько стоит приём кардиолога?",
+        "Сколько стоит кардиолог?",
+        "Хочу записать ребенка к педиатру, ему 5 лет, кашель",
+        "Болит горло и ухо, к кому записаться?",
+        "У меня температура 37.5 и насморк",
+    ],
+)
+def test_routine_symptoms_not_red_flag(message: str) -> None:
+    assert detect_red_flags(message) is None, message
+
+
+def test_red_flag_preempts_llm() -> None:
+    gem = FakeGemini()
+    resp = _run(handle_medical_center_chat(gem, _request("Сильная боль в груди и трудно дышать")))
+    assert resp.answer == EMERGENCY_ANSWER
+    assert gem.planner_calls == 0 and gem.writer_calls == 0
+    assert "103/112" in resp.answer
+    assert "запис" not in resp.answer.casefold()
+    md = resp.metadata
+    assert md["emergency_short_circuit"] is True
+    assert md["state"]["urgency_flag"] == "emergency"
+    assert md["conversation_status"] == "emergency"
+    assert md["conversation_status_label"] == "Срочная помощь"
+
+
+def test_routine_chest_question_goes_through_normal_pipeline() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_price"),
+        writer_texts=["Первичный приём кардиолога — 16 000 ₸, ЭКГ с расшифровкой — 6 000 ₸."],
+    )
+    resp = _run(handle_medical_center_chat(
+        gem, _request("Иногда побаливает в груди при нагрузке, сколько стоит приём кардиолога?")
+    ))
+    assert gem.planner_calls == 1 and gem.writer_calls == 1
+    assert "16 000" in resp.answer
+    assert resp.metadata["validation_result"]["failed"] is False
+
+
+def test_emergency_sticky_but_planned_booking_still_works() -> None:
+    # Red flag earlier in history; the follow-up is a calm planned booking.
+    history = [
+        _msg("user", "У отца сильная боль в груди и трудно дышать"),
+        _msg("assistant", EMERGENCY_ANSWER),
+    ]
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="contact"),
+        writer_texts=[
+            "Спасибо! Передам заявку администратору — он свяжется и подтвердит удобное время.",
+        ],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request(
+        "Спасибо, ему уже лучше. Хочу записаться к кардиологу планово, +7 701 111 22 33",
+        history=history,
+    )))
+    assert gem.writer_calls == 1  # normal pipeline, not short-circuited
+    assert resp.lead_status == "contact_collected"
+    assert resp.metadata["state"]["urgency_flag"] == "emergency"  # sticky for the lead
+    assert resp.metadata["medical_lead_status"] == "appointment_requested"
+
+
+# ---------------------------------------------------------------------------
+# Guardrails: prices, diagnosis, prescription, labs, slots, child contact
+# ---------------------------------------------------------------------------
+
+def test_guardrail_rejects_invented_price() -> None:
+    res = validate_answer("МРТ стоит 25 000 ₸.", ConversationState(), _default_planner())
+    assert res.failed and not res.checks["no_invented_prices"]
+
+
+def test_guardrail_accepts_kb_prices() -> None:
+    res = validate_answer(
+        "Первичный приём кардиолога — 16 000 ₸, ЭКГ — 6 000 ₸.",
+        ConversationState(),
+        _default_planner(current_intent="ask_price"),
+    )
+    assert not res.failed, res.fix
+
+
+def test_guardrail_rejects_diagnosis() -> None:
+    for answer in (
+        "Похоже, у вас гастрит.",
+        "Скорее всего, это мигрень.",
+        "У вас бронхит, ничего страшного.",
+    ):
+        res = validate_answer(answer, ConversationState(), _default_planner())
+        assert res.failed and not res.checks["no_diagnosis"], answer
+
+
+def test_guardrail_allows_specialty_routing() -> None:
+    res = validate_answer(
+        "С такими жалобами обычно записывают к ЛОР-врачу. Могу помочь с записью.",
+        ConversationState(),
+        _default_planner(current_intent="ask_specialty_advice"),
+    )
+    assert res.checks["no_diagnosis"] is True
+    assert not res.failed, res.fix
+
+
+def test_guardrail_rejects_prescription() -> None:
+    for answer in (
+        "Примите ибупрофен 400 мг три раза в день.",
+        "Пейте антибиотик широкого спектра.",
+        "Рекомендую принимать парацетамол на ночь.",
+    ):
+        res = validate_answer(answer, ConversationState(), _default_planner())
+        assert res.failed and not res.checks["no_prescription"], answer
+
+
+def test_guardrail_accepts_prescription_refusal() -> None:
+    res = validate_answer(
+        "Лекарства назначает врач после осмотра. Могу подсказать, к какому специалисту обратиться.",
+        ConversationState(),
+        _default_planner(current_intent="medical_advice_request"),
+    )
+    assert res.checks["no_prescription"] is True
+    assert not res.failed, res.fix
+
+
+def test_guardrail_rejects_lab_interpretation() -> None:
+    res = validate_answer(
+        "Ваши анализы показывают воспаление, это выше нормы.",
+        ConversationState(),
+        _default_planner(),
+    )
+    assert res.failed and not res.checks["no_lab_interpretation"]
+
+
+def test_guardrail_rejects_slot_promise() -> None:
+    res = validate_answer(
+        "Записал вас на 15:00 к кардиологу, ждём вас завтра в клинике.",
+        ConversationState(),
+        _default_planner(current_intent="wants_booking"),
+    )
+    assert res.failed and not res.checks["no_invented_availability"]
+
+    res2 = validate_answer(
+        "Передам заявку — администратор свяжется и подтвердит ближайшее доступное время.",
+        ConversationState(),
+        _default_planner(current_intent="wants_booking"),
+    )
+    assert res2.checks["no_invented_availability"] is True
+
+
+def test_guardrail_rejects_child_contact_request() -> None:
+    for answer in (
+        "Оставьте, пожалуйста, номер ребёнка для связи.",
+        "Мне понадобится его номер телефона.",
+        "Продиктуйте телефон сына.",
+    ):
+        res = validate_answer(answer, ConversationState(), _default_planner())
+        assert res.failed and not res.checks["no_child_contact_request"], answer
+
+
+def test_guardrail_accepts_adult_contact_request() -> None:
+    res = validate_answer(
+        "Оставьте, пожалуйста, ваше имя и WhatsApp/телефон для связи.",
+        ConversationState(),
+        _default_planner(current_intent="wants_booking"),
+    )
+    assert res.checks["no_child_contact_request"] is True
+    assert not res.failed, res.fix
+
+
+def test_guardrail_rejects_invented_doctor() -> None:
+    res = validate_answer(
+        "Вас примет доктор Иванов, он отличный специалист.",
+        ConversationState(),
+        _default_planner(),
+    )
+    assert res.failed and not res.checks["no_invented_doctor"]
+
+
+def test_guardrail_accepts_kb_doctor_with_declension() -> None:
+    res = validate_answer(
+        "Детей принимает врач Мадина Омарова. Можно записаться к врачу Руслану Киму.",
+        ConversationState(),
+        _default_planner(current_intent="ask_doctor"),
+    )
+    assert res.checks["no_invented_doctor"] is True
+    assert not res.failed, res.fix
+
+
+def test_guardrail_rejects_invented_promotion() -> None:
+    for answer in (
+        "Могу предложить рассрочку на 3 месяца.",
+        "Сделаем скидку 20% на первый визит.",
+    ):
+        res = validate_answer(answer, ConversationState(), _default_planner())
+        assert res.failed and not res.checks["no_invented_promotion"], answer
+
+
+def test_guardrail_accepts_kb_discounts() -> None:
+    res = validate_answer(
+        "Пенсионерам скидка 10% на консультации по будням до 13:00, семейная карта даёт 5% на консультации.",
+        ConversationState(),
+        _default_planner(current_intent="ask_discount"),
+    )
+    assert res.checks["no_invented_promotion"] is True
+    assert not res.failed, res.fix
+
+
+def test_guardrail_rejects_guarantee() -> None:
+    res = validate_answer(
+        "Гарантируем полное выздоровление после курса.",
+        ConversationState(),
+        _default_planner(),
+    )
+    assert res.failed and not res.checks["no_guarantees"]
+
+
+def test_price_question_allows_honest_admin_handoff() -> None:
+    # Service not priced in KB — an honest handoff must NOT trigger the
+    # price-present repair loop.
+    res = validate_answer(
+        "Такой услуги нет в моей базе — точную стоимость уточнит администратор.",
+        ConversationState(),
+        _default_planner(current_intent="ask_price"),
+    )
+    assert res.checks["price_present_when_asked"] is True
+    assert not res.failed, res.fix
+
+
+def test_doctor_schedule_answer_passes() -> None:
+    res = validate_answer(
+        "Кардиолог Руслан Ким принимает во вторник и четверг с 14:00 до 20:00, в субботу с 10:00 до 14:00. "
+        "Точное свободное время подтвердит администратор.",
+        ConversationState(),
+        _default_planner(current_intent="ask_schedule"),
+    )
+    assert not res.failed, res.fix
+
+
+def test_no_booking_cta_in_emergency_context() -> None:
+    state = ConversationState(urgency_flag="emergency")
+    res = validate_answer(
+        "Рекомендую записаться к кардиологу, могу оформить запись.",
+        state,
+        _default_planner(current_intent="symptom_description"),
+    )
+    assert res.failed and not res.checks["no_booking_cta_on_emergency"]
+
+
+def test_guardrail_rejects_repeated_greeting() -> None:
+    state = ConversationState(greeting_already_sent=True)
+    res = validate_answer(
+        "Здравствуйте! Приём терапевта стоит 12 000 ₸.",
+        state,
+        _default_planner(current_intent="ask_price"),
+    )
+    assert res.failed and not res.checks["no_repeated_greeting"]
+
+
+def test_guardrail_rejects_reasking_known_slot() -> None:
+    state = ConversationState(age="5")
+    res = validate_answer(
+        "Хорошо. Подскажите, сколько лет пациенту?",
+        state,
+        _default_planner(),
+    )
+    assert res.failed and not res.checks["no_repeated_known_slot"]
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator: repair flow and safety
+# ---------------------------------------------------------------------------
+
+def test_orchestrator_repairs_prescription() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="medical_advice_request"),
+        writer_texts=[
+            "Примите ибупрофен 400 мг.",  # prescription → fails
+            "Лекарства назначает врач после осмотра. Могу подсказать, к какому специалисту обратиться.",
+        ],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("Назначьте мне антибиотик")))
+    assert gem.writer_calls == 2
+    assert resp.metadata["repaired_answer"] is True
+    assert "ибупрофен" not in resp.answer.casefold()
+    assert "мг" not in resp.answer.casefold()
+
+
+def test_orchestrator_repairs_diagnosis() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="symptom_description"),
+        writer_texts=[
+            "Похоже, у вас гастрит.",  # diagnosis → fails
+            "Оценить это может врач на приёме — с такими жалобами обычно идут к гастроэнтерологу.",
+        ],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("Изжога и боль в животе после еды")))
+    assert gem.writer_calls == 2
+    assert "гастрит" not in resp.answer.casefold()
+
+
+def test_orchestrator_repairs_slot_promise() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="wants_booking"),
+        writer_texts=[
+            "Записал вас на 15:00 к неврологу!",  # slot promise → fails
+            "Передам заявку — администратор свяжется и подтвердит ближайшее доступное время.",
+        ],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("Можно сегодня к неврологу?")))
+    assert gem.writer_calls == 2
+    assert "15:00" not in resp.answer
+
+
+def test_orchestrator_repairs_child_contact_wording() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="wants_booking", recommended_next_step="ask_contact"),
+        writer_texts=[
+            "Для записи мне нужен номер ребёнка.",  # child contact → fails
+            "Оставьте, пожалуйста, ваше имя и WhatsApp/телефон для связи.",
+        ],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("Хочу записать сына, ему 5 лет, кашель")))
+    assert gem.writer_calls == 2
+    low = resp.answer.casefold()
+    assert "номер ребёнка" not in low and "номер ребенка" not in low
+    assert "ваше имя" in low
+
+
+def test_missing_price_never_hallucinated() -> None:
+    # Writer keeps inventing a non-KB price → deterministic safe fallback, no ₸.
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="ask_price"),
+        writer_texts=[
+            "МРТ головного мозга стоит 25 000 ₸.",
+            "МРТ обойдётся примерно в 25 000 ₸.",
+        ],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("Сколько стоит МРТ?")))
+    assert "₸" not in resp.answer
+    assert "25 000" not in resp.answer
+    assert "администратор" in resp.answer.casefold()
+
+
+def test_contact_collection_sets_lead_status() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(
+            current_intent="contact",
+            slots={"specialty": "кардиолог", "contact": "+7 701 222 33 44"},
+        ),
+        writer_texts=[
+            "Спасибо, заявка принята! Администратор свяжется с вами и подтвердит ближайшее доступное время.",
+        ],
+    )
+    resp = _run(handle_medical_center_chat(
+        gem, _request("Хочу записаться к кардиологу, мой номер +7 701 222 33 44")
+    ))
+    assert resp.lead_status == "contact_collected"
+    assert resp.metadata["state"]["contact"]
+    assert resp.metadata["medical_lead_status"] == "appointment_requested"
+    assert resp.metadata["conversation_status"] == "contact_collected"
+
+
+def test_metadata_carries_medical_state() -> None:
+    gem = FakeGemini(
+        planner=_default_planner(
+            current_intent="symptom_description",
+            slots={
+                "specialty": "педиатр",
+                "age": "5",
+                "symptoms_or_goal": "температура и кашель",
+                "patient_name": "Алишер",
+            },
+        ),
+        writer_texts=["Для ребёнка подойдёт педиатр. Подсказать удобное время?"],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("Сыну 5 лет, температура и кашель")))
+    state = resp.metadata["state"]
+    assert state["specialty"] == "педиатр"
+    assert state["age"] == "5"
+    assert state["symptoms_or_goal"] == "температура и кашель"
+    assert state["urgency_flag"] == "normal"
+
+
+def test_orchestrator_never_crashes_on_writer_failure() -> None:
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_price"), writer_texts=[])
+    resp = _run(handle_medical_center_chat(gem, _request("сколько стоит терапевт?")))
+    assert resp.answer
+    assert resp.metadata.get("error")
+    assert "₸" not in resp.answer
+
+
+def test_orchestrator_survives_planner_failure() -> None:
+    gem = FakeGemini(fail_planner=True, writer_texts=["Расскажу о клинике и направлениях."])
+    resp = _run(handle_medical_center_chat(gem, _request("расскажите о клинике")))
+    assert resp.metadata["planner_llm_used"] is False
+    assert resp.answer
+
+
+def test_planner_timeout_returns_safe_response() -> None:
+    from unittest.mock import patch
+
+    gem = FakeGemini(writer_texts=["Приём терапевта — 12 000 ₸."])
+
+    async def _timeout(*args, **kwargs):
+        raise asyncio.TimeoutError("simulated planner timeout")
+
+    with patch("app.medical_center_demo.plan_conversation_turn", side_effect=_timeout):
+        resp = _run(handle_medical_center_chat(gem, _request("сколько стоит терапевт?")))
+
+    assert resp.answer
+    assert resp.metadata.get("planner_timeout") is True
+
+
+def test_writer_timeout_returns_safe_fallback() -> None:
+    from unittest.mock import patch
+
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_price"))
+
+    async def _timeout(*args, **kwargs):
+        raise asyncio.TimeoutError("simulated writer timeout")
+
+    with patch("app.medical_center_demo.write_response", side_effect=_timeout):
+        resp = _run(handle_medical_center_chat(gem, _request("сколько стоит терапевт?")))
+
+    assert resp.answer
+    assert "₸" not in resp.answer
+    assert resp.metadata.get("writer_timeout") is True
+
+
+def test_repair_timeout_returns_safe_fallback() -> None:
+    from unittest.mock import patch
+
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_price"))
+
+    async def _timeout_on_repair(*args, repair=None, **kwargs):
+        if repair:
+            raise asyncio.TimeoutError("simulated repair timeout")
+        return "МРТ стоит 25 000 ₸."  # invented price → triggers repair
+
+    with patch("app.medical_center_demo.write_response", side_effect=_timeout_on_repair):
+        resp = _run(handle_medical_center_chat(gem, _request("сколько стоит МРТ?")))
+
+    assert resp.answer
+    assert "25 000" not in resp.answer
+    assert resp.metadata.get("repair_timeout") is True
+
+
+def test_stage_timeouts_fit_frontend_budget() -> None:
+    from app.medical_center_demo import _PLANNER_TIMEOUT, _REPAIR_TIMEOUT, _WRITER_TIMEOUT
+
+    assert _PLANNER_TIMEOUT + _WRITER_TIMEOUT + _REPAIR_TIMEOUT <= 30
+
+
+# ---------------------------------------------------------------------------
+# Reclassifiers
+# ---------------------------------------------------------------------------
+
+def test_medical_advice_reclassifier_retags_medication_question() -> None:
+    plan = _default_planner(current_intent="ask_price", recommended_next_step="ask_contact")
+    out = reclassify_medical_advice_question("Что мне принять от головной боли?", plan)
+    assert out["current_intent"] == "medical_advice_request"
+    assert out["recommended_next_step"] == "none"
+
+
+def test_medical_advice_reclassifier_retags_lab_question() -> None:
+    out = reclassify_medical_advice_question(
+        "Расшифруйте мои анализы, пожалуйста", _default_planner(current_intent="answer_question")
+    )
+    assert out["current_intent"] == "medical_advice_request"
+
+
+def test_medical_advice_reclassifier_leaves_price_question() -> None:
+    out = reclassify_medical_advice_question(
+        "Сколько стоит приём кардиолога?", _default_planner(current_intent="ask_price")
+    )
+    assert out["current_intent"] == "ask_price"
+
+
+def test_medical_advice_reclassifier_leaves_protected_intents() -> None:
+    for intent in ("wants_booking", "contact", "offensive", "correction"):
+        out = reclassify_medical_advice_question(
+            "что мне принять?", _default_planner(current_intent=intent)
+        )
+        assert out["current_intent"] == intent
+
+
+def test_discount_reclassifier_retags_price_intent() -> None:
+    out = reclassify_discount_question(
+        "А есть скидки для пенсионеров?", _default_planner(current_intent="ask_price")
+    )
+    assert out["current_intent"] == "ask_discount"
+
+
+def test_discount_honest_answer_passes_without_repair() -> None:
+    honest = (
+        "Пенсионерам действует скидка 10% на консультации специалистов по будням до 13:00. "
+        "Остальные условия уточнит администратор."
+    )
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_price"), writer_texts=[honest])
+    resp = _run(handle_medical_center_chat(gem, _request("А есть скидки для пенсионеров?")))
+    assert resp.answer == honest
+    assert gem.writer_calls == 1
+    assert resp.metadata["current_intent"] == "ask_discount"
+
+
+# ---------------------------------------------------------------------------
+# State
+# ---------------------------------------------------------------------------
+
+def test_looks_like_contact() -> None:
+    assert looks_like_contact("+7 700 415 77 21")
+    assert looks_like_contact("мой телеграм @damir_k")
+    assert not looks_like_contact("хочу узнать цены")
+
+
+def test_build_state_sticky_emergency_from_history() -> None:
+    history = [
+        _msg("user", "Сильная боль в груди и трудно дышать"),
+        _msg("assistant", EMERGENCY_ANSWER),
+    ]
+    state = build_conversation_state(history, "Спасибо, уже лучше")
+    assert state.urgency_flag == "emergency"
+
+
+def test_planner_can_upgrade_to_urgent_but_not_downgrade_emergency() -> None:
+    state = ConversationState()
+    apply_planner_updates(state, _default_planner(slots={"urgency": "urgent"}))
+    assert state.urgency_flag == "urgent"
+
+    emergency = ConversationState(urgency_flag="emergency")
+    apply_planner_updates(emergency, _default_planner(slots={"urgency": "urgent"}))
+    assert emergency.urgency_flag == "emergency"
+
+
+def test_apply_planner_updates_protects_stable_slots() -> None:
+    state = ConversationState(specialty="кардиолог")
+    apply_planner_updates(state, _default_planner(correction=False, slots={"specialty": "невролог"}))
+    assert state.specialty == "кардиолог"
+    apply_planner_updates(state, _default_planner(correction=True, slots={"specialty": "невролог"}))
+    assert state.specialty == "невролог"
+
+
+def test_build_state_collects_contact_and_asked_questions() -> None:
+    history = [
+        _msg("user", "хочу к врачу"),
+        _msg("assistant", "Подскажите, какое время удобно?"),
+        _msg("user", "мой номер +7 701 222 33 44"),
+    ]
+    state = build_conversation_state(history, "суббота утром")
+    assert state.contact
+    assert "preferred_time" in state.recent_questions_asked
+
+
+# ---------------------------------------------------------------------------
+# Safe fallbacks
+# ---------------------------------------------------------------------------
+
+def test_safe_fallbacks_are_clean_and_pass_guardrails() -> None:
+    for intent in (
+        "ask_price", "ask_discount", "medical_advice_request", "wants_booking",
+        "symptom_description", "offensive", "objection", "smalltalk",
+    ):
+        planner = _default_planner(current_intent=intent)
+        fb = build_safe_fallback(planner)
+        low = fb.casefold()
+        assert "₸" not in fb, intent
+        assert "ибупрофен" not in low and "антибиотик" not in low, intent
+        assert "записал вас" not in low, intent
+        res = validate_answer(fb, ConversationState(), planner)
+        assert not res.failed, f"{intent}: {res.fix}"
+
+
+def test_medical_advice_fallback_is_a_refusal() -> None:
+    fb = build_safe_fallback(_default_planner(current_intent="medical_advice_request"))
+    low = fb.casefold()
+    assert "не врач" in low or "врач на приёме" in low
+    assert "назнач" in low  # explains that a doctor prescribes
+
+
+def test_contact_aware_fallback_does_not_reask_contact() -> None:
+    state = ConversationState(contact="+7 701 222 33 44", age="5")
+    for intent in ("contact", "wants_booking", "ask_price", "smalltalk"):
+        fb = build_safe_fallback(_default_planner(current_intent=intent), state)
+        assert "оставьте" not in fb.casefold(), intent

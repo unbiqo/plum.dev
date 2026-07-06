@@ -50,6 +50,7 @@ class Settings:
     # empty the notifier no-ops (logs only), so local/dev never breaks.
     lead_telegram_bot_token: str = ""
     lead_telegram_chat_id: str = ""
+    quality_console_admin_token: str = ""
 
     @property
     def gemini_api_key(self) -> str:
@@ -171,4 +172,5 @@ def get_settings() -> Settings:
         ),
         lead_telegram_bot_token=os.getenv("LEAD_TELEGRAM_BOT_TOKEN", ""),
         lead_telegram_chat_id=os.getenv("LEAD_TELEGRAM_CHAT_ID", ""),
+        quality_console_admin_token=os.getenv("QUALITY_CONSOLE_ADMIN_TOKEN", ""),
     )

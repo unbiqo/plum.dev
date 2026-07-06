@@ -7,6 +7,8 @@ export const config = {
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
+  if (pathname.startsWith('/quality-console') || pathname.startsWith('/admin')) return NextResponse.next()
+
   // Already on /ru subtree — never redirect (prevents loop)
   if (pathname.startsWith('/ru')) return NextResponse.next()
 

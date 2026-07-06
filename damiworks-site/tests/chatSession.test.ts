@@ -31,10 +31,12 @@ import {
   touchChatSession,
   DAMIWORKS_SESSION_TTL_MS,
   ENGLISH_SCHOOL_SESSION_TTL_MS,
+  MEDICAL_CENTER_SESSION_TTL_MS,
 } from '../lib/chatSession'
 
 const SITE = 'damiworks_site'
 const SCHOOL = 'damiworks_english_school_demo'
+const MEDICAL = 'damiworks_medical_center_demo'
 
 function pass(name: string) {
   console.log(`  ✓ ${name}`)
@@ -108,15 +110,31 @@ suite('resetChatSession', () => {
 suite('per-instance isolation', () => {
   reset()
   assert.notEqual(chatSessionKey(SITE), chatSessionKey(SCHOOL), 'distinct storage keys per instance')
+  assert.notEqual(chatSessionKey(SCHOOL), chatSessionKey(MEDICAL), 'medical demo has its own storage key')
+  assert.equal(
+    chatSessionKey(MEDICAL),
+    'damiworks_chat_session_v1:damiworks_medical_center_demo',
+    'medical demo key is instance-scoped',
+  )
 
   const site = loadChatSession(SITE, DAMIWORKS_SESSION_TTL_MS).session.chat_id
   const school = loadChatSession(SCHOOL, ENGLISH_SCHOOL_SESSION_TTL_MS).session.chat_id
+  const medical = loadChatSession(MEDICAL, MEDICAL_CENTER_SESSION_TTL_MS).session.chat_id
   assert.notEqual(site, school, 'DamiWorks and English School get different chat_ids')
+  assert.notEqual(school, medical, 'English School and Medical Center get different chat_ids')
 
   // Touch/reset on one instance must not affect the other.
   resetChatSession(SCHOOL)
   const siteAfter = loadChatSession(SITE, DAMIWORKS_SESSION_TTL_MS).session.chat_id
   assert.equal(site, siteAfter, 'resetting English School does not overwrite DamiWorks')
+
+  resetChatSession(MEDICAL)
+  const schoolAfter = loadChatSession(SCHOOL, ENGLISH_SCHOOL_SESSION_TTL_MS).session.chat_id
+  assert.notEqual(school, schoolAfter, 'English School was reset once above')
+  const schoolAfterMedicalReset = loadChatSession(SCHOOL, ENGLISH_SCHOOL_SESSION_TTL_MS).session.chat_id
+  assert.equal(schoolAfter, schoolAfterMedicalReset, 'resetting Medical Center does not overwrite English School')
+  const siteAfterMedicalReset = loadChatSession(SITE, DAMIWORKS_SESSION_TTL_MS).session.chat_id
+  assert.equal(site, siteAfterMedicalReset, 'resetting Medical Center does not overwrite DamiWorks')
   pass('different instance_id values use separate keys and never overwrite each other')
 })
 
