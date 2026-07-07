@@ -118,6 +118,7 @@ from (
     (row_number() over (partition by coalesce(nullif(cl.instance_id, ''), 'damiworks_site'), cl.chat_id order by cl.created_at) * 2 - 1)::int as turn_index,
     cl.created_at
   from public.chat_logs cl
+  where cl.chat_id is not null
   union all
   select
     coalesce(nullif(cl.instance_id, ''), 'damiworks_site') as instance_id,
@@ -128,6 +129,7 @@ from (
     (row_number() over (partition by coalesce(nullif(cl.instance_id, ''), 'damiworks_site'), cl.chat_id order by cl.created_at) * 2)::int as turn_index,
     cl.created_at + interval '1 millisecond' as created_at
   from public.chat_logs cl
+  where cl.chat_id is not null
 ) legacy_messages
 on conflict (instance_id, chat_id, message_id) do nothing;
 

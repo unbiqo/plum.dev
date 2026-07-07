@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -15,6 +16,31 @@ from .schemas import ChatHistoryMessage, Route
 
 logger = logging.getLogger(__name__)
 
+# How long to keep skipping a table after a missing-table (404) error before
+# checking again. Without this, a table created after process startup (e.g.
+# a manual migration applied while the service is running) stays "unavailable"
+# in this process's memory until it's restarted.
+_AVAILABILITY_RETRY_SECONDS = 60
+
+
+class _TableAvailability:
+    def __init__(self) -> None:
+        self._unavailable_since: float | None = None
+
+    def blocked(self) -> bool:
+        if self._unavailable_since is None:
+            return False
+        if time.monotonic() - self._unavailable_since >= _AVAILABILITY_RETRY_SECONDS:
+            self._unavailable_since = None
+            return False
+        return True
+
+    def mark_unavailable(self) -> None:
+        self._unavailable_since = time.monotonic()
+
+    def mark_available(self) -> None:
+        self._unavailable_since = None
+
 
 class SupabaseService:
     def __init__(self, settings: Settings) -> None:
@@ -23,10 +49,10 @@ class SupabaseService:
             settings.supabase_url,
             settings.supabase_service_role_key,
         )
-        self._chat_sessions_available: bool | None = None
-        self._leads_available: bool | None = None
-        self._quality_feedback_available: bool | None = None
-        self._ai_conversations_available: bool | None = None
+        self._chat_sessions_available = _TableAvailability()
+        self._leads_available = _TableAvailability()
+        self._quality_feedback_available = _TableAvailability()
+        self._ai_conversations_available = _TableAvailability()
 
     async def search_knowledge_base(
         self,
@@ -659,7 +685,7 @@ class SupabaseService:
             "chat_id": chat_id,
         }
         for table_name in ("chat_logs", "user_memories", "chat_sessions"):
-            if table_name == "chat_sessions" and self._chat_sessions_available is False:
+            if table_name == "chat_sessions" and self._chat_sessions_available.blocked():
                 continue
             try:
                 query = self.client.table(table_name).delete()
@@ -668,7 +694,7 @@ class SupabaseService:
                 query.execute()
             except Exception as exc:
                 if table_name == "chat_sessions" and self._is_missing_table_error(exc):
-                    self._chat_sessions_available = False
+                    self._chat_sessions_available.mark_unavailable()
                     logger.warning("chat_sessions unavailable; skipped session state clear")
                     continue
                 logger.exception("Failed to clear %s for reset_context", table_name)
@@ -697,7 +723,7 @@ class SupabaseService:
         channel: str,
         chat_id: str,
     ) -> dict[str, Any]:
-        if self._chat_sessions_available is False:
+        if self._chat_sessions_available.blocked():
             return {}
 
         try:
@@ -712,14 +738,14 @@ class SupabaseService:
             )
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._chat_sessions_available = False
+                self._chat_sessions_available.mark_unavailable()
                 logger.warning("chat_sessions unavailable; using chat_logs fact scan fallback")
                 return {}
-            self._chat_sessions_available = False
+            self._chat_sessions_available.mark_unavailable()
             logger.exception("Failed to fetch chat session metadata")
             return {}
 
-        self._chat_sessions_available = True
+        self._chat_sessions_available.mark_available()
         rows = response.data or []
         if not rows:
             return {}
@@ -734,7 +760,7 @@ class SupabaseService:
         chat_id: str,
         metadata: dict[str, Any],
     ) -> None:
-        if self._chat_sessions_available is False:
+        if self._chat_sessions_available.blocked():
             return
 
         try:
@@ -750,10 +776,10 @@ class SupabaseService:
             ).execute()
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._chat_sessions_available = False
+                self._chat_sessions_available.mark_unavailable()
                 logger.warning("chat_sessions unavailable; skipped session metadata upsert")
                 return
-            self._chat_sessions_available = False
+            self._chat_sessions_available.mark_unavailable()
             logger.exception("Failed to upsert chat session metadata")
 
     # ------------------------------------------------------------------
@@ -761,7 +787,7 @@ class SupabaseService:
     # ------------------------------------------------------------------
 
     def _get_lead_sync(self, instance_id: str, chat_id: str) -> dict[str, Any] | None:
-        if self._leads_available is False:
+        if self._leads_available.blocked():
             return None
         try:
             response = (
@@ -774,17 +800,17 @@ class SupabaseService:
             )
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._leads_available = False
+                self._leads_available.mark_unavailable()
                 logger.warning("damiworks_leads table unavailable; lead lookup skipped")
                 return None
             logger.exception("Failed to fetch damiworks lead")
             return None
-        self._leads_available = True
+        self._leads_available.mark_available()
         rows = response.data or []
         return rows[0] if rows else None
 
     def _upsert_lead_sync(self, lead: dict[str, Any]) -> dict[str, Any] | None:
-        if self._leads_available is False:
+        if self._leads_available.blocked():
             return None
         payload = {k: v for k, v in lead.items() if v is not None}
         payload["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -796,12 +822,12 @@ class SupabaseService:
             )
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._leads_available = False
+                self._leads_available.mark_unavailable()
                 logger.warning("damiworks_leads table unavailable; lead upsert skipped")
                 return None
             logger.exception("Failed to upsert damiworks lead")
             return None
-        self._leads_available = True
+        self._leads_available.mark_available()
         rows = response.data or []
         return rows[0] if rows else None
 
@@ -810,7 +836,7 @@ class SupabaseService:
     # ------------------------------------------------------------------
 
     def _create_quality_feedback_sync(self, feedback: dict[str, Any]) -> dict[str, Any] | None:
-        if self._quality_feedback_available is False:
+        if self._quality_feedback_available.blocked():
             return None
 
         payload = {k: v for k, v in feedback.items() if v is not None}
@@ -820,13 +846,13 @@ class SupabaseService:
             response = self.client.table("ai_message_feedback").insert(payload).execute()
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._quality_feedback_available = False
+                self._quality_feedback_available.mark_unavailable()
                 logger.warning("ai_message_feedback table unavailable; feedback insert skipped")
                 return None
             logger.exception("Failed to create quality feedback")
             return None
 
-        self._quality_feedback_available = True
+        self._quality_feedback_available.mark_available()
         rows = response.data or []
         if rows:
             self._refresh_feedback_counts(
@@ -848,7 +874,7 @@ class SupabaseService:
         created_to: str | None,
         limit: int,
     ) -> list[dict[str, Any]]:
-        if self._quality_feedback_available is False:
+        if self._quality_feedback_available.blocked():
             return []
 
         try:
@@ -875,13 +901,13 @@ class SupabaseService:
             )
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._quality_feedback_available = False
+                self._quality_feedback_available.mark_unavailable()
                 logger.warning("ai_message_feedback table unavailable; feedback list skipped")
                 return []
             logger.exception("Failed to list quality feedback")
             return []
 
-        self._quality_feedback_available = True
+        self._quality_feedback_available.mark_available()
         return list(response.data or [])
 
     def _update_quality_feedback_sync(
@@ -889,7 +915,7 @@ class SupabaseService:
         feedback_id: str,
         updates: dict[str, Any],
     ) -> dict[str, Any] | None:
-        if self._quality_feedback_available is False:
+        if self._quality_feedback_available.blocked():
             return None
 
         payload = {k: v for k, v in updates.items() if v is not None}
@@ -905,13 +931,13 @@ class SupabaseService:
             )
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._quality_feedback_available = False
+                self._quality_feedback_available.mark_unavailable()
                 logger.warning("ai_message_feedback table unavailable; feedback update skipped")
                 return None
             logger.exception("Failed to update quality feedback")
             return None
 
-        self._quality_feedback_available = True
+        self._quality_feedback_available.mark_available()
         rows = response.data or []
         if rows:
             self._refresh_feedback_counts(
@@ -967,7 +993,7 @@ class SupabaseService:
         lead_status: str | None,
         metadata: dict[str, Any] | None,
     ) -> None:
-        if self._ai_conversations_available is False:
+        if self._ai_conversations_available.blocked():
             return
 
         now = datetime.now(timezone.utc).isoformat()
@@ -1032,13 +1058,13 @@ class SupabaseService:
             ).eq("instance_id", instance_id).eq("chat_id", chat_id).execute()
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._ai_conversations_available = False
+                self._ai_conversations_available.mark_unavailable()
                 logger.warning("ai_conversations tables unavailable; conversation logging skipped")
                 return
             logger.exception("Failed to log AI conversation turn")
             return
 
-        self._ai_conversations_available = True
+        self._ai_conversations_available.mark_available()
 
     def _count_conversation_messages(self, instance_id: str, chat_id: str) -> int:
         try:
@@ -1079,7 +1105,7 @@ class SupabaseService:
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
-        if self._ai_conversations_available is False:
+        if self._ai_conversations_available.blocked():
             return []
 
         try:
@@ -1103,13 +1129,13 @@ class SupabaseService:
             response = query.order("last_message_at", desc=True).range(start, end).execute()
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._ai_conversations_available = False
+                self._ai_conversations_available.mark_unavailable()
                 logger.warning("ai_conversations table unavailable; conversation list skipped")
                 return []
             logger.exception("Failed to list AI conversations")
             return []
 
-        self._ai_conversations_available = True
+        self._ai_conversations_available.mark_available()
         return list(response.data or [])
 
     def _get_ai_conversation_detail_sync(
@@ -1117,7 +1143,7 @@ class SupabaseService:
         instance_id: str,
         chat_id: str,
     ) -> dict[str, Any] | None:
-        if self._ai_conversations_available is False:
+        if self._ai_conversations_available.blocked():
             return None
 
         try:
@@ -1151,7 +1177,7 @@ class SupabaseService:
             )
         except Exception as exc:
             if self._is_missing_table_error(exc):
-                self._ai_conversations_available = False
+                self._ai_conversations_available.mark_unavailable()
                 logger.warning("ai_conversations table unavailable; conversation detail skipped")
                 return None
             logger.exception("Failed to get AI conversation detail")
@@ -1175,7 +1201,7 @@ class SupabaseService:
                 }
             )
 
-        self._ai_conversations_available = True
+        self._ai_conversations_available.mark_available()
         return {
             "conversation": conversation,
             "messages": messages,
