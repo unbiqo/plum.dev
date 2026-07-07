@@ -15,6 +15,7 @@ import json
 import pytest
 
 from app.medical_center_demo import (
+    INVALID_CONTACT_ANSWER,
     MEDICAL_CENTER_INSTANCE_ID,
     handle_medical_center_chat,
 )
@@ -34,9 +35,12 @@ from app.medical_center_state import (
     ConversationState,
     apply_planner_updates,
     build_conversation_state,
+    classify_contact,
     detect_red_flags,
     looks_like_contact,
+    looks_like_invalid_phone,
 )
+from app.medical_center_writer import build_turn_plan
 from app.schemas import ChatHistoryMessage, ChatRequest
 
 
@@ -679,6 +683,67 @@ def test_looks_like_contact() -> None:
     assert looks_like_contact("+7 700 415 77 21")
     assert looks_like_contact("мой телеграм @damir_k")
     assert not looks_like_contact("хочу узнать цены")
+    # A 12-digit run is not a plausible phone — must not count as a contact.
+    assert not looks_like_contact("713812732873")
+
+
+def test_classify_contact() -> None:
+    assert classify_contact("мой телеграм @damir_k") == "telegram"
+    assert classify_contact("+7 700 415 77 21") == "phone"   # 11 digits, +
+    assert classify_contact("87004157721") == "phone"        # 11 digits, local
+    assert classify_contact("7004157721") == "phone"         # 10 digits, local
+    assert classify_contact("713812732873") == "phone_invalid"  # 12 digits
+    assert classify_contact("12345") == "none"               # too short to look like a phone
+    assert classify_contact("хочу узнать цены") == "none"
+
+
+def test_looks_like_invalid_phone_gated_on_digit_dominance() -> None:
+    # A bare broken number is a contact attempt.
+    assert looks_like_invalid_phone("713812732873")
+    # A valid number is not "invalid".
+    assert not looks_like_invalid_phone("+7 701 222 33 44")
+    # Prose that merely contains a long number must not be hijacked.
+    assert not looks_like_invalid_phone(
+        "Меня выставили счёт на 123456789 тенге, это дороговато для меня"
+    )
+
+
+def test_invalid_phone_short_circuits_without_llm() -> None:
+    gem = FakeGemini(planner=_default_planner(current_intent="contact"))
+    history = [
+        _msg("user", "хочу записаться"),
+        _msg("assistant", "Оставьте, пожалуйста, ваше имя и WhatsApp/телефон для связи."),
+    ]
+    resp = _run(handle_medical_center_chat(gem, _request("713812732873", history=history)))
+    assert resp.answer == INVALID_CONTACT_ANSWER
+    assert gem.planner_calls == 0
+    assert gem.writer_calls == 0
+    assert resp.metadata["invalid_contact_short_circuit"] is True
+    assert resp.lead_status != "contact_collected"
+    assert not resp.metadata["state"]["contact"]
+
+
+def test_price_intent_appends_booking_cta_hint() -> None:
+    state = ConversationState(specialty="невролог", greeting_already_sent=True)
+    planner = _default_planner(
+        current_intent="ask_price",
+        should_pause_qualification=True,
+        recommended_next_step="none",
+    )
+    plan = build_turn_plan(state, planner)
+    assert "предложи записаться" in plan.casefold()
+    # The pause line must not suppress the CTA for a price question.
+    assert "на паузе" not in plan.casefold()
+
+
+def test_price_cta_suppressed_once_offered_or_contact_known() -> None:
+    planner = _default_planner(current_intent="ask_price", recommended_next_step="none")
+    # Already offered booking → no repeat CTA.
+    offered = ConversationState(booking_cta_mentioned=True, greeting_already_sent=True)
+    assert "предложи записаться" not in build_turn_plan(offered, planner).casefold()
+    # Contact already on file → no CTA (do not re-push booking).
+    have_contact = ConversationState(contact="+7 701 222 33 44", greeting_already_sent=True)
+    assert "предложи записаться" not in build_turn_plan(have_contact, planner).casefold()
 
 
 def test_build_state_sticky_emergency_from_history() -> None:

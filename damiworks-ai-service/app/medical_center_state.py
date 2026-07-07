@@ -29,10 +29,47 @@ _PHONE_RE = re.compile(r"\+?\d[\d\s\-\(\)]{6,}\d")
 _TELEGRAM_RE = re.compile(r"@\w{3,}")
 
 
-def looks_like_contact(text: str) -> bool:
-    """True if the text contains a phone number or Telegram handle."""
+def classify_contact(text: str) -> str:
+    """Classify the contact content of a user message.
+
+    Returns one of ``"telegram"``, ``"phone"``, ``"phone_invalid"``, ``"none"``.
+    A phone is plausible when it has 10–11 digits (local KZ/RU form) or 11–15
+    digits with an international ``+`` prefix (E.164). A phone-shaped run outside
+    that range (e.g. the 12-digit ``713812732873``) is ``"phone_invalid"`` — we
+    must not treat it as a real callback number.
+    """
     t = (text or "").strip()
-    return bool(_PHONE_RE.search(t) or _TELEGRAM_RE.search(t))
+    if _TELEGRAM_RE.search(t):
+        return "telegram"
+    match = _PHONE_RE.search(t)
+    if not match:
+        return "none"
+    raw = match.group(0)
+    has_plus = raw.lstrip().startswith("+")
+    digit_count = len(re.sub(r"\D", "", raw))
+    if has_plus:
+        return "phone" if 11 <= digit_count <= 15 else "phone_invalid"
+    return "phone" if 10 <= digit_count <= 11 else "phone_invalid"
+
+
+def looks_like_contact(text: str) -> bool:
+    """True if the text contains a Telegram handle or a plausible phone number."""
+    return classify_contact(text) in ("telegram", "phone")
+
+
+def looks_like_invalid_phone(text: str) -> bool:
+    """True when the message is clearly a contact attempt with a bad phone.
+
+    Gated on the digit run dominating the message so ordinary prose that merely
+    contains a long number (an order id, "болит уже 12345678 часов") never
+    hijacks the flow — only a message the user meant as their number.
+    """
+    if classify_contact(text) != "phone_invalid":
+        return False
+    t = (text or "").strip()
+    digit_count = len(re.sub(r"\D", "", t))
+    letter_count = sum(c.isalpha() for c in t)
+    return digit_count >= 8 and letter_count <= digit_count
 
 
 # Emergency red flags (KB section «Красные флаги»). Strong markers only: a

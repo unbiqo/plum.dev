@@ -97,6 +97,9 @@ _RECENT_FACT_LABELS: dict[str, str] = {
     "preparation_mentioned": "подготовка к приёму/анализам (уже упоминалась)",
 }
 
+# Price intents where a soft booking CTA naturally follows the quoted amount.
+_PRICE_CTA_INTENTS = frozenset({"ask_price", "ask_all_prices"})
+
 _NEXT_STEP_HINTS = {
     "ask_specialty": "уточни, к какому специалисту или с какой жалобой обращается",
     "ask_age": "спроси возраст пациента",
@@ -167,6 +170,18 @@ def build_turn_plan(state: ConversationState, planner: dict) -> str:
         next_step = "none"
     if next_step == "ask_contact" and state.contact_asked:
         next_step = "none"
+
+    # Asking a price is a strong buying signal: after quoting it, gently offer to
+    # book (once) instead of dead-ending on the number — unless the CTA was
+    # already made, a contact is on file, or the conversation is an emergency.
+    if (
+        next_step == "none"
+        and planner.get("current_intent") in _PRICE_CTA_INTENTS
+        and not state.booking_cta_mentioned
+        and not state.is_known("contact")
+        and state.urgency_flag != "emergency"
+    ):
+        next_step = "offer_booking"
     hint = _NEXT_STEP_HINTS.get(next_step, "")
     if paused and not hint:
         lines.append(

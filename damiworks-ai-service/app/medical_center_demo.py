@@ -41,6 +41,7 @@ from .medical_center_state import (
     apply_planner_updates,
     build_conversation_state,
     detect_red_flags,
+    looks_like_invalid_phone,
 )
 from .medical_center_writer import write_response
 from .schemas import ChatHistoryMessage, ChatResponse, Route
@@ -52,6 +53,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MEDICAL_CENTER_INSTANCE_ID = "damiworks_medical_center_demo"
+
+# Deterministic reply when the user tried to leave a phone number but it is
+# implausible (wrong length). Asking to re-check beats echoing a broken number
+# and finalizing a lead nobody can call back. No LLM call, no lead finalized.
+INVALID_CONTACT_ANSWER = (
+    "Кажется, в номере телефона закралась ошибка — обычно это 11 цифр, "
+    "например +7 701 234 56 78. Пришлите, пожалуйста, номер ещё раз или "
+    "оставьте Telegram, и я передам заявку администратору."
+)
 
 # Per-stage LLM timeouts (same budget rationale as the English School demo:
 # worst case planner + writer + repair must stay inside the frontend proxy abort).
@@ -256,6 +266,31 @@ async def handle_medical_center_chat(
                     **_derive_conversation_status(
                         state, history, {}, lead_status, emergency_turn=True
                     ),
+                },
+            )
+
+        # ---- INVALID CONTACT SHORT-CIRCUIT (deterministic, before any LLM) ----
+        # The user tried to leave a phone but it is implausible (wrong length).
+        # Ask them to re-check instead of echoing a broken number and finalizing
+        # an uncallable lead. Skipped when a valid contact is already on file.
+        if not state.contact and looks_like_invalid_phone(message):
+            lead_status = _derive_lead_status(state, history)
+            return ChatResponse(
+                route=Route.general,
+                routes=[Route.general],
+                answer=INVALID_CONTACT_ANSWER,
+                checkout=False,
+                lead_status=lead_status,
+                metadata={
+                    "medical_center_demo": True,
+                    "planner_llm_used": False,
+                    "writer_llm_used": False,
+                    "invalid_contact_short_circuit": True,
+                    "medical_lead_status": _derive_medical_lead_status(
+                        lead_status, history, message
+                    ),
+                    "state": state.to_metadata(),
+                    **_derive_conversation_status(state, history, {}, lead_status),
                 },
             )
 
