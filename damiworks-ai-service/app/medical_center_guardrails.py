@@ -32,7 +32,12 @@ import re
 from dataclasses import dataclass
 
 from .medical_center_kb import get_full_kb_context
-from .medical_center_state import ConversationState, QUESTION_TO_SLOT, detect_asked_slots
+from .medical_center_state import (
+    ConversationState,
+    QUESTION_TO_SLOT,
+    detect_asked_slots,
+    detect_symptom_specialty,
+)
 
 # Exact wording required for emergency turns (KB red-flag template, short form).
 EMERGENCY_ANSWER = (
@@ -423,14 +428,21 @@ _FALLBACK_SPECIALTY = (
 )
 
 
-def build_safe_fallback(planner: dict, state: ConversationState | None = None) -> str:
+def build_safe_fallback(
+    planner: dict,
+    state: ConversationState | None = None,
+    message: str = "",
+) -> str:
     """Intent-aware safe answer used when generation/repair fails.
 
     Contact-aware: once the user has left a phone/Telegram, no fallback may ask
-    for the contact again.
+    for the contact again. Symptom-aware: a symptom message still routes to a
+    specialist and asks one clarifying question instead of dumping to the admin,
+    even when the planner degraded to a vague intent (e.g. an LLM timeout).
     """
     intent = (planner or {}).get("current_intent", "unknown")
     contact_known = bool(state is not None and getattr(state, "contact", ""))
+    emergency = state is not None and getattr(state, "urgency_flag", "") == "emergency"
 
     if intent == "offensive":
         return _FALLBACK_OFFENSIVE
@@ -438,6 +450,20 @@ def build_safe_fallback(planner: dict, state: ConversationState | None = None) -
         return _FALLBACK_MEDICAL_ADVICE
     if intent == "ask_discount":
         return _FALLBACK_DISCOUNT
+
+    # Symptom routing (deterministic, routing-only): keep a degraded turn useful
+    # instead of falling through to a generic "leave your contact" answer.
+    if not contact_known and not emergency and intent not in ("contact", "wants_booking"):
+        specialty = detect_symptom_specialty(message)
+        if specialty:
+            ask_age = state is None or not state.is_known("age")
+            detail_q = "сколько лет пациенту и как давно беспокоит" if ask_age else "как давно беспокоит"
+            return (
+                f"При таких жалобах обычно помогает {specialty}. "
+                f"Подскажите, пожалуйста, {detail_q}? Предложу подходящего "
+                "специалиста и помогу записаться."
+            )
+
     if intent in ("ask_specialty_advice", "symptom_description"):
         return _FALLBACK_SPECIALTY
     if intent in ("contact", "wants_booking"):

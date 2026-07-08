@@ -325,7 +325,7 @@ async def handle_medical_center_chat(
         except asyncio.TimeoutError:
             writer_timeout = True
             logger.warning("medical_center_chat: writer timed out")
-            answer = build_safe_fallback(planner, state)
+            answer = build_safe_fallback(planner, state, message)
 
         validation = validate_answer(answer, state, planner)
 
@@ -343,11 +343,11 @@ async def handle_medical_center_chat(
                 )
                 validation = validate_answer(answer, state, planner)
                 if validation.failed:
-                    answer = build_safe_fallback(planner, state)
+                    answer = build_safe_fallback(planner, state, message)
             except asyncio.TimeoutError:
                 repair_timeout = True
                 logger.warning("medical_center_chat: repair writer timed out")
-                answer = build_safe_fallback(planner, state)
+                answer = build_safe_fallback(planner, state, message)
 
         fallback_reason: str | None = (
             "planner_timeout" if planner_timeout
@@ -378,7 +378,7 @@ async def handle_medical_center_chat(
         return ChatResponse(
             route=Route.general,
             routes=[Route.general],
-            answer=build_safe_fallback(planner),
+            answer=build_safe_fallback(planner, message=message),
             checkout=False,
             metadata={
                 "medical_center_demo": True,

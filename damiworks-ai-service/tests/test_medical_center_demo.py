@@ -37,6 +37,7 @@ from app.medical_center_state import (
     build_conversation_state,
     classify_contact,
     detect_red_flags,
+    detect_symptom_specialty,
     looks_like_contact,
     looks_like_invalid_phone,
 )
@@ -744,6 +745,38 @@ def test_price_cta_suppressed_once_offered_or_contact_known() -> None:
     # Contact already on file → no CTA (do not re-push booking).
     have_contact = ConversationState(contact="+7 701 222 33 44", greeting_already_sent=True)
     assert "приглашение записаться" not in build_turn_plan(have_contact, planner).casefold()
+
+
+def test_detect_symptom_specialty_routes_common_complaints() -> None:
+    assert detect_symptom_specialty("болит живот") == "гастроэнтеролог или терапевт"
+    assert detect_symptom_specialty("У меня болит спина") == "невролог"
+    assert detect_symptom_specialty("болит голова уже неделю") == "невролог"
+    assert detect_symptom_specialty("сыпь на коже и зуд") == "дерматолог"
+    assert detect_symptom_specialty("болит горло и ухо") == "ЛОР"
+    # A price question that names a specialty must NOT be read as a symptom.
+    assert detect_symptom_specialty("сколько стоит приём невролога") is None
+    assert detect_symptom_specialty("хочу узнать цены") is None
+
+
+def test_symptom_routing_fallback_when_llm_down() -> None:
+    # Planner LLM down -> fallback plan; writer LLM down -> outer safe fallback.
+    # A symptom must still route to a specialist and ask a clarifying question,
+    # never dump to "leave your contact".
+    gem = FakeGemini(fail_planner=True)
+    resp = _run(handle_medical_center_chat(gem, _request("болит живот")))
+    low = resp.answer.casefold()
+    assert "гастроэнтеролог" in low or "терапевт" in low
+    assert "?" in resp.answer  # asks a clarifying question
+    assert "оставьте" not in low  # not the generic admin-contact dump
+    assert resp.lead_status != "contact_collected"
+
+
+def test_symptom_routing_fallback_skipped_once_contact_known() -> None:
+    # With a contact already on file, a degraded turn must not re-route/re-ask;
+    # it confirms via the contact-aware fallback instead.
+    state = ConversationState(contact="+7 701 222 33 44")
+    answer = build_safe_fallback(_default_planner(current_intent="answer_question"), state, "болит живот")
+    assert "гастроэнтеролог" not in answer.casefold()
 
 
 def test_build_state_sticky_emergency_from_history() -> None:

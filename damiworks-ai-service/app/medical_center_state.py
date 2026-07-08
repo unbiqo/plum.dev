@@ -135,6 +135,46 @@ def detect_red_flags(text: str) -> str | None:
     return None
 
 
+# Symptom -> specialty routing (KB specialties only; NO dentist in this KB).
+# Deterministic and routing-only — never a diagnosis. Used solely by the safe
+# fallback so a degraded-LLM turn still guides the patient to a specialist and
+# asks a clarifying question instead of dumping to the administrator. Patterns
+# use symptom words, never specialty names, so a price question like
+# «сколько стоит приём невролога» does NOT match.
+_SYMPTOM_SPECIALTY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"живот|желуд|изжог|тошнот|отрыжк|вздути|стул|понос|запор|кишечник|\bжкт\b", re.IGNORECASE),
+     "гастроэнтеролог или терапевт"),
+    (re.compile(r"спин|поясниц|\bшея\b|\bшею\b|\bшеи\b|онемен|головокруж|мигрен|голов[ае]\s+бол|болит\s+голов", re.IGNORECASE),
+     "невролог"),
+    (re.compile(r"сердц|давлени[ея]|сердцебиени|аритми|пульс", re.IGNORECASE),
+     "кардиолог"),
+    (re.compile(r"\bгорло|\bухо\b|\bуши\b|\bнос\b|насморк|гаймор|синусит|\bотит|слух", re.IGNORECASE),
+     "ЛОР"),
+    (re.compile(r"\bкож|сыпь|высыпани|\bпрыщ|\bакне|родинк|\bзуд|дерматит|грибок", re.IGNORECASE),
+     "дерматолог"),
+    (re.compile(r"\bглаз|зрени|\bочк[иов]", re.IGNORECASE),
+     "офтальмолог"),
+    (re.compile(r"щитовид|сахар|гормон|\bвес\b|похуде|набор\s+веса", re.IGNORECASE),
+     "эндокринолог"),
+    (re.compile(r"мочеиспуск|мочев|мочит|цистит", re.IGNORECASE),
+     "уролог"),
+    (re.compile(r"температур|\bорви\b|простуд|кашель|насморк|слабость|ломота", re.IGNORECASE),
+     "терапевт (для ребёнка — педиатр)"),
+)
+
+
+def detect_symptom_specialty(text: str) -> str | None:
+    """Return a routing phrase (which specialist usually handles this), or None.
+
+    Routing only — never a diagnosis. First match wins.
+    """
+    t = text or ""
+    for pattern, specialty in _SYMPTOM_SPECIALTY_PATTERNS:
+        if pattern.search(t):
+            return specialty
+    return None
+
+
 # Phrases the assistant uses when asking about a specific slot — used to know
 # which questions were already asked (so we don't repeat them).
 QUESTION_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (

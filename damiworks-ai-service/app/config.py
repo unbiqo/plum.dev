@@ -9,6 +9,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TEXT_GENERATION_MODEL = "gemini-2.5-flash-lite"
+# Fallback model tried when the primary is unavailable (e.g. 503 "high demand").
+# _generate_text walks the whole pool inside a single attempt, so a second model
+# rescues the turn without waiting for the tenacity retry/timeout to expire.
+TEXT_GENERATION_FALLBACK_MODEL = "gemini-2.5-flash"
+DEFAULT_TEXT_MODEL_POOL = (TEXT_GENERATION_MODEL, TEXT_GENERATION_FALLBACK_MODEL)
 
 
 @dataclass(frozen=True)
@@ -26,9 +31,9 @@ class Settings:
     general_model: str = TEXT_GENERATION_MODEL
     rag_model: str = TEXT_GENERATION_MODEL
     embedding_model: str = "text-embedding-004"
-    router_model_pool: tuple[str, ...] = (TEXT_GENERATION_MODEL,)
-    general_model_pool: tuple[str, ...] = (TEXT_GENERATION_MODEL,)
-    rag_model_pool: tuple[str, ...] = (TEXT_GENERATION_MODEL,)
+    router_model_pool: tuple[str, ...] = DEFAULT_TEXT_MODEL_POOL
+    general_model_pool: tuple[str, ...] = DEFAULT_TEXT_MODEL_POOL
+    rag_model_pool: tuple[str, ...] = DEFAULT_TEXT_MODEL_POOL
     embedding_model_pool: tuple[str, ...] = ("text-embedding-004", "gemini-embedding-001")
     supabase_rag_table: str = "rag_documents"
     max_history_messages: int = 15
@@ -115,9 +120,9 @@ def get_settings() -> Settings:
     rag_model = TEXT_GENERATION_MODEL
     embedding_model = os.getenv("GEMINI_VECTOR_EMBEDDING_MODEL", "text-embedding-004")
 
-    router_model_pool = (TEXT_GENERATION_MODEL,)
-    general_model_pool = (TEXT_GENERATION_MODEL,)
-    rag_model_pool = (TEXT_GENERATION_MODEL,)
+    router_model_pool = env_csv("ROUTER_MODEL_POOL", list(DEFAULT_TEXT_MODEL_POOL))
+    general_model_pool = env_csv("GENERAL_MODEL_POOL", list(DEFAULT_TEXT_MODEL_POOL))
+    rag_model_pool = env_csv("RAG_MODEL_POOL", list(DEFAULT_TEXT_MODEL_POOL))
     embedding_model_pool = env_csv(
         "GEMINI_VECTOR_EMBEDDING_MODEL_POOL",
         [embedding_model, "gemini-embedding-001"],
