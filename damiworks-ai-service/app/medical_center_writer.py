@@ -171,19 +171,26 @@ def build_turn_plan(state: ConversationState, planner: dict) -> str:
     if next_step == "ask_contact" and state.contact_asked:
         next_step = "none"
 
-    # Asking a price is a strong buying signal: after quoting it, gently offer to
-    # book (once) instead of dead-ending on the number — unless the CTA was
+    # Asking a price is a strong buying signal: after quoting it, invite the user
+    # to book (once) instead of dead-ending on the number — unless the CTA was
     # already made, a contact is on file, or the conversation is an emergency.
-    if (
+    # This gets a firm, explicit line (not the soft "только если уместно" hint)
+    # so the writer reliably adds the invitation.
+    price_cta = (
         next_step == "none"
         and planner.get("current_intent") in _PRICE_CTA_INTENTS
         and not state.booking_cta_mentioned
         and not state.is_known("contact")
         and state.urgency_flag != "emergency"
-    ):
-        next_step = "offer_booking"
+    )
     hint = _NEXT_STEP_HINTS.get(next_step, "")
-    if paused and not hint:
+    if price_cta:
+        lines.append(
+            "После суммы задай ОДИН короткий вопрос-приглашение записаться к подходящему "
+            "специалисту (например: «Хотите, подберём удобное время и запишу вас на приём?»). "
+            "Без давления — только приглашение."
+        )
+    elif paused and not hint:
         lines.append(
             "Сбор данных НА ПАУЗЕ: только ответь на вопрос. НЕ задавай НИ ОДНОГО уточняющего "
             "вопроса (ни про направление, возраст, жалобы, время, контакт)."

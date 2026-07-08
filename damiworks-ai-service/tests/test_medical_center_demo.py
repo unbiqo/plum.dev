@@ -731,7 +731,7 @@ def test_price_intent_appends_booking_cta_hint() -> None:
         recommended_next_step="none",
     )
     plan = build_turn_plan(state, planner)
-    assert "предложи записаться" in plan.casefold()
+    assert "приглашение записаться" in plan.casefold()
     # The pause line must not suppress the CTA for a price question.
     assert "на паузе" not in plan.casefold()
 
@@ -740,10 +740,10 @@ def test_price_cta_suppressed_once_offered_or_contact_known() -> None:
     planner = _default_planner(current_intent="ask_price", recommended_next_step="none")
     # Already offered booking → no repeat CTA.
     offered = ConversationState(booking_cta_mentioned=True, greeting_already_sent=True)
-    assert "предложи записаться" not in build_turn_plan(offered, planner).casefold()
+    assert "приглашение записаться" not in build_turn_plan(offered, planner).casefold()
     # Contact already on file → no CTA (do not re-push booking).
     have_contact = ConversationState(contact="+7 701 222 33 44", greeting_already_sent=True)
-    assert "предложи записаться" not in build_turn_plan(have_contact, planner).casefold()
+    assert "приглашение записаться" not in build_turn_plan(have_contact, planner).casefold()
 
 
 def test_build_state_sticky_emergency_from_history() -> None:
