@@ -141,13 +141,15 @@ def detect_red_flags(text: str) -> str | None:
     return None
 
 
-# Symptom -> specialty routing (KB specialties only; NO dentist in this KB).
+# Symptom -> specialty routing (KB specialties only).
 # Deterministic and routing-only — never a diagnosis. Used solely by the safe
 # fallback so a degraded-LLM turn still guides the patient to a specialist and
 # asks a clarifying question instead of dumping to the administrator. Patterns
 # use symptom words, never specialty names, so a price question like
 # «сколько стоит приём невролога» does NOT match.
 _SYMPTOM_SPECIALTY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bзуб\w*|дёсн\w*|десн\w*|карие[сc]|пломб", re.IGNORECASE),
+     "стоматолог"),
     (re.compile(r"живот|желуд|изжог|тошнот|отрыжк|вздути|стул|понос|запор|кишечник|\bжкт\b", re.IGNORECASE),
      "гастроэнтеролог или терапевт"),
     (re.compile(r"спин|поясниц|\bшея\b|\bшею\b|\bшеи\b|онемен|головокруж|мигрен|голов[ае]\s+бол|болит\s+голов", re.IGNORECASE),

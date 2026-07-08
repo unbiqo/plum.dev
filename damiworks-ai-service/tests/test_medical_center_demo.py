@@ -136,8 +136,9 @@ def test_kb_contains_cardiologist_and_ecg_prices() -> None:
 
 def test_kb_price_set_is_exact() -> None:
     assert kb_price_set() == frozenset({
-        1500, 2500, 3500, 6000, 8000, 10000, 12000, 13000,
-        14000, 15000, 16000, 18000, 29000, 32000,
+        1500, 2500, 3500, 6000, 8000, 9000, 10000, 10500, 11000, 11500,
+        12000, 13000, 13500, 14000, 14500, 15000, 15500, 16000, 18000,
+        20000, 29000, 30000, 32000, 45000, 65000,
     })
 
 
@@ -147,9 +148,18 @@ def test_kb_has_no_damiworks_branding() -> None:
 
 def test_kb_doctor_names_parsed() -> None:
     names = kb_doctor_names()
-    for expected in ("Ким", "Омарова", "Рахимов", "Ахметов", "Панченко"):
+    for expected in ("Ким", "Омарова", "Рахимов", "Ахметов", "Панченко", "Сарсенова"):
         assert expected in names
     assert "Иванов" not in names
+
+
+def test_kb_contains_dentist() -> None:
+    kb = get_full_kb_context()
+    assert "стоматолог" in kb.casefold()
+    assert "Сарсенова" in kb
+    assert "6 000" in kb  # dentist exam/consultation
+    assert "18 000" in kb  # cavity filling
+    assert "65 000" in kb  # crown
 
 
 # ---------------------------------------------------------------------------
@@ -753,9 +763,26 @@ def test_detect_symptom_specialty_routes_common_complaints() -> None:
     assert detect_symptom_specialty("болит голова уже неделю") == "невролог"
     assert detect_symptom_specialty("сыпь на коже и зуд") == "дерматолог"
     assert detect_symptom_specialty("болит горло и ухо") == "ЛОР"
+    assert detect_symptom_specialty("болит зуб уже два дня") == "стоматолог"
+    assert detect_symptom_specialty("кровоточат дёсны") == "стоматолог"
     # A price question that names a specialty must NOT be read as a symptom.
     assert detect_symptom_specialty("сколько стоит приём невролога") is None
     assert detect_symptom_specialty("хочу узнать цены") is None
+
+
+def test_dentist_normalization_and_slots() -> None:
+    state = ConversationState()
+    apply_planner_updates(state, _default_planner(slots={"specialty": "dentist"}))
+    assert state.specialty == "стоматолог"
+
+    gem = FakeGemini(planner=_default_planner(
+        current_intent="wants_booking", slots={"specialty": "стоматолог"},
+    ))
+    resp = _run(handle_medical_center_chat(gem, _request("Можете записать к стоматологу?")))
+    low = resp.answer.casefold()
+    assert "к стоматологу" in low  # correct dative form
+    assert "17:00" in low and "14:00" in low  # controlled demo slots present
+    assert resp.metadata["conversation_status"] == "slots_offered"
 
 
 def test_symptom_routing_fallback_when_llm_down() -> None:
