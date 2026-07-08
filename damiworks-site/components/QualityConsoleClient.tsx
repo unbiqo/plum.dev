@@ -91,6 +91,14 @@ const EMPTY_FILTERS: ConversationFilters = {
   date_to: '',
 }
 
+const AGENT_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '', label: 'All agents' },
+  { value: 'damiworks_site', label: 'DamiWorks Site (Sales Consultant)' },
+  { value: 'damiworks_custom_demo', label: 'Custom Demo' },
+  { value: 'damiworks_english_school_demo', label: 'English School Demo' },
+  { value: 'damiworks_medical_center_demo', label: 'MedNova Clinic (Medical Center)' },
+]
+
 function formatDate(value?: string): string {
   if (!value) return '—'
   const date = new Date(value)
@@ -157,9 +165,9 @@ export default function QualityConsoleClient() {
 
   const authHeaders = () => ({ 'x-admin-token': adminToken })
 
-  const loadConversations = async () => {
+  const loadConversations = async (f: ConversationFilters = filters) => {
     const qs = buildConversationQuery({
-      ...filters,
+      ...f,
       limit: 200,
       offset: 0,
     })
@@ -169,16 +177,16 @@ export default function QualityConsoleClient() {
     const data = (await res.json()) as { items?: Conversation[] }
     const items = data.items ?? []
     setConversations(items)
-    if (!selected && items[0]) {
+    if (items[0] && !items.some((item) => item.instance_id === selected?.conversation.instance_id && item.chat_id === selected?.conversation.chat_id)) {
       await loadConversationDetail(items[0].instance_id, items[0].chat_id)
     }
   }
 
-  const loadFeedback = async () => {
+  const loadFeedback = async (f: ConversationFilters = filters) => {
     const qs = new URLSearchParams()
     qs.set('limit', '200')
-    if (filters.instance_id) qs.set('instance_id', filters.instance_id)
-    if (filters.chat_id) qs.set('chat_id', filters.chat_id)
+    if (f.instance_id) qs.set('instance_id', f.instance_id)
+    if (f.chat_id) qs.set('chat_id', f.chat_id)
     const res = await fetch(`/api/quality-feedback?${qs.toString()}`, { headers: authHeaders() })
     if (res.status === 401) throw new Error('Admin token is invalid.')
     if (!res.ok) throw new Error('Could not load feedback queue.')
@@ -186,16 +194,22 @@ export default function QualityConsoleClient() {
     setFeedbackItems(data.items ?? [])
   }
 
-  const loadAll = async () => {
+  const loadAll = async (f: ConversationFilters = filters) => {
     setLoading(true)
     setError(null)
     try {
-      await Promise.all([loadConversations(), loadFeedback()])
+      await Promise.all([loadConversations(f), loadFeedback(f)])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load quality data.')
     } finally {
       setLoading(false)
     }
+  }
+
+  const selectAgent = (instanceId: string) => {
+    const next = { ...filters, instance_id: instanceId }
+    setFilters(next)
+    void loadAll(next)
   }
 
   const loadConversationDetail = async (instanceId: string, chatId: string) => {
@@ -416,6 +430,8 @@ export default function QualityConsoleClient() {
               conversations={conversations}
               selected={selected?.conversation ?? null}
               loading={loading}
+              agent={filters.instance_id}
+              onAgentChange={selectAgent}
               onSelect={(conversation) => void loadConversationDetail(conversation.instance_id, conversation.chat_id)}
             />
             <ConversationDetailPanel
@@ -475,18 +491,36 @@ function ConversationList({
   conversations,
   selected,
   loading,
+  agent,
+  onAgentChange,
   onSelect,
 }: {
   conversations: Conversation[]
   selected: Conversation | null
   loading: boolean
+  agent: string
+  onAgentChange: (agent: string) => void
   onSelect: (conversation: Conversation) => void
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-border-col bg-surface">
-      <div className="flex items-center justify-between border-b border-border-col px-4 py-3">
-        <div className="text-sm font-semibold">Conversations</div>
-        <div className="text-xs text-secondary">{loading ? 'Loading...' : `${conversations.length} shown`}</div>
+      <div className="border-b border-border-col px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold">Conversations</div>
+          <div className="text-xs text-secondary">{loading ? 'Loading...' : `${conversations.length} shown`}</div>
+        </div>
+        <label className="mt-2 block text-xs font-medium text-secondary">
+          AI agent
+          <select
+            value={agent}
+            onChange={(e) => onAgentChange(e.target.value)}
+            className="mt-1 w-full rounded-xl border border-border-col bg-bg px-3 py-2 text-sm text-primary"
+          >
+            {AGENT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
       </div>
       <div className="max-h-[720px] overflow-y-auto">
         {conversations.map((conversation) => (
