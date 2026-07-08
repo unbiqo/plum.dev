@@ -230,11 +230,16 @@ export interface DictMedicalSummaryLabels {
   time: string
   status: string
   statusValues: {
+    new_dialog: string
     consultation: string
     exploring: string
+    doctor_selection: string
     intent_detected: string
     objection: string
     agreed_next_step: string
+    slots_offered: string
+    awaiting_contact: string
+    booking_created: string
     contact_requested: string
     contact_collected: string
     off_topic: string
@@ -823,11 +828,16 @@ const en: Dict = {
       time: 'Convenient time',
       status: 'Status',
       statusValues: {
+        new_dialog: 'New conversation',
         consultation: 'Consultation',
         exploring: 'Exploring request',
+        doctor_selection: 'Choosing specialist',
         intent_detected: 'Specialty detected',
         objection: 'Has objection',
         agreed_next_step: 'Ready to book',
+        slots_offered: 'Slots offered',
+        awaiting_contact: 'Awaiting contact',
+        booking_created: 'Booking created',
         contact_requested: 'Contact requested',
         contact_collected: 'Contact received',
         off_topic: 'Off-topic',
@@ -1538,11 +1548,16 @@ const ru: Dict = {
       time: 'Удобное время',
       status: 'Статус',
       statusValues: {
+        new_dialog: 'Новый диалог',
         consultation: 'Консультация',
         exploring: 'Уточняет запрос',
+        doctor_selection: 'Подбор врача',
         intent_detected: 'Направление определено',
         objection: 'Возражение',
         agreed_next_step: 'Готов к записи',
+        slots_offered: 'Предложены окна',
+        awaiting_contact: 'Ожидает контакт',
+        booking_created: 'Запись создана',
         contact_requested: 'Контакт запрошен',
         contact_collected: 'Контакт получен',
         off_topic: 'Не по теме',

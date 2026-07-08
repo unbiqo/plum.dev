@@ -36,12 +36,21 @@ from .medical_center_planner import (
     reclassify_discount_question,
     reclassify_medical_advice_question,
 )
+from .medical_center_slots import (
+    format_slots,
+    match_slot,
+    slots_for,
+    specialty_dative,
+    specialty_display,
+)
 from .medical_center_state import (
     ConversationState,
     apply_planner_updates,
     build_conversation_state,
     detect_red_flags,
     looks_like_invalid_phone,
+    reconstruct_selected_slot,
+    reconstruct_specialty_from_history,
 )
 from .medical_center_writer import write_response
 from .schemas import ChatHistoryMessage, ChatResponse, Route
@@ -84,10 +93,10 @@ _INTENT_TO_CONV_STATUS: dict[str, str] = {
     "offensive":              "off_topic",
     "ask_doctor":             "exploring",
     "ask_schedule":           "exploring",
-    "ask_specialty_advice":   "exploring",
+    "ask_specialty_advice":   "doctor_selection",
     "ask_preparation":        "exploring",
     "ask_services":           "exploring",
-    "symptom_description":    "exploring",
+    "symptom_description":    "doctor_selection",
     "medical_advice_request": "exploring",
     "answer_question":        "exploring",
     "correction":             "exploring",
@@ -96,11 +105,16 @@ _INTENT_TO_CONV_STATUS: dict[str, str] = {
 }
 
 _CONV_STATUS_LABELS: dict[str, str] = {
+    "new_dialog":        "Новый диалог",
     "consultation":      "Консультация",
     "exploring":         "Изучает варианты",
+    "doctor_selection":  "Подбор врача",
     "intent_detected":   "Проявил интерес",
     "objection":         "Возражение",
     "agreed_next_step":  "Готов к записи",
+    "slots_offered":     "Предложены окна",
+    "awaiting_contact":  "Ожидает контакт",
+    "booking_created":   "Запись создана",
     "contact_requested": "Контакт запрошен",
     "contact_collected": "Контакт получен",
     "off_topic":         "Не по теме",
@@ -120,6 +134,99 @@ _BOOKING_INTENT_RE = re.compile(
     r"запиш|записат|запис[ьи]\b|хочу\s+на\s+при[её]м|оформ(?:ите|ить)?\s+(?:запись|заявку)",
     re.IGNORECASE,
 )
+
+# The user is asking about dates/availability.
+_DATE_QUESTION_RE = re.compile(
+    r"на\s+как(?:ую|ой|ие)\s+(?:дат|день|врем)|когда\s+можно|как(?:ие|ой)\s+(?:есть\s+)?"
+    r"(?:дат|окн|врем)|свободн\w*\s+(?:окн|врем|дат)|ближайш\w+\s+(?:окн|врем|дат)",
+    re.IGNORECASE,
+)
+
+
+def _assistant_offered_slots(history: list[ChatHistoryMessage]) -> bool:
+    """True if the assistant's most recent turn offered demo slots."""
+    for msg in reversed(list(history or [])):
+        if msg.role == "assistant":
+            return "демо-окна" in (msg.content or "").casefold()
+    return False
+
+
+def _is_booking_turn(
+    state: "ConversationState",
+    planner: dict,
+    message: str,
+    history: list[ChatHistoryMessage],
+) -> bool:
+    """Whether this turn is booking mechanics the deterministic handler owns."""
+    if planner.get("current_intent") == "wants_booking":
+        return True
+    if _BOOKING_INTENT_RE.search(message) or _DATE_QUESTION_RE.search(message):
+        return True
+    if state.selected_slot:
+        return True
+    if state.specialty and match_slot(state.specialty, message):
+        return True
+    if _assistant_offered_slots(history):
+        # The user is replying to a slot offer with a choice or their contact.
+        if planner.get("current_intent") == "contact":
+            return True
+        if state.specialty and match_slot(state.specialty, message):
+            return True
+    return False
+
+
+def _resolve_booking_turn(
+    state: "ConversationState",
+    planner: dict,
+    message: str,
+    history: list[ChatHistoryMessage],
+) -> tuple[str, str] | None:
+    """Deterministic appointment flow. Returns (answer, conversation_status) or None.
+
+    Controlled and safe: slots come only from the demo availability source, and
+    a booking is confirmed ONLY when specialist + slot + name + contact are all
+    known. Emergencies are never handled here.
+    """
+    if state.urgency_flag == "emergency":
+        return None
+    if not _is_booking_turn(state, planner, message, history):
+        return None
+    if not state.specialty:
+        return None  # let the LLM route/ask specialty (with a CTA)
+
+    dative = specialty_dative(state.specialty)
+
+    # Stage 1 — no slot chosen yet: offer concrete demo slots.
+    if not state.selected_slot:
+        return (
+            f"К {dative} есть демо-окна: {format_slots(slots_for(state.specialty))}.\n\n"
+            "Какое время вам удобнее?",
+            "slots_offered",
+        )
+
+    # Stage 2 — slot chosen: ask only for the fields still missing.
+    name = state.patient_name or state.contact_name
+    gating_missing = not name or not state.contact
+    if gating_missing:
+        ask_fields: list[str] = []
+        if not name:
+            ask_fields.append("имя")
+        if not state.is_known("age"):
+            ask_fields.append("возраст")
+        if not state.contact:
+            ask_fields.append("WhatsApp или телефон")
+        return (
+            f"Отлично, {state.selected_slot} к {dative}.\n\n"
+            f"Для записи оставьте, пожалуйста, {', '.join(ask_fields)}.",
+            "awaiting_contact",
+        )
+
+    # Stage 3 — all required fields present: confirm the demo booking.
+    return (
+        f"Готово, записали вас на {state.selected_slot} к {dative}. "
+        "С вами свяжутся для подтверждения деталей.",
+        "booking_created",
+    )
 
 
 def _derive_lead_status(
@@ -315,6 +422,51 @@ async def handle_medical_center_chat(
         planner = reclassify_discount_question(message, planner)
 
         state = apply_planner_updates(state, planner)
+
+        # Stateless server: recover specialty (if the planner didn't fill it) and
+        # the already-picked demo slot from the replayed history.
+        if not state.specialty:
+            state.specialty = reconstruct_specialty_from_history(history)
+        state.selected_slot = reconstruct_selected_slot(history, message, state.specialty)
+
+        # ---- DETERMINISTIC BOOKING FLOW (controlled demo slots, no LLM) ----
+        # Owns the booking mechanics so slots are never invented and a booking is
+        # confirmed only when specialist + slot + name + contact are all present.
+        booking = _resolve_booking_turn(state, planner, message, history)
+        if booking is not None:
+            answer_text, booking_status = booking
+            # Reflect the real state: a contact already on file stays collected
+            # even while we are still offering slots.
+            lead_status = _derive_lead_status(state, history)
+            if lead_status == "open" and booking_status == "awaiting_contact":
+                lead_status = "contact_requested"
+            return ChatResponse(
+                route=Route.general,
+                routes=[Route.general],
+                answer=answer_text,
+                checkout=False,
+                lead_status=lead_status,
+                metadata={
+                    "medical_center_demo": True,
+                    "planner_llm_used": "_error" not in planner,
+                    "writer_llm_used": False,
+                    "booking_stage": booking_status,
+                    "current_intent": planner.get("current_intent"),
+                    "medical_lead_status": (
+                        "appointment_created" if booking_status == "booking_created"
+                        else _derive_medical_lead_status(lead_status, history, message)
+                    ),
+                    "state": state.to_metadata(),
+                    "conversation_status": booking_status,
+                    "conversation_status_label": _CONV_STATUS_LABELS.get(
+                        booking_status, booking_status
+                    ),
+                    "conversation_status_reason": (
+                        f"booking_stage={booking_status} specialty={state.specialty} "
+                        f"slot={state.selected_slot}"
+                    ),
+                },
+            )
 
         # ---- writer (free-text, temp 0.35) ----
         try:

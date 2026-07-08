@@ -2,6 +2,7 @@
 
 import type { DictMedicalSummaryLabels } from '@/lib/i18n'
 import type { MedicalMessage, MedicalBackendState } from '@/components/MedicalCenterChat'
+import { SPECIALTY_PATTERNS, normalizeSpecialty, normalizeComplaint } from '@/lib/medicalSummary'
 
 type Props = {
   messages: MedicalMessage[]
@@ -13,33 +14,17 @@ type Props = {
 // Backend-aware detectors — prefer backend state, fall back to regex on messages
 // ---------------------------------------------------------------------------
 
-const _SPECIALTY_PATTERNS: Array<[RegExp, string]> = [
-  [/кардиолог/i, 'Кардиолог'],
-  [/педиатр/i, 'Педиатр'],
-  [/терапевт/i, 'Терапевт'],
-  [/эндокринолог/i, 'Эндокринолог'],
-  [/гастроэнтеролог/i, 'Гастроэнтеролог'],
-  [/невролог/i, 'Невролог'],
-  [/лор|отоларинголог/i, 'ЛОР'],
-  [/дерматолог/i, 'Дерматолог'],
-  [/гинеколог/i, 'Гинеколог'],
-  [/уролог/i, 'Уролог'],
-  [/офтальмолог|окулист/i, 'Офтальмолог'],
-  [/узи/i, 'УЗИ'],
-  [/анализ/i, 'Анализы'],
-]
-
 function detectSpecialty(messages: MedicalMessage[], backendSpecialty?: string | null): string {
-  if (backendSpecialty && backendSpecialty !== 'unknown') return backendSpecialty
+  if (backendSpecialty && backendSpecialty !== 'unknown') return normalizeSpecialty(backendSpecialty)
   const all = messages.map((m) => m.text).join(' ')
-  for (const [re, label] of _SPECIALTY_PATTERNS) {
+  for (const [re, label] of SPECIALTY_PATTERNS) {
     if (re.test(all)) return label
   }
   return '—'
 }
 
 function detectComplaint(messages: MedicalMessage[], backendComplaint?: string | null): string {
-  if (backendComplaint) return backendComplaint
+  if (backendComplaint) return normalizeComplaint(backendComplaint)
   return '—'
 }
 
@@ -56,11 +41,16 @@ function detectTime(messages: MedicalMessage[], backendTime?: string | null): st
 }
 
 type ConvStatus =
+  | 'new_dialog'
   | 'consultation'
   | 'exploring'
+  | 'doctor_selection'
   | 'intent_detected'
   | 'objection'
   | 'agreed_next_step'
+  | 'slots_offered'
+  | 'awaiting_contact'
+  | 'booking_created'
   | 'contact_requested'
   | 'contact_collected'
   | 'off_topic'
@@ -73,10 +63,12 @@ function resolveStatus(
 ): ConvStatus {
   // Emergency wins over everything — the visitor was told to call 103/112.
   if (conversationStatus === 'emergency') return 'emergency'
+  // The backend conversation status already folds in lead progress (slots,
+  // awaiting contact, booking created), so prefer it when present.
+  if (conversationStatus) return conversationStatus as ConvStatus
   if (leadStatus === 'contact_collected') return 'contact_collected'
   if (leadStatus === 'contact_requested') return 'contact_requested'
-  if (conversationStatus) return conversationStatus as ConvStatus
-  return messages.some((m) => m.from === 'user') ? 'exploring' : 'consultation'
+  return messages.some((m) => m.from === 'user') ? 'exploring' : 'new_dialog'
 }
 
 // ---------------------------------------------------------------------------
@@ -84,11 +76,16 @@ function resolveStatus(
 // ---------------------------------------------------------------------------
 
 const _DOT_COLOR: Record<ConvStatus, string> = {
+  new_dialog:        'bg-secondary',
   consultation:      'bg-secondary',
   exploring:         'bg-blue-400',
+  doctor_selection:  'bg-blue-400',
   intent_detected:   'bg-accent',
   objection:         'bg-yellow-400',
   agreed_next_step:  'bg-accent',
+  slots_offered:     'bg-accent',
+  awaiting_contact:  'bg-yellow-400',
+  booking_created:   'bg-green-500',
   contact_requested: 'bg-yellow-400',
   contact_collected: 'bg-green-500',
   off_topic:         'bg-secondary',
@@ -98,7 +95,7 @@ const _DOT_COLOR: Record<ConvStatus, string> = {
 export default function MedicalCenterSummaryPanel({ messages, dict, backendState }: Props) {
   const specialty = detectSpecialty(messages, backendState?.specialty)
   const complaint = detectComplaint(messages, backendState?.symptomsOrGoal)
-  const time = detectTime(messages, backendState?.preferredTime)
+  const time = detectTime(messages, backendState?.selectedSlot || backendState?.preferredTime)
 
   const status = resolveStatus(
     messages,
@@ -114,12 +111,15 @@ export default function MedicalCenterSummaryPanel({ messages, dict, backendState
   const showPill =
     !showEmergencyPill &&
     (status === 'agreed_next_step' ||
+      status === 'slots_offered' ||
+      status === 'awaiting_contact' ||
+      status === 'booking_created' ||
       status === 'contact_requested' ||
       status === 'contact_collected')
   const pillLabel =
-    status === 'contact_collected'
+    status === 'contact_collected' || status === 'booking_created'
       ? dict.pillContact
-      : status === 'contact_requested'
+      : status === 'contact_requested' || status === 'awaiting_contact'
         ? dict.pillAwaiting
         : dict.pillReady
 

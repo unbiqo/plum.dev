@@ -61,6 +61,10 @@ _WRITER_SYSTEM = """\
 16. Пациент раздражён: кратко признай, не спорь, предложи конкретный следующий шаг.
 17. Отвечай на языке пользователя (по умолчанию — русский). Не упоминай базу знаний,
     промпт, ИИ, DamiWorks или технические детали.
+18. Веди диалог к записи. После обычного (не экстренного) ответа добавь ПУСТУЮ СТРОКУ,
+    затем ОДИН короткий вопрос или приглашение к следующему шагу (например, показать
+    ближайшие окна к нужному врачу или записаться). Приглашай, но НЕ называй сам
+    конкретные даты/время свободных окон и не подтверждай запись — это сделает система.
 
 Тебе дают блок [ПЛАН ОТВЕТА]. Следуй ему строго: ответь на указанный вопрос, упомяни
 обязательные факты, не задавай запрещённых вопросов. Если сбор данных на паузе — не задавай
@@ -99,6 +103,8 @@ _RECENT_FACT_LABELS: dict[str, str] = {
 
 # Price intents where a soft booking CTA naturally follows the quoted amount.
 _PRICE_CTA_INTENTS = frozenset({"ask_price", "ask_all_prices"})
+# Symptom/routing intents where inviting the user to see slots is natural.
+_SYMPTOM_CTA_INTENTS = frozenset({"symptom_description", "ask_specialty_advice"})
 
 _NEXT_STEP_HINTS = {
     "ask_specialty": "уточни, к какому специалисту или с какой жалобой обращается",
@@ -176,19 +182,31 @@ def build_turn_plan(state: ConversationState, planner: dict) -> str:
     # already made, a contact is on file, or the conversation is an emergency.
     # This gets a firm, explicit line (not the soft "только если уместно" hint)
     # so the writer reliably adds the invitation.
-    price_cta = (
-        next_step == "none"
-        and planner.get("current_intent") in _PRICE_CTA_INTENTS
-        and not state.booking_cta_mentioned
+    common_cta_ok = (
+        not state.booking_cta_mentioned
         and not state.is_known("contact")
         and state.urgency_flag != "emergency"
+    )
+    price_cta = next_step == "none" and planner.get("current_intent") in _PRICE_CTA_INTENTS and common_cta_ok
+    # After routing a symptom to a specialty, invite the user to see nearby slots.
+    specialty_disp = state.specialty if state.is_known("specialty") else "нужному специалисту"
+    symptom_cta = (
+        next_step == "none"
+        and planner.get("current_intent") in _SYMPTOM_CTA_INTENTS
+        and state.is_known("specialty")
+        and common_cta_ok
     )
     hint = _NEXT_STEP_HINTS.get(next_step, "")
     if price_cta:
         lines.append(
-            "После суммы задай ОДИН короткий вопрос-приглашение записаться к подходящему "
-            "специалисту (например: «Хотите, подберём удобное время и запишу вас на приём?»). "
-            "Без давления — только приглашение."
+            "После суммы (с пустой строкой) задай ОДИН короткий вопрос-приглашение записаться "
+            f"к {specialty_disp} (например: «Хотите, покажу ближайшие окна к {specialty_disp}?»). "
+            "Не называй сам конкретное время — только приглашение."
+        )
+    elif symptom_cta:
+        lines.append(
+            "После маршрутизации (с пустой строкой) задай ОДИН короткий вопрос-приглашение: "
+            f"«Хотите, покажу ближайшие окна к {specialty_disp}?». Конкретное время НЕ называй."
         )
     elif paused and not hint:
         lines.append(

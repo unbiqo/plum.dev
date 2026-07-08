@@ -515,22 +515,22 @@ def test_missing_price_never_hallucinated() -> None:
 
 
 def test_contact_collection_sets_lead_status() -> None:
+    # A cold booking request with a contact but no slot yet must offer slots
+    # first (slots-before-contact flow), while retaining the collected contact.
     gem = FakeGemini(
         planner=_default_planner(
             current_intent="contact",
             slots={"specialty": "кардиолог", "contact": "+7 701 222 33 44"},
         ),
-        writer_texts=[
-            "Спасибо, заявка принята! Администратор свяжется с вами и подтвердит ближайшее доступное время.",
-        ],
     )
     resp = _run(handle_medical_center_chat(
         gem, _request("Хочу записаться к кардиологу, мой номер +7 701 222 33 44")
     ))
-    assert resp.lead_status == "contact_collected"
+    assert resp.metadata["conversation_status"] == "slots_offered"
+    assert "демо-окна" in resp.answer.casefold()
+    assert resp.lead_status == "contact_collected"  # contact already on file
     assert resp.metadata["state"]["contact"]
-    assert resp.metadata["medical_lead_status"] == "appointment_requested"
-    assert resp.metadata["conversation_status"] == "contact_collected"
+    assert resp.metadata["booking_stage"] == "slots_offered"
 
 
 def test_metadata_carries_medical_state() -> None:
@@ -777,6 +777,108 @@ def test_symptom_routing_fallback_skipped_once_contact_known() -> None:
     state = ConversationState(contact="+7 701 222 33 44")
     answer = build_safe_fallback(_default_planner(current_intent="answer_question"), state, "болит живот")
     assert "гастроэнтеролог" not in answer.casefold()
+
+
+# ---------------------------------------------------------------------------
+# Appointment flow (deterministic demo slots)
+# ---------------------------------------------------------------------------
+
+def _booking_history() -> list:
+    return [
+        _msg("user", "болит голова уже три дня, температура"),
+        _msg("assistant", "При головной боли и температуре обычно начинают с терапевта."),
+        _msg("user", "сколько стоит?"),
+        _msg("assistant", "Первичная консультация терапевта стоит 12 000 ₸."),
+    ]
+
+
+def test_symptom_turn_plan_invites_slots() -> None:
+    state = ConversationState(specialty="терапевт", greeting_already_sent=True)
+    plan = build_turn_plan(state, _default_planner(current_intent="symptom_description"))
+    assert "покажу ближайшие окна" in plan.casefold()
+
+
+def test_specialty_normalized_to_russian() -> None:
+    state = ConversationState()
+    apply_planner_updates(state, _default_planner(slots={"specialty": "therapist"}))
+    assert state.specialty == "терапевт"
+
+
+def test_booking_offers_slots_and_keeps_specialty() -> None:
+    gem = FakeGemini(planner=_default_planner(
+        current_intent="wants_booking", slots={"specialty": "терапевт"},
+    ))
+    resp = _run(handle_medical_center_chat(
+        gem, _request("Можете записать?", history=_booking_history())
+    ))
+    low = resp.answer.casefold()
+    assert "демо-окна" in low
+    assert "завтра 10:00" in low and "15:30" in low
+    assert resp.metadata["conversation_status"] == "slots_offered"
+    # Does NOT re-ask the specialist, does NOT defer to the administrator.
+    assert "какому специалист" not in low
+    assert "администратор" not in low
+    assert gem.writer_calls == 0  # deterministic, no LLM writer
+
+
+def test_date_question_returns_concrete_slots() -> None:
+    gem = FakeGemini(planner=_default_planner(
+        current_intent="wants_booking", slots={"specialty": "терапевт"},
+    ))
+    resp = _run(handle_medical_center_chat(
+        gem, _request("На какую дату можно?", history=_booking_history())
+    ))
+    low = resp.answer.casefold()
+    assert "10:00" in low and "11:00" in low
+    assert "администратор" not in low
+
+
+def test_no_booking_confirm_before_contact() -> None:
+    history = _booking_history() + [
+        _msg("user", "Можете записать?"),
+        _msg("assistant", "К терапевту есть демо-окна: завтра 10:00, завтра 15:30 или послезавтра 11:00.\n\nКакое время вам удобнее?"),
+    ]
+    gem = FakeGemini(planner=_default_planner(
+        current_intent="wants_booking", slots={"specialty": "терапевт"},
+    ))
+    resp = _run(handle_medical_center_chat(gem, _request("Завтра 15:30", history=history)))
+    low = resp.answer.casefold()
+    assert "записали вас" not in low          # must NOT confirm yet
+    assert "оставьте" in low and "имя" in low  # asks for missing fields
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
+
+
+def test_booking_confirmed_when_all_fields_present() -> None:
+    history = _booking_history() + [
+        _msg("user", "Завтра 15:30"),
+        _msg("assistant", "Отлично, завтра 15:30 к терапевту.\n\nДля записи оставьте, пожалуйста, имя, возраст, WhatsApp или телефон."),
+    ]
+    gem = FakeGemini(planner=_default_planner(
+        current_intent="contact",
+        slots={"specialty": "терапевт", "patient_name": "Дамир", "age": "22", "contact": "+7 701 000 00 00"},
+    ))
+    resp = _run(handle_medical_center_chat(
+        gem, _request("Дамир, 22 года, +7 701 000 00 00", history=history)
+    ))
+    low = resp.answer.casefold()
+    assert "готово, записали вас на завтра 15:30 к терапевту" in low
+    assert resp.metadata["conversation_status"] == "booking_created"
+    assert resp.lead_status == "contact_collected"
+    assert resp.metadata["medical_lead_status"] == "appointment_created"
+
+
+def test_emergency_preempts_booking_flow() -> None:
+    history = _booking_history() + [
+        _msg("user", "Можете записать?"),
+        _msg("assistant", "К терапевту есть демо-окна: завтра 10:00, завтра 15:30 или послезавтра 11:00.\n\nКакое время вам удобнее?"),
+    ]
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
+    resp = _run(handle_medical_center_chat(
+        gem, _request("Сильная боль в груди и трудно дышать", history=history)
+    ))
+    assert resp.answer == EMERGENCY_ANSWER
+    assert "демо-окна" not in resp.answer.casefold()
+    assert gem.planner_calls == 0  # short-circuit before any LLM
 
 
 def test_build_state_sticky_emergency_from_history() -> None:

@@ -19,6 +19,12 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 
+from .medical_center_slots import (
+    match_slot,
+    normalize_specialty,
+    normalize_symptom_terms,
+    specialty_display,
+)
 from .schemas import ChatHistoryMessage
 
 # ---------------------------------------------------------------------------
@@ -280,6 +286,9 @@ class ConversationState:
     specialty: str = ""
     symptoms_or_goal: str = ""
     preferred_time: str = ""
+    # The concrete demo slot the user picked (e.g. "завтра 15:30"). Set
+    # deterministically from the controlled demo availability, never by the LLM.
+    selected_slot: str = ""
     # normal -> urgent (planner) -> emergency (red flag; sticky, never downgraded).
     urgency_flag: str = "normal"
     recent_questions_asked: list[str] = field(default_factory=list)
@@ -354,6 +363,55 @@ def build_conversation_state(
     )
 
 
+# The demo server is stateless (the frontend replays the whole history each
+# turn), so specialty and the picked slot must be reconstructed from history.
+_CONFIRMED_SLOT_RE = re.compile(
+    r"(?:записали вас на|отлично,)\s+(послезавтра|завтра|сегодня)\s+(\d{1,2}:\d{2})",
+    re.IGNORECASE,
+)
+
+
+def reconstruct_specialty_from_history(history: list[ChatHistoryMessage]) -> str:
+    """Most recent specialty named in the conversation (RU display), or "".
+
+    Fallback for when the current planner call did not fill specialty (e.g. an
+    LLM timeout) — the deterministic booking flow still needs to know it.
+    """
+    for msg in reversed(list(history or [])):
+        canonical = normalize_specialty(msg.content or "")
+        if canonical:
+            return specialty_display(canonical)
+    return ""
+
+
+def reconstruct_selected_slot(
+    history: list[ChatHistoryMessage],
+    message: str,
+    specialty: str,
+) -> str:
+    """The demo slot the user has already picked, recovered from history.
+
+    Scans user turns for a slot matching the specialty and assistant turns for a
+    previously confirmed slot; the latest occurrence wins. Returns "" if none.
+    """
+    if not specialty:
+        return ""
+    latest = ""
+    for msg in list(history or []):
+        if msg.role == "user":
+            got = match_slot(specialty, msg.content or "")
+            if got:
+                latest = got
+        else:
+            m = _CONFIRMED_SLOT_RE.search(msg.content or "")
+            if m:
+                latest = f"{m.group(1).lower()} {m.group(2)}"
+    got = match_slot(specialty, message or "")
+    if got:
+        latest = got
+    return latest
+
+
 def apply_planner_updates(state: ConversationState, planner: dict) -> ConversationState:
     """Merge the planner's slots into state.
 
@@ -371,6 +429,11 @@ def apply_planner_updates(state: ConversationState, planner: dict) -> Conversati
         value = slots.get(key)
         if value in _UNSET:
             continue
+        # RU-normalize known values so the summary panel never shows English.
+        if key == "specialty":
+            value = specialty_display(value) or value
+        elif key == "symptoms_or_goal":
+            value = normalize_symptom_terms(value) or value
         if key in _FREE_TEXT_SLOTS:
             setattr(state, key, value)
             continue

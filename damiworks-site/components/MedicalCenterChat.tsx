@@ -30,6 +30,7 @@ export type MedicalBackendState = {
   specialty: string | null
   symptomsOrGoal: string | null
   preferredTime: string | null
+  selectedSlot: string | null
   urgencyFlag: string | null
   conversationStatus: string | null
   conversationStatusLabel: string | null
@@ -153,6 +154,7 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
           specialty: s.specialty || null,
           symptomsOrGoal: s.symptoms_or_goal || null,
           preferredTime: s.preferred_time || null,
+          selectedSlot: s.selected_slot || null,
           urgencyFlag: s.urgency_flag || null,
           conversationStatus: data.metadata?.conversation_status ?? null,
           conversationStatusLabel: data.metadata?.conversation_status_label ?? null,
