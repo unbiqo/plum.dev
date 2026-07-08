@@ -657,24 +657,6 @@ const en: Dict = {
         },
       },
       {
-        id: 'english',
-        label: 'English school',
-        agentName: 'Alem English Academy',
-        messages: [
-          { from: 'user', text: 'Do you have English courses?' },
-          {
-            from: 'ai',
-            text: 'Yes! We have groups for children, teens, and adults, offline and online. I can help find the right format.',
-          },
-        ],
-        leadSummary: {
-          service: 'English course',
-          need: 'Group lessons',
-          time: 'This week',
-          status: 'Warm lead',
-        },
-      },
-      {
         id: 'medical',
         label: 'Medical center',
         agentName: 'MedNova Clinic',
@@ -690,6 +672,24 @@ const en: Dict = {
           need: 'Specialist selection',
           time: 'This week',
           status: 'Appointment lead',
+        },
+      },
+      {
+        id: 'english',
+        label: 'English school',
+        agentName: 'Alem English Academy',
+        messages: [
+          { from: 'user', text: 'Do you have English courses?' },
+          {
+            from: 'ai',
+            text: 'Yes! We have groups for children, teens, and adults, offline and online. I can help find the right format.',
+          },
+        ],
+        leadSummary: {
+          service: 'English course',
+          need: 'Group lessons',
+          time: 'This week',
+          status: 'Warm lead',
         },
       },
       {
@@ -920,29 +920,29 @@ const en: Dict = {
     note: 'Final cost depends on project scope and complexity.',
     pilotOffer: {
       eyebrow: 'Pilot example',
-      title: 'Pilot example: courses and education projects',
-      subtitle: 'For online courses, schools, coaching programs, clubs, marathons, and self-development programs.',
+      title: 'Pilot example: medical clinics and dental practices',
+      subtitle: 'For medical centers, dental clinics, diagnostic labs, and private specialists.',
       body:
-        'An AI administrator answers questions about the program, schedule, payment, access to lessons, private channels, and materials, then collects contact details and hands the request to your team.',
+        'An AI administrator answers questions about doctors, services, prices, schedules, and visit preparation, helps choose the right specialist, then collects contact details and hands the appointment request to your administrator. It never diagnoses or prescribes — that stays with the doctor.',
       includesTitle: 'Where AI helps',
       bullets: [
-        'AI answers first questions from parents and students',
-        'Explains programs, prices, and formats',
-        'Helps choose the right course',
-        'Books a trial lesson or consultation',
-        'Hands off a warm lead to an administrator or manager',
+        'AI answers first questions from patients 24/7',
+        'Explains services, doctors, prices, and schedules',
+        'Helps choose the right specialist by symptom or need',
+        'Collects an appointment request and adult contact details',
+        'Hands off a warm lead to the administrator to confirm the time',
       ],
       cards: [
-        { label: 'Requests', title: 'Questions before purchase', text: 'AI explains the program, format, schedule, price, start date, and who the course is for.' },
-        { label: 'Access', title: 'Channels and materials', text: 'AI answers how to get access after payment, where lessons are, and what to do if something is unclear.' },
-        { label: 'Handoff', title: 'Clear next step', text: 'AI collects contact details, goal, preferred format, and sends the team a clear request.' },
+        { label: 'Requests', title: 'Questions before the visit', text: 'AI explains services, doctors, prices, working hours, and how to prepare for a consultation or procedure.' },
+        { label: 'Safety', title: 'No diagnosis, no prescriptions', text: 'AI routes to the right specialist and, on urgent symptoms, tells the patient to call emergency services — it never diagnoses or prescribes.' },
+        { label: 'Handoff', title: 'Clear next step', text: 'AI collects the patient goal, specialty, and contact, then sends the administrator a ready appointment request.' },
       ],
       pricingLine:
         'Pilot format is selected after a short review of your process.',
       adaptNote:
-        'The same approach adapts to clinics, salons, local services, online stores, and B2B services.',
+        'The same approach adapts to schools, salons, courses, local services, online stores, and B2B services.',
       ctaPrimary: 'Discuss pilot',
-      ctaSecondary: 'See school demo',
+      ctaSecondary: 'See clinic demo',
     },
     plans: [
       {
@@ -1372,24 +1372,6 @@ const ru: Dict = {
         },
       },
       {
-        id: 'english',
-        label: 'Школа английского',
-        agentName: 'Alem English Academy',
-        messages: [
-          { from: 'user', text: 'У вас есть курсы английского?' },
-          {
-            from: 'ai',
-            text: 'Да! Есть группы для детей, подростков и взрослых, офлайн и онлайн. Помогу подобрать подходящий формат.',
-          },
-        ],
-        leadSummary: {
-          service: 'Курс английского',
-          need: 'Групповые занятия',
-          time: 'На этой неделе',
-          status: 'Тёплый лид',
-        },
-      },
-      {
         id: 'medical',
         label: 'Медицинский центр',
         agentName: 'MedNova Clinic',
@@ -1405,6 +1387,24 @@ const ru: Dict = {
           need: 'Подбор специалиста',
           time: 'На этой неделе',
           status: 'Заявка на запись',
+        },
+      },
+      {
+        id: 'english',
+        label: 'Школа английского',
+        agentName: 'Alem English Academy',
+        messages: [
+          { from: 'user', text: 'У вас есть курсы английского?' },
+          {
+            from: 'ai',
+            text: 'Да! Есть группы для детей, подростков и взрослых, офлайн и онлайн. Помогу подобрать подходящий формат.',
+          },
+        ],
+        leadSummary: {
+          service: 'Курс английского',
+          need: 'Групповые занятия',
+          time: 'На этой неделе',
+          status: 'Тёплый лид',
         },
       },
       {
@@ -1635,30 +1635,30 @@ const ru: Dict = {
     note: 'Итоговая стоимость зависит от объёма и сложности проекта.',
     pilotOffer: {
       eyebrow: 'Пример пилота',
-      title: 'Пример пилота: курсы и образовательные проекты',
+      title: 'Пример пилота: медицинские клиники и стоматологии',
       subtitle:
-        'Для онлайн-курсов, школ, наставничества, клубов, марафонов и программ по саморазвитию.',
+        'Для медицинских центров, стоматологий, диагностических лабораторий и частных специалистов.',
       body:
-        'AI-администратор отвечает на вопросы о программе, расписании, оплате, доступе к урокам, закрытым каналам и материалам, собирает контакт и передаёт заявку команде.',
+        'AI-администратор отвечает на вопросы о врачах, услугах, ценах, расписании и подготовке к приёму, помогает выбрать подходящего специалиста, собирает контакт и передаёт заявку на запись администратору. Он не ставит диагноз и не назначает лечение — это остаётся за врачом.',
       includesTitle: 'Где помогает AI',
       bullets: [
-        'AI отвечает на первые вопросы клиентов',
-        'Объясняет программы, цены, расписание и условия',
-        'Помогает выбрать подходящий курс, формат или консультацию',
-        'Собирает контакт и ключевую информацию по заявке',
-        'Передаёт тёплую заявку вашей команде',
+        'AI отвечает на первые вопросы пациентов 24/7',
+        'Объясняет услуги, врачей, цены и расписание',
+        'Помогает выбрать специалиста по жалобе или задаче',
+        'Собирает заявку на запись и контакт взрослого',
+        'Передаёт тёплую заявку администратору для подтверждения времени',
       ],
       cards: [
-        { label: 'Заявки', title: 'Вопросы до покупки', text: 'AI объясняет программу, формат, расписание, стоимость, старт потока и кому подойдёт курс.' },
-        { label: 'Доступы', title: 'Каналы и материалы', text: 'AI отвечает, как получить доступ после оплаты, где уроки, записи, задания и закрытый канал.' },
-        { label: 'Передача', title: 'Понятный следующий шаг', text: 'AI собирает контакт, цель, интересующий формат и передаёт команде готовую заявку.' },
+        { label: 'Заявки', title: 'Вопросы до приёма', text: 'AI объясняет услуги, врачей, цены, режим работы и как подготовиться к консультации или процедуре.' },
+        { label: 'Безопасность', title: 'Без диагнозов и назначений', text: 'AI направляет к нужному специалисту и при тревожных симптомах советует вызвать скорую — но не ставит диагноз и не назначает лечение.' },
+        { label: 'Передача', title: 'Понятный следующий шаг', text: 'AI собирает цель визита, направление и контакт и передаёт администратору готовую заявку на запись.' },
       ],
       pricingLine:
         'Формат пилота подбираем после короткого разбора вашего проекта.',
       adaptNote:
-        'По такому же принципу AI-сотрудника можно адаптировать под клиники, салоны, локальные услуги, онлайн-магазины и B2B-сервисы.',
+        'По такому же принципу AI-сотрудника можно адаптировать под школы, салоны, курсы, локальные услуги, онлайн-магазины и B2B-сервисы.',
       ctaPrimary: 'Обсудить пилот',
-      ctaSecondary: 'Посмотреть демо',
+      ctaSecondary: 'Посмотреть демо клиники',
     },
     plans: [
       {
