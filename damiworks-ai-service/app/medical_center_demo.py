@@ -38,16 +38,16 @@ from .medical_center_planner import (
 )
 from .medical_center_slots import (
     format_slots,
-    match_slot,
+    resolve_slot,
     slots_for,
     specialty_dative,
-    specialty_display,
 )
 from .medical_center_state import (
     ConversationState,
     apply_planner_updates,
     build_conversation_state,
     detect_red_flags,
+    is_affirmation,
     looks_like_invalid_phone,
     reconstruct_selected_slot,
     reconstruct_specialty_from_history,
@@ -63,13 +63,11 @@ logger = logging.getLogger(__name__)
 
 MEDICAL_CENTER_INSTANCE_ID = "damiworks_medical_center_demo"
 
-# Deterministic reply when the user tried to leave a phone number but it is
-# implausible (wrong length). Asking to re-check beats echoing a broken number
-# and finalizing a lead nobody can call back. No LLM call, no lead finalized.
+# Deterministic reply when we can't find a usable contact. Country-agnostic —
+# never says "usually 11 digits" (that is wrong for international users).
 INVALID_CONTACT_ANSWER = (
-    "Кажется, в номере телефона закралась ошибка — обычно это 11 цифр, "
-    "например +7 701 234 56 78. Пришлите, пожалуйста, номер ещё раз или "
-    "оставьте Telegram, и я передам заявку администратору."
+    "Не вижу контакт для связи. Оставьте, пожалуйста, телефон в любом "
+    "международном формате или Telegram."
 )
 
 # Per-stage LLM timeouts (same budget rationale as the English School demo:
@@ -143,12 +141,25 @@ _DATE_QUESTION_RE = re.compile(
 )
 
 
-def _assistant_offered_slots(history: list[ChatHistoryMessage]) -> bool:
-    """True if the assistant's most recent turn offered demo slots."""
+def _last_assistant(history: list[ChatHistoryMessage]) -> str:
     for msg in reversed(list(history or [])):
         if msg.role == "assistant":
-            return "демо-окна" in (msg.content or "").casefold()
-    return False
+            return (msg.content or "").casefold()
+    return ""
+
+
+def _assistant_in_slot_selection(history: list[ChatHistoryMessage]) -> bool:
+    """True if the assistant's last turn offered slots or proposed a specific one."""
+    low = _last_assistant(history)
+    return "демо-окна" in low or "правильно понял, хотите" in low
+
+
+def _assistant_asked_for_contact(history: list[ChatHistoryMessage]) -> bool:
+    """True if the assistant's last turn already asked for a phone/Telegram."""
+    low = _last_assistant(history)
+    if "не вижу контакт" in low:
+        return True
+    return "оставьте" in low and ("телефон" in low or "whatsapp" in low or "контакт" in low)
 
 
 def _is_booking_turn(
@@ -164,13 +175,16 @@ def _is_booking_turn(
         return True
     if state.selected_slot:
         return True
-    if state.specialty and match_slot(state.specialty, message):
+    if state.specialty and resolve_slot(state.specialty, message)[0] != "none":
         return True
-    if _assistant_offered_slots(history):
-        # The user is replying to a slot offer with a choice or their contact.
+    if _assistant_in_slot_selection(history):
+        # The user is replying to a slot offer/suggestion with a choice, an
+        # affirmation, or their contact.
         if planner.get("current_intent") == "contact":
             return True
-        if state.specialty and match_slot(state.specialty, message):
+        if is_affirmation(message):
+            return True
+        if state.specialty and resolve_slot(state.specialty, message)[0] != "none":
             return True
     return False
 
@@ -196,36 +210,54 @@ def _resolve_booking_turn(
 
     dative = specialty_dative(state.specialty)
 
-    # Stage 1 — no slot chosen yet: offer concrete demo slots.
+    # Stage 1 — no slot chosen yet.
     if not state.selected_slot:
+        kind, slot = resolve_slot(state.specialty, message)
+        if kind == "suggest" and slot:
+            # One plausible guess but ambiguous — confirm instead of guessing.
+            return (f"Правильно понял, хотите {slot}?", "slots_offered")
+        if _assistant_in_slot_selection(history):
+            # Already offered — the reply didn't map. Clarify ONCE, don't re-list.
+            return (
+                "Не совсем понял выбор времени. Напишите, пожалуйста, день и час "
+                "из предложенных — например «завтра 16:00».",
+                "slots_offered",
+            )
         return (
             f"К {dative} есть демо-окна: {format_slots(slots_for(state.specialty))}.\n\n"
             "Какое время вам удобнее?",
             "slots_offered",
         )
 
-    # Stage 2 — slot chosen: ask only for the fields still missing.
+    # Stage 2 — slot chosen: confirm only when name AND contact are present.
     name = state.patient_name or state.contact_name
-    gating_missing = not name or not state.contact
-    if gating_missing:
+    if state.contact and name:
+        return (
+            f"Готово, {name}! Записали вас на {state.selected_slot} к {dative}. "
+            "С вами свяжутся для подтверждения деталей.",
+            "booking_created",
+        )
+
+    if not state.contact:
+        if _assistant_asked_for_contact(history):
+            # We already asked and the reply had no usable contact.
+            return (INVALID_CONTACT_ANSWER, "awaiting_contact")
         ask_fields: list[str] = []
         if not name:
             ask_fields.append("имя")
         if not state.is_known("age"):
             ask_fields.append("возраст")
-        if not state.contact:
-            ask_fields.append("WhatsApp или телефон")
+        ask_fields.append("WhatsApp или телефон")
         return (
             f"Отлично, {state.selected_slot} к {dative}.\n\n"
             f"Для записи оставьте, пожалуйста, {', '.join(ask_fields)}.",
             "awaiting_contact",
         )
 
-    # Stage 3 — all required fields present: confirm the demo booking.
+    # Contact is on file but we still need a name to finalize.
     return (
-        f"Готово, записали вас на {state.selected_slot} к {dative}. "
-        "С вами свяжутся для подтверждения деталей.",
-        "booking_created",
+        "Спасибо! Подскажите, пожалуйста, как вас зовут — и завершу запись.",
+        "awaiting_contact",
     )
 
 
@@ -428,6 +460,8 @@ async def handle_medical_center_chat(
         if not state.specialty:
             state.specialty = reconstruct_specialty_from_history(history)
         state.selected_slot = reconstruct_selected_slot(history, message, state.specialty)
+        if state.selected_slot:
+            state.preferred_time = state.selected_slot  # summary shows the picked slot
 
         # ---- DETERMINISTIC BOOKING FLOW (controlled demo slots, no LLM) ----
         # Owns the booking mechanics so slots are never invented and a booking is

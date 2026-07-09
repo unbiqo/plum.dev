@@ -27,6 +27,7 @@ from app.medical_center_guardrails import (
     validate_answer,
 )
 from app.medical_center_kb import get_full_kb_context
+from app.medical_center_slots import normalize_symptom_terms, resolve_slot
 from app.medical_center_planner import (
     reclassify_discount_question,
     reclassify_medical_advice_question,
@@ -38,6 +39,7 @@ from app.medical_center_state import (
     classify_contact,
     detect_red_flags,
     detect_symptom_specialty,
+    extract_contact,
     looks_like_contact,
     looks_like_invalid_phone,
 )
@@ -690,29 +692,43 @@ def test_discount_honest_answer_passes_without_repair() -> None:
 # State
 # ---------------------------------------------------------------------------
 
-def test_looks_like_contact() -> None:
-    assert looks_like_contact("+7 700 415 77 21")
-    assert looks_like_contact("мой телеграм @damir_k")
-    assert not looks_like_contact("хочу узнать цены")
-    # A 12-digit run is not a plausible phone — must not count as a contact.
-    assert not looks_like_contact("713812732873")
+def test_looks_like_contact_international() -> None:
+    for good in (
+        "77777102402", "+77777102402", "87777102402", "+7 777 710 24 02",
+        "8 777 710 24 02", "+1 415 555 2671", "+44 7700 900123",
+        "+90 555 123 45 67", "+49 151 23456789", "7012345678", "0555 123 45 67",
+        "@damir", "t.me/damir", "мой телеграм @damir_k",
+    ):
+        assert looks_like_contact(good), good
+    for bad in ("хочу узнать цены", "123", "hello", "телефон позже"):
+        assert not looks_like_contact(bad), bad
 
 
 def test_classify_contact() -> None:
     assert classify_contact("мой телеграм @damir_k") == "telegram"
-    assert classify_contact("+7 700 415 77 21") == "phone"   # 11 digits, +
-    assert classify_contact("87004157721") == "phone"        # 11 digits, local
-    assert classify_contact("7004157721") == "phone"         # 10 digits, local
-    assert classify_contact("713812732873") == "phone_invalid"  # 12 digits
-    assert classify_contact("12345") == "none"               # too short to look like a phone
+    assert classify_contact("t.me/damir") == "telegram"
+    assert classify_contact("+1 415 555 2671") == "phone"      # US 11 digits
+    assert classify_contact("+44 7700 900123") == "phone"      # UK 12 digits
+    assert classify_contact("713812732873") == "phone"         # 12 digits — valid intl now
+    assert classify_contact("Дамир 23 77777102402") == "phone"  # phone + age noise
+    assert classify_contact("123") == "none"                   # too short to be a phone
+    assert classify_contact("1234567890123456789") == "phone_invalid"  # 19 digits
     assert classify_contact("хочу узнать цены") == "none"
 
 
-def test_looks_like_invalid_phone_gated_on_digit_dominance() -> None:
-    # A bare broken number is a contact attempt.
-    assert looks_like_invalid_phone("713812732873")
-    # A valid number is not "invalid".
+def test_extract_contact_cleans_phone_from_noise() -> None:
+    assert extract_contact("Дамир 23 77777102402") == "77777102402"
+    assert extract_contact("мой номер +7 777 710 24 02") == "+7 777 710 24 02"
+    assert extract_contact("телеграм @damir_k").lower().endswith("@damir_k")
+    assert extract_contact("зовут Дамир") == ""
+
+
+def test_looks_like_invalid_phone_only_when_too_long() -> None:
+    # Valid international numbers are NOT invalid.
+    assert not looks_like_invalid_phone("713812732873")   # 12 digits — valid now
     assert not looks_like_invalid_phone("+7 701 222 33 44")
+    # A digit-dominated run longer than 15 digits is a failed attempt.
+    assert looks_like_invalid_phone("12345678901234567890")
     # Prose that merely contains a long number must not be hijacked.
     assert not looks_like_invalid_phone(
         "Меня выставили счёт на 123456789 тенге, это дороговато для меня"
@@ -725,7 +741,8 @@ def test_invalid_phone_short_circuits_without_llm() -> None:
         _msg("user", "хочу записаться"),
         _msg("assistant", "Оставьте, пожалуйста, ваше имя и WhatsApp/телефон для связи."),
     ]
-    resp = _run(handle_medical_center_chat(gem, _request("713812732873", history=history)))
+    # A 20-digit run is implausible for any country -> deterministic re-ask.
+    resp = _run(handle_medical_center_chat(gem, _request("12345678901234567890", history=history)))
     assert resp.answer == INVALID_CONTACT_ANSWER
     assert gem.planner_calls == 0
     assert gem.writer_calls == 0
@@ -888,7 +905,8 @@ def test_booking_confirmed_when_all_fields_present() -> None:
         gem, _request("Дамир, 22 года, +7 701 000 00 00", history=history)
     ))
     low = resp.answer.casefold()
-    assert "готово, записали вас на завтра 15:30 к терапевту" in low
+    assert "готово, дамир!" in low  # confirmation greets the patient by name
+    assert "записали вас на завтра 15:30 к терапевту" in low
     assert resp.metadata["conversation_status"] == "booking_created"
     assert resp.lead_status == "contact_collected"
     assert resp.metadata["medical_lead_status"] == "appointment_created"
@@ -906,6 +924,118 @@ def test_emergency_preempts_booking_flow() -> None:
     assert resp.answer == EMERGENCY_ANSWER
     assert "демо-окна" not in resp.answer.casefold()
     assert gem.planner_calls == 0  # short-circuit before any LLM
+
+
+# ---------------------------------------------------------------------------
+# Natural-language slot selection + loop prevention
+# ---------------------------------------------------------------------------
+
+def test_resolve_slot_natural_language() -> None:
+    # ЛОР demo slots: завтра 11:00, завтра 16:00, послезавтра 12:00.
+    assert resolve_slot("ЛОР", "В 16") == ("matched", "завтра 16:00")
+    assert resolve_slot("ЛОР", "В 4 дня") == ("matched", "завтра 16:00")
+    assert resolve_slot("ЛОР", "Завтра в 4") == ("matched", "завтра 16:00")
+    assert resolve_slot("ЛОР", "Завтра в 16:00") == ("matched", "завтра 16:00")
+    assert resolve_slot("ЛОР", "второй вариант") == ("matched", "завтра 16:00")
+    # Bare small hour with no day/qualifier -> suggest, don't guess silently.
+    assert resolve_slot("ЛОР", "В 4") == ("suggest", "завтра 16:00")
+    # A phone number must not be read as a slot.
+    assert resolve_slot("ЛОР", "Дамир 23 77777102402") == ("none", None)
+
+
+def _lor_offer_history() -> list:
+    return [
+        _msg("user", "покраснение и чихаю"),
+        _msg("assistant", "По описанным симптомам вам может помочь ЛОР-врач."),
+        _msg("assistant", "К ЛОРу есть демо-окна: завтра 11:00, завтра 16:00 или послезавтра 12:00.\n\nКакое время вам удобнее?"),
+    ]
+
+
+def _lor_planner(**kw):
+    slots = {"specialty": "ЛОР"}
+    slots.update(kw.pop("slots", {}))
+    return _default_planner(current_intent=kw.pop("current_intent", "wants_booking"), slots=slots, **kw)
+
+
+def test_natural_slot_selection_advances_to_contact() -> None:
+    # "В 16" is understood -> move straight to collecting contact, not re-listing.
+    gem = FakeGemini(planner=_lor_planner())
+    resp = _run(handle_medical_center_chat(gem, _request("В 16", history=_lor_offer_history())))
+    low = resp.answer.casefold()
+    assert "демо-окна" not in low          # no repeated slot list
+    assert "завтра 16:00" in low
+    assert "оставьте" in low                # asks for name/contact
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
+    assert resp.metadata["state"]["selected_slot"] == "завтра 16:00"
+
+
+def test_ambiguous_slot_asks_confirmation_not_relist() -> None:
+    gem = FakeGemini(planner=_lor_planner())
+    resp = _run(handle_medical_center_chat(gem, _request("В 4", history=_lor_offer_history())))
+    low = resp.answer.casefold()
+    assert "правильно понял, хотите завтра 16:00" in low
+    assert "демо-окна" not in low  # a confirmation, not the full list again
+
+
+def test_affirmation_confirms_suggested_slot() -> None:
+    history = _lor_offer_history() + [
+        _msg("user", "В 4"),
+        _msg("assistant", "Правильно понял, хотите завтра 16:00?"),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="contact"))
+    resp = _run(handle_medical_center_chat(gem, _request("да", history=history)))
+    assert resp.metadata["state"]["selected_slot"] == "завтра 16:00"
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
+
+
+def test_unmapped_reply_after_offer_clarifies_once() -> None:
+    # Still trying to book (wants_booking) but the time can't be parsed -> the
+    # handler engages and clarifies ONCE instead of repeating the slot list.
+    gem = FakeGemini(planner=_lor_planner(current_intent="wants_booking"))
+    resp = _run(handle_medical_center_chat(gem, _request("давайте не уверен", history=_lor_offer_history())))
+    low = resp.answer.casefold()
+    assert "демо-окна" not in low  # must NOT repeat the same list
+    assert "не совсем понял" in low and "например" in low
+    assert gem.writer_calls == 0  # deterministic clarification, no LLM loop
+
+
+def test_transcript_phone_accepted_and_confirms() -> None:
+    # The exact failing transcript reply: phone with an age prefix, no '+'.
+    history = _lor_offer_history() + [
+        _msg("user", "В 16"),
+        _msg("assistant", "Отлично, завтра 16:00 к ЛОРу.\n\nДля записи оставьте, пожалуйста, имя, возраст, WhatsApp или телефон."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(
+        current_intent="contact",
+        slots={"patient_name": "Дамир", "age": "23", "contact": "77777102402"},
+    ))
+    resp = _run(handle_medical_center_chat(gem, _request("Дамир 23 77777102402", history=history)))
+    low = resp.answer.casefold()
+    assert "не вижу контакт" not in low         # phone must be accepted
+    assert "готово, дамир!" in low
+    assert "завтра 16:00 к лору" in low
+    assert resp.metadata["conversation_status"] == "booking_created"
+    assert resp.lead_status == "contact_collected"
+
+
+def test_invalid_contact_in_booking_reasks_internationally() -> None:
+    history = _lor_offer_history() + [
+        _msg("user", "В 16"),
+        _msg("assistant", "Отлично, завтра 16:00 к ЛОРу.\n\nДля записи оставьте, пожалуйста, имя, возраст, WhatsApp или телефон."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="contact"))
+    resp = _run(handle_medical_center_chat(gem, _request("123", history=history)))
+    low = resp.answer.casefold()
+    assert "не вижу контакт" in low
+    assert "международном формате" in low
+    assert "11 цифр" not in low  # never country-specific
+    assert resp.metadata["conversation_status"] != "booking_created"
+
+
+def test_symptom_normalization_sneezing_redness() -> None:
+    out = normalize_symptom_terms("redness and sneezing")
+    assert "покраснение" in out and "чихание" in out
+    assert "redness" not in out.lower() and "sneezing" not in out.lower()
 
 
 def test_build_state_sticky_emergency_from_history() -> None:

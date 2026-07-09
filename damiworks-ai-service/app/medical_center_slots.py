@@ -102,6 +102,9 @@ _SYMPTOM_TERMS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bstomach ache\b|\babdominal pain\b", re.IGNORECASE), "боль в животе"),
     (re.compile(r"\bback pain\b", re.IGNORECASE), "боль в спине"),
     (re.compile(r"\brash\b", re.IGNORECASE), "сыпь"),
+    (re.compile(r"\bsneezing\b|\bsneeze\b", re.IGNORECASE), "чихание"),
+    (re.compile(r"\bredness\b", re.IGNORECASE), "покраснение"),
+    (re.compile(r"\brunny nose\b", re.IGNORECASE), "насморк"),
     (re.compile(r"\bconsultation\b", re.IGNORECASE), "консультация"),
     (re.compile(r"\bappointment\b", re.IGNORECASE), "запись"),
 )
@@ -163,50 +166,93 @@ _ORDINALS: tuple[tuple[re.Pattern[str], int], ...] = (
     (re.compile(r"\bвтор(?:ой|ое|ая|ых)?\b|\b2[-\s]?(?:й|е|ой|вариант)\b", re.IGNORECASE), 1),
     (re.compile(r"\bтрет(?:ий|ье|ья|ьих)?\b|\b3[-\s]?(?:й|е|ий|вариант)\b", re.IGNORECASE), 2),
 )
-_TIME_RE = re.compile(r"\b(\d{1,2})[:.\s](\d{2})\b")
+_TIME_RE = re.compile(r"\b(\d{1,2})[:.](\d{2})\b")  # explicit HH:MM
+_BARE_HOUR_RE = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
 # Order matters: «послезавтра» contains «завтра» as a substring, so it must be
 # tested first to avoid a false «завтра» match.
 _DAY_WORDS = ("послезавтра", "завтра", "сегодня")
+# Time-of-day qualifiers that disambiguate a bare hour (4 дня -> 16:00).
+_QUALIFIER_PM_RE = re.compile(r"\bдня\b|\bдн[её]м\b|\bвечер\w*|\bпополудни\b", re.IGNORECASE)
+_QUALIFIER_AM_RE = re.compile(r"\bутра\b|\bутром\b|\bноч[иь]\w*", re.IGNORECASE)
 
 
-def match_slot(specialty: str | None, message: str) -> str | None:
-    """Return the rendered slot the user's message refers to, or None.
+def resolve_slot(specialty: str | None, message: str) -> tuple[str, str | None]:
+    """Map a natural-language reply to an offered demo slot.
 
-    Deterministic: matches by (day + time), a unique bare time, a mentioned day
-    if it has a single slot, or an ordinal ('второй вариант'). Never guesses.
+    Returns ``(kind, slot)`` where ``kind`` is:
+    - ``"matched"`` — confident, ``slot`` is the chosen "день ЧЧ:ММ";
+    - ``"suggest"`` — one plausible guess but ambiguous, ask "хотите X?";
+    - ``"none"``    — nothing offered matched, ``slot`` is None.
+
+    Handles ordinals, explicit HH:MM, a bare hour ("в 16"), 12-hour phrasing
+    ("в 4 дня" -> 16:00), and a day word that disambiguates a small hour
+    ("завтра в 4" -> the offered afternoon slot). A bare small hour with no day
+    and no качественный qualifier stays a *suggestion* so we confirm instead of
+    guessing silently.
     """
     slots = _slot_tuples(specialty)
     if not slots:
-        return None
+        return ("none", None)
     low = (message or "").lower()
 
-    # 1. Ordinal reference into the offered list.
     for pattern, index in _ORDINALS:
         if pattern.search(low) and index < len(slots):
             day, time = slots[index]
-            return f"{day} {time}"
+            return ("matched", f"{day} {time}")
 
-    # 2. Time mentioned in the message.
-    times_in_msg = {f"{int(h):d}:{m}" for h, m in _TIME_RE.findall(low)}
     day_in_msg = next((d for d in _DAY_WORDS if d in low), None)
-    if times_in_msg:
-        # Prefer an exact day+time match.
-        for day, time in slots:
-            norm = f"{int(time.split(':')[0]):d}:{time.split(':')[1]}"
-            if norm in times_in_msg and (day_in_msg is None or day_in_msg == day):
-                return f"{day} {time}"
-        # Otherwise a unique time across the offered slots.
-        for day, time in slots:
-            norm = f"{int(time.split(':')[0]):d}:{time.split(':')[1]}"
-            if norm in times_in_msg:
-                matching = [s for s in slots if f"{int(s[1].split(':')[0]):d}:{s[1].split(':')[1]}" == norm]
-                if len(matching) == 1:
-                    return f"{day} {time}"
+    pm = bool(_QUALIFIER_PM_RE.search(low))
+    am = bool(_QUALIFIER_AM_RE.search(low))
 
-    # 3. A day mentioned with exactly one slot on that day.
-    if day_in_msg:
-        same_day = [(d, t) for d, t in slots if d == day_in_msg]
+    explicit = {(int(h), int(m)) for h, m in _TIME_RE.findall(low)}
+    low_wo_times = _TIME_RE.sub(" ", low)
+    bare = [int(x) for x in _BARE_HOUR_RE.findall(low_wo_times) if 0 <= int(x) <= 23]
+
+    confident: set[tuple[int, int]] = set(explicit)
+    ambiguous: set[tuple[int, int]] = set()
+    for h in bare:
+        if h >= 13:
+            confident.add((h, 0))
+        elif pm:
+            confident.add((12 if h == 12 else h + 12, 0))
+        elif am:
+            confident.add((0 if h == 12 else h, 0))
+        else:
+            target = confident if day_in_msg else ambiguous
+            for cand in {h, h if h >= 12 else h + 12}:
+                target.add((cand, 0))
+
+    def _match(cands: set[tuple[int, int]]) -> list[str]:
+        found: list[str] = []
+        for sday, stime in slots:
+            if day_in_msg is not None and day_in_msg != sday:
+                continue
+            sh, sm = int(stime.split(":")[0]), int(stime.split(":")[1])
+            if any(ch == sh and (cm == sm or cm == 0) for ch, cm in cands):
+                label = f"{sday} {stime}"
+                if label not in found:
+                    found.append(label)
+        return found
+
+    conf = _match(confident)
+    if len(conf) == 1:
+        return ("matched", conf[0])
+    if len(conf) >= 2:
+        return ("none", None)  # ambiguous among several confident hits — clarify
+    amb = _match(ambiguous)
+    if len(amb) == 1:
+        return ("suggest", amb[0])
+
+    # A lone day word with exactly one slot on that day.
+    if day_in_msg and not explicit and not bare:
+        same_day = [f"{d} {t}" for d, t in slots if d == day_in_msg]
         if len(same_day) == 1:
-            return f"{same_day[0][0]} {same_day[0][1]}"
+            return ("matched", same_day[0])
 
-    return None
+    return ("none", None)
+
+
+def match_slot(specialty: str | None, message: str) -> str | None:
+    """Confident slot match only (or None) — thin wrapper over resolve_slot."""
+    kind, slot = resolve_slot(specialty, message)
+    return slot if kind == "matched" else None

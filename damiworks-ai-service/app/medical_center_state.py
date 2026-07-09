@@ -31,31 +31,39 @@ from .schemas import ChatHistoryMessage
 # Deterministic detectors (safety only, NOT conversation drivers)
 # ---------------------------------------------------------------------------
 
-_PHONE_RE = re.compile(r"\+?\d[\d\s\-\(\)]{6,}\d")
-_TELEGRAM_RE = re.compile(r"@\w{3,}")
+# A phone-shaped run: optional +, then digits with spaces/hyphens/parens.
+_PHONE_RE = re.compile(r"\+?\d[\d\s\-\(\)]{4,}\d")
+# Telegram in any common form: @handle, t.me/handle, "telegram/тг: handle".
+_TELEGRAM_RE = re.compile(
+    r"@[a-zA-Z0-9_]{3,}"
+    r"|t\.me/[a-zA-Z0-9_]{3,}"
+    r"|(?:telegram|телеграм|тг)\b\s*[:\-]?\s*@?[a-zA-Z0-9_]{3,}",
+    re.IGNORECASE,
+)
+# International plausibility: E.164 allows up to 15 digits; 7 is a safe floor.
+_PHONE_MIN_DIGITS = 7
+_PHONE_MAX_DIGITS = 15
 
 
 def classify_contact(text: str) -> str:
-    """Classify the contact content of a user message.
+    """Classify the contact content of a message (country-agnostic).
 
-    Returns one of ``"telegram"``, ``"phone"``, ``"phone_invalid"``, ``"none"``.
-    A phone is plausible when it has 10–11 digits (local KZ/RU form) or 11–15
-    digits with an international ``+`` prefix (E.164). A phone-shaped run outside
-    that range (e.g. the 12-digit ``713812732873``) is ``"phone_invalid"`` — we
-    must not treat it as a real callback number.
+    Returns ``"telegram"``, ``"phone"``, ``"phone_invalid"`` or ``"none"``.
+    A phone is accepted for ANY country: 7–15 digits, with an optional ``+`` and
+    spaces/hyphens/parens. A phone-shaped run outside 7–15 digits is
+    ``"phone_invalid"``; text with no phone run and no Telegram handle is
+    ``"none"``.
     """
     t = (text or "").strip()
     if _TELEGRAM_RE.search(t):
         return "telegram"
-    match = _PHONE_RE.search(t)
-    if not match:
-        return "none"
-    raw = match.group(0)
-    has_plus = raw.lstrip().startswith("+")
-    digit_count = len(re.sub(r"\D", "", raw))
-    if has_plus:
-        return "phone" if 11 <= digit_count <= 15 else "phone_invalid"
-    return "phone" if 10 <= digit_count <= 11 else "phone_invalid"
+    saw_phoneish = False
+    for match in _PHONE_RE.finditer(t):
+        digit_count = len(re.sub(r"\D", "", match.group(0)))
+        if _PHONE_MIN_DIGITS <= digit_count <= _PHONE_MAX_DIGITS:
+            return "phone"
+        saw_phoneish = True
+    return "phone_invalid" if saw_phoneish else "none"
 
 
 def looks_like_contact(text: str) -> bool:
@@ -63,19 +71,39 @@ def looks_like_contact(text: str) -> bool:
     return classify_contact(text) in ("telegram", "phone")
 
 
-def looks_like_invalid_phone(text: str) -> bool:
-    """True when the message is clearly a contact attempt with a bad phone.
+def extract_contact(text: str) -> str:
+    """Return the cleanest contact token from ``text`` (phone or Telegram), or "".
 
-    Gated on the digit run dominating the message so ordinary prose that merely
-    contains a long number (an order id, "болит уже 12345678 часов") never
-    hijacks the flow — only a message the user meant as their number.
+    Prefers a long contiguous digit run (so "Дамир 23 77777102402" -> the phone,
+    not the age), then a spaced/formatted phone run, then a Telegram handle.
+    """
+    t = (text or "").strip()
+    tg = _TELEGRAM_RE.search(t)
+    if tg:
+        return tg.group(0).strip()
+    contiguous = re.findall(rf"\d{{{_PHONE_MIN_DIGITS},{_PHONE_MAX_DIGITS}}}", t)
+    if contiguous:
+        return max(contiguous, key=len)
+    for match in _PHONE_RE.finditer(t):
+        run = match.group(0).strip()
+        if _PHONE_MIN_DIGITS <= len(re.sub(r"\D", "", run)) <= _PHONE_MAX_DIGITS:
+            return run
+    return ""
+
+
+def looks_like_invalid_phone(text: str) -> bool:
+    """True when the message is clearly a failed contact attempt.
+
+    Only a digit-dominated message whose number is implausible (too long, >15
+    digits) — never a valid international number. Ordinary prose that merely
+    contains a long id never hijacks the flow.
     """
     if classify_contact(text) != "phone_invalid":
         return False
     t = (text or "").strip()
     digit_count = len(re.sub(r"\D", "", t))
     letter_count = sum(c.isalpha() for c in t)
-    return digit_count >= 8 and letter_count <= digit_count
+    return digit_count > _PHONE_MAX_DIGITS and letter_count <= digit_count
 
 
 # Emergency red flags (KB section «Красные флаги»). Strong markers only: a
@@ -346,11 +374,11 @@ def build_conversation_state(
         if msg.role != "user":
             continue
         if looks_like_contact(msg.content or ""):
-            contact = (msg.content or "").strip()
+            contact = extract_contact(msg.content or "")
         if urgency_flag != "emergency" and detect_red_flags(msg.content or ""):
             urgency_flag = "emergency"
     if looks_like_contact(message or ""):
-        contact = (message or "").strip()
+        contact = extract_contact(message or "")
     if detect_red_flags(message or ""):
         urgency_flag = "emergency"
 
@@ -371,6 +399,21 @@ _CONFIRMED_SLOT_RE = re.compile(
     r"(?:записали вас на|отлично,)\s+(послезавтра|завтра|сегодня)\s+(\d{1,2}:\d{2})",
     re.IGNORECASE,
 )
+# The assistant's "Правильно понял, хотите X?" clarification proposes a slot.
+_SUGGEST_SLOT_RE = re.compile(
+    r"хотите\s+(послезавтра|завтра|сегодня)\s+(?:в\s+)?(\d{1,2}:\d{2})",
+    re.IGNORECASE,
+)
+_AFFIRMATION_RE = re.compile(
+    r"^\W*(?:да|ага|угу|ок(?:ей)?|okay|ok|yes|верно|правильно|точно|именно|"
+    r"хорошо|давай(?:те)?|подходит|подойд[её]т|годится|согласен|согласна)\b",
+    re.IGNORECASE,
+)
+
+
+def is_affirmation(text: str) -> bool:
+    """True if the message is a short yes/agreement (used to confirm a suggestion)."""
+    return bool(_AFFIRMATION_RE.match((text or "").strip()))
 
 
 def reconstruct_specialty_from_history(history: list[ChatHistoryMessage]) -> str:
@@ -393,24 +436,41 @@ def reconstruct_selected_slot(
 ) -> str:
     """The demo slot the user has already picked, recovered from history.
 
-    Scans user turns for a slot matching the specialty and assistant turns for a
-    previously confirmed slot; the latest occurrence wins. Returns "" if none.
+    A slot is confirmed by a confident match, by the assistant echoing it back,
+    or by the user affirming ("да") a "Правильно понял, хотите X?" suggestion.
+    A phone number is never parsed for a slot. The latest confirmation wins.
     """
     if not specialty:
         return ""
     latest = ""
+    pending_suggestion = ""  # slot the assistant last proposed, awaiting a yes
     for msg in list(history or []):
+        content = msg.content or ""
         if msg.role == "user":
-            got = match_slot(specialty, msg.content or "")
+            if classify_contact(content) == "phone":
+                continue  # a phone reply is not a slot selection
+            got = match_slot(specialty, content)
             if got:
                 latest = got
+                pending_suggestion = ""
+            elif pending_suggestion and is_affirmation(content):
+                latest = pending_suggestion
+                pending_suggestion = ""
         else:
-            m = _CONFIRMED_SLOT_RE.search(msg.content or "")
-            if m:
-                latest = f"{m.group(1).lower()} {m.group(2)}"
-    got = match_slot(specialty, message or "")
-    if got:
-        latest = got
+            cm = _CONFIRMED_SLOT_RE.search(content)
+            if cm:
+                latest = f"{cm.group(1).lower()} {cm.group(2)}"
+                pending_suggestion = ""
+            sm = _SUGGEST_SLOT_RE.search(content)
+            if sm:
+                pending_suggestion = f"{sm.group(1).lower()} {sm.group(2)}"
+
+    if classify_contact(message or "") != "phone":
+        got = match_slot(specialty, message or "")
+        if got:
+            latest = got
+        elif pending_suggestion and is_affirmation(message or ""):
+            latest = pending_suggestion
     return latest
 
 

@@ -10,7 +10,7 @@ export const SPECIALTY_PATTERNS: Array<[RegExp, string]> = [
   [/эндокринолог|endocrinolog/i, 'Эндокринолог'],
   [/гастроэнтеролог|gastroenterolog/i, 'Гастроэнтеролог'],
   [/невролог|neurolog/i, 'Невролог'],
-  [/лор|отоларинголог|otolaryngolog|\bent\b/i, 'ЛОР'],
+  [/лор|отоларинголог|otolaryngolog|\bent\b|\blor\b/i, 'ЛОР'],
   [/дерматолог|dermatolog/i, 'Дерматолог'],
   [/гинеколог|gynecolog|gynaecolog/i, 'Гинеколог'],
   [/уролог|urolog/i, 'Уролог'],
@@ -29,6 +29,9 @@ export const SYMPTOM_TERMS: Array<[RegExp, string]> = [
   [/back pain/gi, 'боль в спине'],
   [/abdominal pain|stomach ache/gi, 'боль в животе'],
   [/rash/gi, 'сыпь'],
+  [/sneezing|sneeze/gi, 'чихание'],
+  [/redness/gi, 'покраснение'],
+  [/runny nose/gi, 'насморк'],
   [/consultation/gi, 'консультация'],
   [/appointment/gi, 'запись'],
 ]

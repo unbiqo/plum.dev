@@ -19,13 +19,21 @@ assert.equal(normalizeSpecialty('neurologist'), 'Невролог')
 assert.equal(normalizeSpecialty('pediatrician'), 'Педиатр')
 assert.equal(normalizeSpecialty('dentist'), 'Стоматолог')
 assert.equal(normalizeSpecialty('терапевт'), 'Терапевт')
-pass('specialty labels normalize to Russian')
+// ENT / lor / otolaryngologist must all render as ЛОР, never English.
+assert.equal(normalizeSpecialty('ENT'), 'ЛОР')
+assert.equal(normalizeSpecialty('otolaryngologist'), 'ЛОР')
+assert.equal(normalizeSpecialty('lor'), 'ЛОР')
+pass('specialty labels normalize to Russian (incl. ENT -> ЛОР)')
 
 // Symptom EN -> RU.
 const complaint = normalizeComplaint('headache and fever')
 assert.ok(complaint.includes('головная боль'), 'headache -> головная боль')
 assert.ok(complaint.includes('температура'), 'fever -> температура')
-pass('symptom labels normalize to Russian')
+const complaint2 = normalizeComplaint('redness and sneezing')
+assert.ok(complaint2.includes('покраснение'), 'redness -> покраснение')
+assert.ok(complaint2.includes('чихание'), 'sneezing -> чихание')
+assert.ok(!/redness|sneezing/i.test(complaint2), 'no English redness/sneezing remains')
+pass('symptom labels normalize to Russian (incl. redness/sneezing)')
 
 // No English leaks for known values.
 const known = normalizeSpecialty('therapist') + ' ' + normalizeComplaint('headache fever')
