@@ -56,6 +56,16 @@ def _load_kb() -> list[dict[str, object]]:
     return _split_into_chunks(text)
 
 
+def get_raw_markdown() -> str:
+    """The KB's raw markdown text, cached. Used by medical_center_rag.py to
+    build fine-grained (per-doctor/per-direction) retrieval chunks — a
+    different split than the coarse ``##``-only chunks used by
+    ``get_full_kb_context()`` (which guardrails.py still relies on for
+    exhaustive price/doctor-name validation and must keep seeing everything).
+    """
+    return _KB_PATH.read_text(encoding="utf-8")
+
+
 def _get_chunks() -> list[dict[str, object]]:
     global _CHUNKS
     if _CHUNKS is None:

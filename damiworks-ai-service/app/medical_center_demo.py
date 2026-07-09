@@ -30,7 +30,7 @@ from .medical_center_guardrails import (
     build_safe_fallback,
     validate_answer,
 )
-from .medical_center_kb import get_full_kb_context
+from .medical_center_rag import retrieve_medical_kb_context
 from .medical_center_planner import (
     plan_conversation_turn,
     reclassify_discount_question,
@@ -74,6 +74,31 @@ INVALID_CONTACT_ANSWER = (
 # Single source of truth for the patient-facing clinic address.
 CLINIC_ADDRESS_ANSWER = (
     "MedNova Clinic находится в Астане, по адресу: проспект Тауелсиздик, 33."
+)
+
+# Deterministic deflection for prompt-injection / internal-architecture probes.
+# Matches the KB's own "Защита от посторонних инструкций" wording so the
+# behavior is consistent whether this short-circuit or the LLM (grounded on
+# that KB section) ends up answering. A dedicated CODE short-circuit is more
+# robust than relying on retrieval to surface the right chunk for an
+# adversarial prompt specifically designed to evade instructions.
+INJECTION_REFUSAL_ANSWER = (
+    "Я могу помочь только с вопросами по клинике: услуги, врачи, цены, график "
+    "и запись. Хотите подобрать специалиста?"
+)
+_INJECTION_RE = re.compile(
+    r"drop\s+all|ignore\s+(?:all\s+|previous\s+|the\s+)*instructions?"
+    r"|system\s*prompt|jailbreak|без\s+ограничени|отключ\w*\s+(?:ограничени|правил|фильтр)"
+    r"|забудь\s+(?:все\s+)?(?:правил|инструкц|ограничени)"
+    r"|игнорир\w*\s+(?:все\s+)?(?:правил|инструкц|ограничени)"
+    r"|раскрой\w*\s+(?:системн\w*\s+)?(?:промпт|инструкц)"
+    r"|покажи\w*\s+(?:мне\s+)?(?:системн\w*\s+)?промпт"
+    r"|(?:какой|какая|расскажи).{0,20}(?:промпт|системн\w*\s+инструкц)"
+    r"|сколько\s+промпт|сколько\s+инструкций\s+в\s+систем"
+    r"|расскажи.{0,20}архитектур|как\s+(?:ты\s+)?устроен\w*\s+(?:внутри|изнутри)"
+    r"|kb\s+chunks|про\s+rag\b|retrieval\s+(?:систем|архитектур)"
+    r"|притворись\s+(?:другим|обычным)|веди\s+себя\s+как\s+обычный\s+чат.?бот",
+    re.IGNORECASE,
 )
 
 # Address / location questions ("где находится", "адрес какой", "куда ехать",
@@ -497,8 +522,6 @@ async def handle_medical_center_chat(
     repair_timeout = False
 
     try:
-        kb_context = get_full_kb_context()
-
         state = build_conversation_state(history, message)
 
         # ---- EMERGENCY SHORT-CIRCUIT (deterministic, before any LLM call) ----
@@ -529,6 +552,32 @@ async def handle_medical_center_chat(
                     **_derive_conversation_status(
                         state, history, {}, lead_status, emergency_turn=True
                     ),
+                },
+            )
+
+        # ---- PROMPT INJECTION SHORT-CIRCUIT (deterministic, before any LLM) ----
+        # A probe for internal prompts/architecture/RAG or an instruction to
+        # ignore the rules is deflected in code — no LLM call, so an
+        # adversarial message can't talk its way past this regardless of how
+        # it's phrased or which language it uses.
+        if _INJECTION_RE.search(message):
+            lead_status = _derive_lead_status(state, history)
+            return ChatResponse(
+                route=Route.general,
+                routes=[Route.general],
+                answer=INJECTION_REFUSAL_ANSWER,
+                checkout=False,
+                lead_status=lead_status,
+                metadata={
+                    "medical_center_demo": True,
+                    "planner_llm_used": False,
+                    "writer_llm_used": False,
+                    "injection_refusal_short_circuit": True,
+                    "medical_lead_status": _derive_medical_lead_status(
+                        lead_status, history, message
+                    ),
+                    "state": state.to_metadata(),
+                    **_derive_conversation_status(state, history, {}, lead_status),
                 },
             )
 
@@ -628,10 +677,24 @@ async def handle_medical_center_chat(
                 },
             )
 
+        # ---- retrieval for the planner (compact: routing/safety-relevant chunks) ----
+        # State.specialty isn't populated yet this turn (that happens after the
+        # planner runs) — use a read-only history lookup as a query hint only,
+        # without mutating state (apply_planner_updates still owns that below).
+        planner_retrieval = retrieve_medical_kb_context(
+            message=message,
+            history=history,
+            specialty=reconstruct_specialty_from_history(history),
+            symptoms_or_goal=state.symptoms_or_goal,
+            mode="planner",
+        )
+
         # ---- planner (JSON, temp 0) ----
         try:
             planner = await asyncio.wait_for(
-                plan_conversation_turn(message, history, state, kb_context, gemini),
+                plan_conversation_turn(
+                    message, history, state, planner_retrieval.context, gemini
+                ),
                 timeout=_PLANNER_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -697,10 +760,21 @@ async def handle_medical_center_chat(
                 },
             )
 
+        # ---- retrieval for the writer (fuller: doctors/prices/FAQ/schedule) ----
+        # state.specialty/symptoms_or_goal are now resolved for this turn, so
+        # the writer's retrieval can be properly state-aware.
+        writer_retrieval = retrieve_medical_kb_context(
+            message=message,
+            history=history,
+            specialty=state.specialty,
+            symptoms_or_goal=state.symptoms_or_goal,
+            mode="writer",
+        )
+
         # ---- writer (free-text, temp 0.35) ----
         try:
             answer = await asyncio.wait_for(
-                write_response(message, history, state, planner, kb_context, gemini),
+                write_response(message, history, state, planner, writer_retrieval.context, gemini),
                 timeout=_WRITER_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -717,7 +791,7 @@ async def handle_medical_center_chat(
             try:
                 answer = await asyncio.wait_for(
                     write_response(
-                        message, history, state, planner, kb_context, gemini,
+                        message, history, state, planner, writer_retrieval.context, gemini,
                         repair=validation.fix,
                     ),
                     timeout=_REPAIR_TIMEOUT,
@@ -752,6 +826,8 @@ async def handle_medical_center_chat(
                 writer_timeout=writer_timeout,
                 repair_timeout=repair_timeout,
                 fallback_reason=fallback_reason,
+                planner_kb_retrieval=planner_retrieval.to_debug_metadata(),
+                kb_retrieval=writer_retrieval.to_debug_metadata(),
             ),
         )
     except Exception as exc:  # noqa: BLE001 - a demo turn must never 500
@@ -785,6 +861,8 @@ def _build_metadata(
     writer_timeout: bool = False,
     repair_timeout: bool = False,
     fallback_reason: str | None = None,
+    planner_kb_retrieval: dict[str, object] | None = None,
+    kb_retrieval: dict[str, object] | None = None,
 ) -> dict[str, object]:
     conv_status = _derive_conversation_status(state, history or [], planner, lead_status)
     return {
@@ -810,5 +888,7 @@ def _build_metadata(
         "writer_timeout": writer_timeout,
         "repair_timeout": repair_timeout,
         "fallback_reason": fallback_reason,
+        "planner_kb_retrieval": planner_kb_retrieval,
+        "kb_retrieval": kb_retrieval,
         **conv_status,
     }
