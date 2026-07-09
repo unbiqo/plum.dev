@@ -1939,6 +1939,18 @@ def test_hybrid_multiple_complaints_without_a_red_flag_ask_for_review() -> None:
     assert "multiple_complaints" in draft.review_reason
 
 
+def test_deterministic_routing_answers_contain_no_em_dash() -> None:
+    # Style rule: never the em dash in a patient-facing message. The routing
+    # table's own explanations are patient-facing too.
+    for message in ("колено болит уже месяц", "пятно на коже на плече",
+                    "болят колени и кисти, по утрам скованность",
+                    "боль идёт от поясницы в ногу, немеет стопа"):
+        routed = route_symptom(message)
+        assert routed is not None, message
+        assert "—" not in routed.explanation, message
+        assert "—" not in routed.cta, message
+
+
 def test_hybrid_routing_never_names_a_specialty_the_clinic_lacks() -> None:
     # Every deterministic destination must exist in the KB.
     for message in ("порезал язык", "надорвал бицепс", "ударился головой", "дискомфорт в икрах"):

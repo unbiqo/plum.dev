@@ -583,6 +583,8 @@ async def handle_medical_center_chat(
                     "writer_llm_used": False,
                     "emergency_short_circuit": True,
                     "red_flag_category": red_flag,
+                    "medical_intake": _intake_metadata(intake, planner_reviewed=False),
+                    "planner_used_for_intake": False,
                     "medical_lead_status": _derive_medical_lead_status(
                         lead_status, history, message
                     ),
@@ -779,6 +781,8 @@ async def handle_medical_center_chat(
                     "planner_llm_used": False,
                     "writer_llm_used": False,
                     "symptom_routing": routing.specialty,
+                    "medical_intake": _intake_metadata(intake, planner_reviewed=False),
+                    "planner_used_for_intake": False,
                     "current_intent": "symptom_description",
                     "medical_lead_status": _derive_medical_lead_status(
                         lead_status, history, message
