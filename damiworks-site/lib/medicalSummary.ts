@@ -50,3 +50,14 @@ export function normalizeComplaint(raw: string): string {
   for (const [re, ru] of SYMPTOM_TERMS) text = text.replace(re, ru)
   return text
 }
+
+// Never guess a specialty from raw chat text — the backend is the single
+// source of truth (it now scans only its own committed-routing "к <specialty>"
+// phrasing, never generic text). If the backend hasn't established one yet,
+// show '—' rather than pattern-matching the whole conversation, which risked
+// the same false-positive class of bug the backend fix addresses (e.g. a
+// generic services-list message containing many specialty words).
+export function detectSpecialty(backendSpecialty?: string | null): string {
+  if (backendSpecialty && backendSpecialty !== 'unknown') return normalizeSpecialty(backendSpecialty)
+  return '—'
+}

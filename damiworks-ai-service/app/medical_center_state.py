@@ -418,6 +418,21 @@ _CONFIRMED_SLOT_RE = re.compile(
     r"(послезавтра|завтра|сегодня)\s+(\d{1,2}:\d{2})\s+к\b",
     re.IGNORECASE,
 )
+# The system's OWN committed-routing/booking text always names a specialty right
+# after "к"/"ко" ("к терапевту", "К ЛОРу", "к травматологу-ортопеду" — see
+# _CONFIRMED_SLOT_RE above and every offer/confirm string in medical_center_demo.py
+# / medical_center_routing.py). Gating on this pattern, AND scanning only the
+# assistant's own messages, avoids two failure modes: (1) picking up a specialty
+# FIELD name that merely appears inside a generic sentence like a services list
+# (e.g. "терапевт, педиатр, кардиолог..." previously misread as a chosen
+# specialty via naive substring search over the whole sentence), and (2) ever
+# treating the user's own objection/negation ("Почему педиатра?", "Только не к
+# педиатру") as if they had chosen that specialty — those are user messages and
+# are never scanned by this function.
+_SPECIALTY_MENTION_RE = re.compile(
+    r"(?:^|[^а-яё])ко?[ \t]+([а-яё][а-яё\-]{2,})",
+    re.IGNORECASE,
+)
 # The assistant's "Правильно понял, хотите X?" clarification proposes a slot.
 _SUGGEST_SLOT_RE = re.compile(
     r"хотите\s+(послезавтра|завтра|сегодня)\s+(?:в\s+)?(\d{1,2}:\d{2})",
@@ -436,15 +451,24 @@ def is_affirmation(text: str) -> bool:
 
 
 def reconstruct_specialty_from_history(history: list[ChatHistoryMessage]) -> str:
-    """Most recent specialty named in the conversation (RU display), or "".
+    """Most recently NAMED specialty in the conversation (RU display), or "".
 
     Fallback for when the current planner call did not fill specialty (e.g. an
-    LLM timeout) — the deterministic booking flow still needs to know it.
+    LLM timeout) — the deterministic booking flow still needs to know it. Only
+    trusts the ASSISTANT's own prior "к <specialty>" / "ко <specialty>" phrasing
+    — the grammatical pattern the system's own text always uses when a specialty
+    is genuinely established (route/offer/confirm). A generic sentence merely
+    listing services, or the user's own objection/negation, will not match —
+    see module note above on _SPECIALTY_MENTION_RE for why this is both
+    false-positive-safe and negation-safe.
     """
     for msg in reversed(list(history or [])):
-        canonical = normalize_specialty(msg.content or "")
-        if canonical:
-            return specialty_display(canonical)
+        if msg.role != "assistant":
+            continue
+        for word in reversed(_SPECIALTY_MENTION_RE.findall(msg.content or "")):
+            canonical = normalize_specialty(word)
+            if canonical:
+                return specialty_display(canonical)
     return ""
 
 

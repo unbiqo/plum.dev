@@ -2,7 +2,7 @@
 
 import type { DictMedicalSummaryLabels } from '@/lib/i18n'
 import type { MedicalMessage, MedicalBackendState } from '@/components/MedicalCenterChat'
-import { SPECIALTY_PATTERNS, normalizeSpecialty, normalizeComplaint } from '@/lib/medicalSummary'
+import { detectSpecialty, normalizeComplaint } from '@/lib/medicalSummary'
 
 type Props = {
   messages: MedicalMessage[]
@@ -11,17 +11,9 @@ type Props = {
 }
 
 // ---------------------------------------------------------------------------
-// Backend-aware detectors — prefer backend state, fall back to regex on messages
+// Backend-aware detectors — the backend is the source of truth; specialty
+// detection lives in lib/medicalSummary.ts (detectSpecialty) for testability.
 // ---------------------------------------------------------------------------
-
-function detectSpecialty(messages: MedicalMessage[], backendSpecialty?: string | null): string {
-  if (backendSpecialty && backendSpecialty !== 'unknown') return normalizeSpecialty(backendSpecialty)
-  const all = messages.map((m) => m.text).join(' ')
-  for (const [re, label] of SPECIALTY_PATTERNS) {
-    if (re.test(all)) return label
-  }
-  return '—'
-}
 
 function detectComplaint(messages: MedicalMessage[], backendComplaint?: string | null): string {
   if (backendComplaint) return normalizeComplaint(backendComplaint)
@@ -93,7 +85,7 @@ const _DOT_COLOR: Record<ConvStatus, string> = {
 }
 
 export default function MedicalCenterSummaryPanel({ messages, dict, backendState }: Props) {
-  const specialty = detectSpecialty(messages, backendState?.specialty)
+  const specialty = detectSpecialty(backendState?.specialty)
   const complaint = detectComplaint(messages, backendState?.symptomsOrGoal)
   const time = detectTime(messages, backendState?.selectedSlot || backendState?.preferredTime)
 

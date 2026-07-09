@@ -43,6 +43,7 @@ from app.medical_center_state import (
     extract_contact,
     looks_like_contact,
     looks_like_invalid_phone,
+    reconstruct_specialty_from_history,
 )
 from app.medical_center_writer import build_turn_plan
 from app.schemas import ChatHistoryMessage, ChatRequest
@@ -1382,3 +1383,71 @@ def test_contact_aware_fallback_does_not_reask_contact() -> None:
     for intent in ("contact", "wants_booking", "ask_price", "smalltalk"):
         fb = build_safe_fallback(_default_planner(current_intent=intent), state)
         assert "оставьте" not in fb.casefold(), intent
+
+
+# ---------------------------------------------------------------------------
+# False specialty lock: reconstruction must ignore generic text and user
+# negation, trusting only the assistant's own "к <specialty>" commitments.
+# ---------------------------------------------------------------------------
+
+def test_reconstruct_specialty_ignores_services_list_but_trusts_assistant_k_phrasing() -> None:
+    services_list = [
+        _msg("user", "Какие услуги предоставляете"),
+        _msg("assistant",
+             "Мы принимаем терапию, педиатрию, кардиологию, эндокринологию, "
+             "гастроэнтерологию, неврологию, ЛОР, дерматологию, гинекологию, "
+             "урологию, офтальмологию и стоматологию."),
+    ]
+    assert reconstruct_specialty_from_history(services_list) == ""
+
+    services_list_nominative = [
+        _msg("assistant",
+             "Направления: терапевт, педиатр, кардиолог, эндокринолог, "
+             "гастроэнтеролог, невролог, ЛОР, дерматолог, гинеколог, уролог, "
+             "офтальмолог, стоматолог, травматолог-ортопед, ревматолог."),
+    ]
+    assert reconstruct_specialty_from_history(services_list_nominative) == ""
+
+    lor_history = [_msg("assistant", "К ЛОРу есть ближайшие окна: завтра 11:00.")]
+    assert reconstruct_specialty_from_history(lor_history) == "ЛОР"
+
+    ortho_history = [_msg("assistant", "Отлично, завтра 12:30 к травматологу-ортопеду.")]
+    assert reconstruct_specialty_from_history(ortho_history) == "травматолог-ортопед"
+
+
+def test_reconstruct_specialty_ignores_user_negation_and_objection() -> None:
+    # User pushback/negation must NEVER lock a specialty — never even inspected,
+    # since only assistant messages are scanned.
+    assert reconstruct_specialty_from_history(
+        [_msg("user", "Только не к педиатру, пожалуйста.")]
+    ) == ""
+    assert reconstruct_specialty_from_history(
+        [_msg("user", "Почему вы отправляете меня к педиатру?")]
+    ) == ""
+    assert reconstruct_specialty_from_history(
+        [_msg("user", "С чего вы решили, что мне к педиатру?")]
+    ) == ""
+
+
+def test_generic_services_answer_then_affirmation_does_not_lock_pediatrician() -> None:
+    history = [
+        _msg("user", "Какие услуги предоставляете"),
+        _msg("assistant",
+             "Мы принимаем терапию, педиатрию, кардиологию, эндокринологию, "
+             "гастроэнтерологию, неврологию, ЛОР, дерматологию, гинекологию, "
+             "урологию, офтальмологию и стоматологию."),
+        _msg("user", "Врачи хорошие?"),
+        _msg("assistant",
+             "Да, у нас опытные врачи. Я могу помочь вам подобрать специалиста "
+             "и записаться на приём."),
+    ]
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="smalltalk"),
+        writer_texts=["Что вас беспокоит? Тогда подскажу подходящего врача."],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("Давайте", history=history)))
+    low = resp.answer.casefold()
+    assert "педиатр" not in low
+    assert "терапевт" not in low
+    assert resp.metadata["state"]["specialty"] == ""
+    assert resp.metadata["conversation_status"] != "slots_offered"

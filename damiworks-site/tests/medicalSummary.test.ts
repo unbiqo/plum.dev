@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import { getDict, type Locale } from '../lib/i18n'
-import { normalizeSpecialty, normalizeComplaint } from '../lib/medicalSummary'
+import { normalizeSpecialty, normalizeComplaint, detectSpecialty } from '../lib/medicalSummary'
 
 function pass(name: string) {
   console.log(`  ✓ ${name}`)
@@ -53,6 +53,17 @@ assert.equal(ru.booking_created, 'Запись создана')
 assert.equal(ru.slots_offered, 'Предложены окна')
 assert.equal(ru.awaiting_contact, 'Ожидает контакт')
 pass('status labels are Russian')
+
+// detectSpecialty never guesses from raw chat text — backend is the only
+// source of truth. Even if a generic services-list message (old or new KB
+// phrasing) is around, an empty/unknown backend specialty must render '—'.
+assert.equal(detectSpecialty(undefined), '—')
+assert.equal(detectSpecialty(null), '—')
+assert.equal(detectSpecialty('unknown'), '—')
+assert.equal(detectSpecialty(''), '—')
+assert.equal(detectSpecialty('терапевт'), 'Терапевт')
+assert.equal(detectSpecialty('ортопед'), 'Травматолог-ортопед')
+pass('detectSpecialty shows — instead of guessing when backend has no specialty')
 
 // Demo order remains DamiWorks -> Medical Center -> English School.
 function visibleOrder(locale: Locale): string[] {
