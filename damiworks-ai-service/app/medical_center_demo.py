@@ -238,21 +238,27 @@ def _resolve_booking_turn(
             "booking_created",
         )
 
+    already_asked = _assistant_asked_for_contact(history)
+    slot_picked_now = resolve_slot(state.specialty, message)[0] == "matched"
+
     if not state.contact:
-        if _assistant_asked_for_contact(history):
-            # We already asked and the reply had no usable contact.
-            return (INVALID_CONTACT_ANSWER, "awaiting_contact")
-        ask_fields: list[str] = []
-        if not name:
-            ask_fields.append("имя")
-        if not state.is_known("age"):
-            ask_fields.append("возраст")
-        ask_fields.append("WhatsApp или телефон")
-        return (
-            f"Отлично, {state.selected_slot} к {dative}.\n\n"
-            f"Для записи оставьте, пожалуйста, {', '.join(ask_fields)}.",
-            "awaiting_contact",
-        )
+        # Acknowledge a (re)chosen slot and (re)ask for the missing fields —
+        # never treat a slot change as a failed contact. "Не вижу контакт" is
+        # only for a reply that was supposed to be the contact but wasn't.
+        if slot_picked_now or not already_asked:
+            ask_fields: list[str] = []
+            if not name:
+                ask_fields.append("имя")
+            if not state.is_known("age"):
+                ask_fields.append("возраст")
+            ask_fields.append("WhatsApp или телефон")
+            lead = "Хорошо, тогда" if already_asked else "Отлично,"
+            return (
+                f"{lead} {state.selected_slot} к {dative}.\n\n"
+                f"Для записи оставьте, пожалуйста, {', '.join(ask_fields)}.",
+                "awaiting_contact",
+            )
+        return (INVALID_CONTACT_ANSWER, "awaiting_contact")
 
     # Contact is on file but we still need a name to finalize.
     return (

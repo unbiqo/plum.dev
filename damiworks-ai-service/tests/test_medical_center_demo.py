@@ -838,8 +838,10 @@ def _booking_history() -> list:
 
 def test_symptom_turn_plan_invites_slots() -> None:
     state = ConversationState(specialty="терапевт", greeting_already_sent=True)
-    plan = build_turn_plan(state, _default_planner(current_intent="symptom_description"))
-    assert "покажу ближайшие окна" in plan.casefold()
+    plan = build_turn_plan(state, _default_planner(current_intent="symptom_description")).casefold()
+    assert "приглашение к записи" in plan
+    # The plan must steer the writer to rephrase rather than repeat verbatim.
+    assert "перефраз" in plan
 
 
 def test_specialty_normalized_to_russian() -> None:
@@ -1036,6 +1038,25 @@ def test_symptom_normalization_sneezing_redness() -> None:
     out = normalize_symptom_terms("redness and sneezing")
     assert "покраснение" in out and "чихание" in out
     assert "redness" not in out.lower() and "sneezing" not in out.lower()
+
+
+def test_reschedule_after_contact_ask_is_not_failed_contact() -> None:
+    # User picked завтра 16:00, we asked for contact, then they change to
+    # "послезавтра днём" -> must acknowledge the new slot, NOT say "Не вижу контакт".
+    history = _lor_offer_history() + [
+        _msg("user", "в 4 завтра"),
+        _msg("assistant", "Отлично, завтра 16:00 к ЛОРу.\n\nДля записи оставьте, пожалуйста, имя, возраст, WhatsApp или телефон."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="wants_booking"))
+    resp = _run(handle_medical_center_chat(
+        gem, _request("а нет, давайте послезавтра днём", history=history)
+    ))
+    low = resp.answer.casefold()
+    assert "не вижу контакт" not in low
+    assert "послезавтра 12:00 к лору" in low
+    assert "оставьте" in low  # re-asks for the missing contact
+    assert resp.metadata["state"]["selected_slot"] == "послезавтра 12:00"
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
 
 
 def test_build_state_sticky_emergency_from_history() -> None:
