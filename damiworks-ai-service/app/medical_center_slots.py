@@ -30,6 +30,8 @@ _SPECIALTY_STEMS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("уролог", ("уролог", "urolog")),
     ("офтальмолог", ("офтальмолог", "окулист", "ophthalmolog", "oculist")),
     ("стоматолог", ("стоматолог", "dentist", "dental")),
+    ("травматолог-ортопед", ("травматолог", "ортопед", "orthoped", "traumatolog")),
+    ("ревматолог", ("ревматолог", "rheumatolog")),
 )
 
 # How each canonical specialty is shown in the RU summary panel / answers.
@@ -46,6 +48,8 @@ _SPECIALTY_DISPLAY: dict[str, str] = {
     "уролог": "уролог",
     "офтальмолог": "офтальмолог",
     "стоматолог": "стоматолог",
+    "травматолог-ортопед": "травматолог-ортопед",
+    "ревматолог": "ревматолог",
 }
 
 
@@ -81,13 +85,15 @@ def specialty_display(raw: str | None) -> str:
 def specialty_dative(raw: str | None) -> str:
     """Dative RU form for 'к <specialist>' phrasing (терапевт -> терапевту).
 
-    Every KB specialty ends in a consonant, so appending 'у' is correct for all
-    of them (including ЛОР -> ЛОРу). Unknown values are returned unchanged.
+    Every KB specialty part ends in a consonant, so appending 'у' is correct
+    (ЛОР -> ЛОРу). Hyphenated names decline both parts
+    (травматолог-ортопед -> травматологу-ортопеду). Unknown text is unchanged.
     """
     canonical = normalize_specialty(raw)
     if not canonical:
         return (raw or "").strip()
-    return _SPECIALTY_DISPLAY[canonical] + "у"
+    display = _SPECIALTY_DISPLAY[canonical]
+    return "-".join(part + "у" for part in display.split("-"))
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +138,8 @@ _DEMO_SLOTS: dict[str, tuple[tuple[str, str], ...]] = {
     "кардиолог": (("завтра", "11:30"), ("послезавтра", "15:00")),
     "невролог": (("завтра", "16:00"), ("послезавтра", "13:00")),
     "стоматолог": (("сегодня", "17:00"), ("завтра", "14:00"), ("послезавтра", "12:30")),
+    "травматолог-ортопед": (("завтра", "12:30"), ("завтра", "17:00"), ("послезавтра", "10:30")),
+    "ревматолог": (("завтра", "13:30"), ("послезавтра", "15:30")),
 }
 _DEFAULT_SLOTS: tuple[tuple[str, str], ...] = (
     ("завтра", "11:00"),

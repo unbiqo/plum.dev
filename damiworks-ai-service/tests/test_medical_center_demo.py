@@ -27,6 +27,7 @@ from app.medical_center_guardrails import (
     validate_answer,
 )
 from app.medical_center_kb import get_full_kb_context
+from app.medical_center_routing import route_symptom
 from app.medical_center_slots import normalize_symptom_terms, resolve_slot
 from app.medical_center_planner import (
     reclassify_discount_question,
@@ -1164,6 +1165,81 @@ def test_no_demo_wording_in_slot_offer() -> None:
     low = resp.answer.casefold()
     assert "ближайшие окна" in low
     assert "демо" not in low and "тестов" not in low
+
+
+# ---------------------------------------------------------------------------
+# Deterministic symptom -> specialist routing (knee/joint/rheum/nerve)
+# ---------------------------------------------------------------------------
+
+def test_route_symptom_table() -> None:
+    assert route_symptom("колено болит уже месяц").specialty == "травматолог-ортопед"
+    assert route_symptom("болит колено").specialty == "травматолог-ортопед"
+    assert route_symptom("колено опухло").specialty == "травматолог-ортопед"
+    assert route_symptom("болит плечо").specialty == "травматолог-ортопед"
+    assert route_symptom("болят колени и кисти, утром скованность").specialty == "ревматолог"
+    assert route_symptom("боль идёт от поясницы в ногу, немеет стопа").specialty == "невролог"
+    # Plain knee never goes to neurologist; unrelated complaints defer to the LLM.
+    assert route_symptom("болит колено") .specialty != "невролог"
+    assert route_symptom("болит живот") is None
+    assert route_symptom("сколько стоит приём ортопеда") is None
+
+
+def test_kb_has_orthopedist_and_rheumatologist() -> None:
+    kb = get_full_kb_context()
+    assert "травматолог-ортопед" in kb.casefold()
+    assert "Баймагамбетов" in kb and "Ермекович" in kb   # doctor + patronymic
+    assert "ревматолог" in kb.casefold()
+    assert "Досжанова" in kb and "Маратовна" in kb
+
+
+def test_knee_pain_routes_to_orthopedist_deterministically() -> None:
+    gem = FakeGemini(planner=_default_planner())
+    resp = _run(handle_medical_center_chat(gem, _request("здравствуйте, колено болит уже месяц")))
+    low = resp.answer.casefold()
+    assert "травматолог" in low
+    assert "невролог" not in low                       # NOT the default for knee
+    assert "окно" in low and "травматолог" in low       # CTA to that specialty
+    assert "у вас" not in low or "артроз" not in low    # no diagnosis
+    assert "демо" not in low
+    assert gem.planner_calls == 0 and gem.writer_calls == 0  # deterministic
+    assert resp.metadata["state"]["specialty"] == "травматолог-ортопед"
+    assert resp.metadata["state"]["symptoms_or_goal"] == "боль в колене"
+    assert resp.metadata["conversation_status"] == "doctor_selection"
+
+
+def test_knee_routing_then_offers_orthopedist_windows() -> None:
+    history = [
+        _msg("user", "колено болит уже месяц"),
+        _msg("assistant", "Если беспокоит колено, лучше начать с травматолога-ортопеда — он оценит сустав. Могу подобрать ближайшее окно к травматологу-ортопеду?"),
+    ]
+    gem = FakeGemini(planner=_default_planner(current_intent="smalltalk", slots={"specialty": "травматолог-ортопед"}))
+    resp = _run(handle_medical_center_chat(gem, _request("давайте", history=history)))
+    low = resp.answer.casefold()
+    assert "ближайшие окна" in low
+    assert "12:30" in low and "17:00" in low          # controlled ortho slots
+    assert "демо" not in low
+    assert resp.metadata["conversation_status"] == "slots_offered"
+
+
+def test_rheumatology_and_nerve_routing_deterministic() -> None:
+    gem = FakeGemini(planner=_default_planner())
+    r1 = _run(handle_medical_center_chat(gem, _request("болят колени и кисти, по утрам скованность")))
+    assert r1.metadata["state"]["specialty"] == "ревматолог"
+    assert "ревматолог" in r1.answer.casefold()
+    gem2 = FakeGemini(planner=_default_planner())
+    r2 = _run(handle_medical_center_chat(gem2, _request("боль идёт от поясницы в ногу, немеет стопа")))
+    assert r2.metadata["state"]["specialty"] == "невролог"
+    assert "невролог" in r2.answer.casefold()
+
+
+def test_joint_trauma_red_flag_preempts_routing() -> None:
+    gem = FakeGemini()
+    resp = _run(handle_medical_center_chat(gem, _request("сильно ударил колено, не могу наступить на ногу")))
+    assert resp.answer == EMERGENCY_ANSWER
+    assert gem.planner_calls == 0
+    assert "травматолог" not in resp.answer.casefold()  # urgent care, not routing
+    # Plain swelling must NOT be an emergency.
+    assert detect_red_flags("колено опухло") is None
 
 
 def test_build_state_sticky_emergency_from_history() -> None:

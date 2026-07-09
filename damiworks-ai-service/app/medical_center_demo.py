@@ -36,6 +36,7 @@ from .medical_center_planner import (
     reclassify_discount_question,
     reclassify_medical_advice_question,
 )
+from .medical_center_routing import route_symptom
 from .medical_center_slots import (
     format_slots,
     resolve_slot,
@@ -590,6 +591,42 @@ async def handle_medical_center_chat(
                         "conversation_status_reason": f"address_short_circuit booked={booked}",
                     },
                 )
+
+        # ---- SYMPTOM ROUTING SHORT-CIRCUIT (deterministic, before the planner) ----
+        # Obvious musculoskeletal / nerve complaints route to the right starting
+        # specialist warmly and consistently (knee -> травматолог-ортопед), no
+        # LLM guessing. Only on a fresh symptom turn — never mid-booking.
+        routing = route_symptom(message)
+        if (
+            routing is not None
+            and not _booking_confirmation_sent(history)
+            and not _assistant_in_slot_selection(history)
+            and not _assistant_asked_for_contact(history)
+        ):
+            state.specialty = routing.specialty
+            state.symptoms_or_goal = routing.complaint
+            lead_status = _derive_lead_status(state, history)
+            return ChatResponse(
+                route=Route.general,
+                routes=[Route.general],
+                answer=f"{routing.explanation}\n\n{routing.cta}",
+                checkout=False,
+                lead_status=lead_status,
+                metadata={
+                    "medical_center_demo": True,
+                    "planner_llm_used": False,
+                    "writer_llm_used": False,
+                    "symptom_routing": routing.specialty,
+                    "current_intent": "symptom_description",
+                    "medical_lead_status": _derive_medical_lead_status(
+                        lead_status, history, message
+                    ),
+                    "state": state.to_metadata(),
+                    "conversation_status": "doctor_selection",
+                    "conversation_status_label": _CONV_STATUS_LABELS["doctor_selection"],
+                    "conversation_status_reason": f"routed to {routing.specialty}",
+                },
+            )
 
         # ---- planner (JSON, temp 0) ----
         try:

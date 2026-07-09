@@ -16,6 +16,8 @@ export const SPECIALTY_PATTERNS: Array<[RegExp, string]> = [
   [/уролог|urolog/i, 'Уролог'],
   [/офтальмолог|окулист|ophthalmolog|oculist/i, 'Офтальмолог'],
   [/стоматолог|dentist/i, 'Стоматолог'],
+  [/травматолог|ортопед|orthoped|traumatolog/i, 'Травматолог-ортопед'],
+  [/ревматолог|rheumatolog/i, 'Ревматолог'],
   [/узи/i, 'УЗИ'],
   [/анализ/i, 'Анализы'],
 ]

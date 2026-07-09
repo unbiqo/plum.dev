@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 
+from .medical_center_routing import route_symptom
 from .medical_center_slots import (
     match_slot,
     normalize_specialty,
@@ -157,6 +158,16 @@ _RED_FLAG_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"температур\w*\s+(?:выше\s+)?(?:39[.,]5|40|41)[^%]|ригидность\s+затылка",
         re.IGNORECASE,
     )),
+    # Acute joint/limb trauma that needs urgent care (fracture/infection signs).
+    # Deliberately narrow — plain «колено опухло» must NOT trigger.
+    ("joint_trauma", re.compile(
+        r"не\s+могу\s+(?:наступить|встать)\s+на\s+ногу|невозможно\s+наступить"
+        r"|деформ\w+\s+(?:сустав|колен|ног|стоп)|(?:сустав|колен|нога|стопа)\w*\s+деформ"
+        r"|сильн\w+\s+от[её]к\w*\s+после\s+(?:травм|удар|падени)"
+        r"|(?:сустав|колен)\w*\s+горяч\w+[^.!?]{0,40}температур"
+        r"|температур\w*[^.!?]{0,40}(?:сустав|колен)\w*\s+горяч",
+        re.IGNORECASE,
+    )),
 )
 
 
@@ -202,8 +213,13 @@ _SYMPTOM_SPECIALTY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 def detect_symptom_specialty(text: str) -> str | None:
     """Return a routing phrase (which specialist usually handles this), or None.
 
-    Routing only — never a diagnosis. First match wins.
+    Routing only — never a diagnosis. Musculoskeletal / joint / nerve complaints
+    go through the deterministic routing table first (so knee pain lands on
+    травматолог-ортопед, not the LLM's guess); the rest use the local patterns.
     """
+    routed = route_symptom(text)
+    if routed:
+        return routed.specialty
     t = text or ""
     for pattern, specialty in _SYMPTOM_SPECIALTY_PATTERNS:
         if pattern.search(t):

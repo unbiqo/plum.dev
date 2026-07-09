@@ -23,7 +23,11 @@ assert.equal(normalizeSpecialty('терапевт'), 'Терапевт')
 assert.equal(normalizeSpecialty('ENT'), 'ЛОР')
 assert.equal(normalizeSpecialty('otolaryngologist'), 'ЛОР')
 assert.equal(normalizeSpecialty('lor'), 'ЛОР')
-pass('specialty labels normalize to Russian (incl. ENT -> ЛОР)')
+// Musculoskeletal specialists render in Russian.
+assert.equal(normalizeSpecialty('травматолог-ортопед'), 'Травматолог-ортопед')
+assert.equal(normalizeSpecialty('ортопед'), 'Травматолог-ортопед')
+assert.equal(normalizeSpecialty('ревматолог'), 'Ревматолог')
+pass('specialty labels normalize to Russian (incl. ENT -> ЛОР, ортопед, ревматолог)')
 
 // Symptom EN -> RU.
 const complaint = normalizeComplaint('headache and fever')
