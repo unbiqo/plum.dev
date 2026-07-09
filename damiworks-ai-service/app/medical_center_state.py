@@ -395,11 +395,8 @@ def build_conversation_state(
 
 # The demo server is stateless (the frontend replays the whole history each
 # turn), so specialty and the picked slot must be reconstructed from history.
-# The assistant always echoes a picked slot as "<день> ЧЧ:ММ к <врачу>"
-# («Отлично, завтра 16:00 к ЛОРу», «Хорошо, тогда послезавтра 12:00 к ЛОРу»,
-# «Записали вас на … к …»). The multi-slot offer never has "к" after a time.
 _CONFIRMED_SLOT_RE = re.compile(
-    r"(послезавтра|завтра|сегодня)\s+(\d{1,2}:\d{2})\s+к\b",
+    r"(?:записали вас на|отлично,)\s+(послезавтра|завтра|сегодня)\s+(\d{1,2}:\d{2})",
     re.IGNORECASE,
 )
 # The assistant's "Правильно понял, хотите X?" clarification proposes a slot.
