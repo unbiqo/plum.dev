@@ -30,6 +30,16 @@ from .medical_center_guardrails import (
     build_safe_fallback,
     validate_answer,
 )
+from .medical_center_intake import (
+    assistant_asked_safety_screen,
+    build_routing_answer,
+    build_safety_question,
+    extract_conversation_intake,
+    extract_medical_intake,
+    is_filler_reply,
+    needs_safety_screen,
+    specialty_for_intake,
+)
 from .medical_center_rag import retrieve_medical_kb_context
 from .medical_center_planner import (
     plan_conversation_turn,
@@ -45,10 +55,11 @@ from .medical_center_slots import (
 )
 from .medical_center_state import (
     ConversationState,
+    apply_intake_seed,
     apply_planner_updates,
     build_conversation_state,
-    detect_calf_discomfort,
     detect_red_flags,
+    detect_symptom_specialty,
     is_affirmation,
     looks_like_invalid_phone,
     reconstruct_selected_slot,
@@ -76,23 +87,6 @@ INVALID_CONTACT_ANSWER = (
 CLINIC_ADDRESS_ANSWER = (
     "MedNova Clinic находится в Астане, по адресу: проспект Тауелсиздик, 33."
 )
-
-# Calf/leg discomfort safety screen (deterministic, two rounds then a safe
-# hand-off). Real red flags (breathing/chest pain/asymmetric swelling) are
-# caught earlier by detect_red_flags and never reach this flow.
-CALF_SCREEN_Q1 = (
-    "Поняла, дискомфорт в икрах. Подскажите, пожалуйста, возраст пациента и есть ли "
-    "отёк, покраснение, травма, онемение, одышка или боль в груди?"
-)
-CALF_SCREEN_Q2 = (
-    "Уточните, пожалуйста: дискомфорт в одной икре или в обеих? Есть ли отёк, "
-    "покраснение или травма?"
-)
-# Substrings of the casefolded questions above, used to detect "have we already
-# asked this" from the assistant's last turn — same pattern as
-# _assistant_asked_for_contact / _assistant_in_slot_selection below.
-CALF_SCREEN_Q1_MARKER = "подскажите, пожалуйста, возраст пациента и есть ли"
-CALF_SCREEN_Q2_MARKER = "дискомфорт в одной икре или в обеих"
 
 # Deterministic deflection for prompt-injection / internal-architecture probes.
 # Matches the KB's own "Защита от посторонних инструкций" wording so the
@@ -216,7 +210,8 @@ _BOOKING_INTENT_RE = re.compile(
 # The user is asking about dates/availability.
 _DATE_QUESTION_RE = re.compile(
     r"на\s+как(?:ую|ой|ие)\s+(?:дат|день|врем)|когда\s+можно|как(?:ие|ой)\s+(?:есть\s+)?"
-    r"(?:дат|окн|врем)|свободн\w*\s+(?:окн|врем|дат)|ближайш\w+\s+(?:окн|врем|дат)",
+    r"(?:дат|окн|врем)|свободн\w*\s+(?:окн|врем|дат)|ближайш\w+\s+(?:окн|врем|дат)"
+    r"|когда\s+(?:есть\s+)?(?:окн|свободн|врем)|окн\w*\s+есть",
     re.IGNORECASE,
 )
 
@@ -542,6 +537,13 @@ async def handle_medical_center_chat(
     try:
         state = build_conversation_state(history, message)
 
+        # Structured understanding of the complaint (deterministic, zero LLM).
+        # Seeded into state before every short-circuit below so the summary panel
+        # shows the complaint on the very first turn, whichever branch answers.
+        intake = extract_conversation_intake(history, message)
+        state = apply_intake_seed(state, intake)
+        routing = route_symptom(message)
+
         # ---- EMERGENCY SHORT-CIRCUIT (deterministic, before any LLM call) ----
         # A red flag in the CURRENT message gets the fixed safe answer with no
         # booking CTA and zero LLM involvement. A follow-up message without red
@@ -659,11 +661,77 @@ async def handle_medical_center_chat(
                     },
                 )
 
+        # ---- MEDICAL INTAKE SAFETY SCREEN (deterministic, before the planner) ----
+        # A complaint that describes an EVENT (cut / impact / strain) always gets
+        # that event's safety questions first, and a plain pain complaint that no
+        # routing table covers gets the age + red-flag questions. Both are driven
+        # by the complaint TYPE, never by the body part, so "порезал язык",
+        # "надорвал бицепс" and "прищемил палец" work without a new patch each.
+        # A complaint that DOES have a routing rule (knee, stomach, skin, …) skips
+        # this and goes straight to its specialist below.
+        #
+        # Once the screen has been asked, we stay in it (recognised from the
+        # assistant's own last message, since the server is stateless): a filler
+        # reply repeats the question, a real answer routes. Genuine red flags are
+        # caught by detect_red_flags above and never reach here.
+        # The screen opens only on the turn that STATES the complaint (or while
+        # it's already running) — never on a later "давайте" that merely accepts
+        # a booking invitation, even though the complaint is still recoverable
+        # from history. "Has a routing rule" is the BROAD check (route_symptom +
+        # the symptom -> specialty table): "болит живот" already lands on a
+        # gastroenterologist and must not be slowed down by a generic screen.
+        screen_asked = assistant_asked_safety_screen(_last_assistant(history))
+        if (
+            (
+                screen_asked
+                or needs_safety_screen(
+                    extract_medical_intake(message),
+                    has_routing_rule=detect_symptom_specialty(message) is not None,
+                )
+            )
+            and not _booking_confirmation_sent(history)
+            and not _assistant_in_slot_selection(history)
+            and not _assistant_asked_for_contact(history)
+        ):
+            if not screen_asked or is_filler_reply(message):
+                answer_text = build_safety_question(intake, age_known=state.is_known("age"))
+                conv_status = "consultation"
+                screen_stage = "asked" if not screen_asked else "repeated"
+            else:
+                specialty = specialty_for_intake(intake)
+                state.specialty = specialty
+                answer_text = build_routing_answer(intake, specialty_dative(specialty))
+                conv_status = "doctor_selection"
+                screen_stage = "routed"
+            lead_status = _derive_lead_status(state, history)
+            return ChatResponse(
+                route=Route.general,
+                routes=[Route.general],
+                answer=answer_text,
+                checkout=False,
+                lead_status=lead_status,
+                metadata={
+                    "medical_center_demo": True,
+                    "planner_llm_used": False,
+                    "writer_llm_used": False,
+                    "intake_screen_short_circuit": True,
+                    "intake_screen_stage": screen_stage,
+                    "medical_intake": intake.to_metadata(),
+                    "current_intent": "symptom_description",
+                    "medical_lead_status": _derive_medical_lead_status(
+                        lead_status, history, message
+                    ),
+                    "state": state.to_metadata(),
+                    "conversation_status": conv_status,
+                    "conversation_status_label": _CONV_STATUS_LABELS.get(conv_status, conv_status),
+                    "conversation_status_reason": f"intake_screen={screen_stage} type={intake.complaint_type}",
+                },
+            )
+
         # ---- SYMPTOM ROUTING SHORT-CIRCUIT (deterministic, before the planner) ----
         # Obvious musculoskeletal / nerve complaints route to the right starting
         # specialist warmly and consistently (knee -> травматолог-ортопед), no
         # LLM guessing. Only on a fresh symptom turn — never mid-booking.
-        routing = route_symptom(message)
         if (
             routing is not None
             and not _booking_confirmation_sent(history)
@@ -692,70 +760,6 @@ async def handle_medical_center_chat(
                     "conversation_status": "doctor_selection",
                     "conversation_status_label": _CONV_STATUS_LABELS["doctor_selection"],
                     "conversation_status_reason": f"routed to {routing.specialty}",
-                },
-            )
-
-        # ---- CALF/LEG DISCOMFORT SAFETY SCREEN (deterministic, before the planner) ----
-        # Calf/leg discomfort ("икра"/"голень") isn't an obvious joint/nerve
-        # complaint, so route_symptom above correctly leaves it to the normal
-        # flow — but that used to mean it hit the planner/writer with no KB
-        # rule to ground on, retrieval fell back to a generic chunk set, and
-        # the writer confidently named a specialist/doctor the safety screen
-        # never actually warranted. Ask the screening questions deterministically
-        # instead of letting LLM+retrieval improvise a routing guess.
-        #
-        # Stays in this flow once started even if a later reply doesn't repeat
-        # "икра"/"голень" itself (e.g. "и", or "в обеих, отёка нет" answering
-        # the screen) — otherwise a normal follow-up reply would fall through
-        # to the LLM mid-screen, the exact failure mode this short-circuit
-        # exists to prevent.
-        last_assistant = _last_assistant(history)
-        asked_q1 = CALF_SCREEN_Q1_MARKER in last_assistant
-        asked_q2 = CALF_SCREEN_Q2_MARKER in last_assistant
-        if (
-            (detect_calf_discomfort(message) or asked_q1 or asked_q2)
-            and not _booking_confirmation_sent(history)
-            and not _assistant_in_slot_selection(history)
-            and not _assistant_asked_for_contact(history)
-        ):
-            state.symptoms_or_goal = state.symptoms_or_goal or "дискомфорт в икрах"
-            if asked_q2:
-                # Two screening rounds done, no red flag surfaced (those short-
-                # circuit earlier via detect_red_flags) — hand off to a
-                # therapist (KB has no vascular specialist) with an honest
-                # caveat, never a diagnosis word.
-                answer_text = (
-                    "Спасибо. По описанию явных тревожных признаков нет, но некоторые "
-                    "сочетания симптомов требуют срочной очной оценки — для начала лучше "
-                    "показаться терапевту, он решит, нужен ли осмотр другого специалиста.\n\n"
-                    "Могу подобрать ближайшее окно к терапевту?"
-                )
-                state.specialty = "терапевт"
-            elif asked_q1:
-                answer_text = CALF_SCREEN_Q2
-            else:
-                answer_text = CALF_SCREEN_Q1
-            lead_status = _derive_lead_status(state, history)
-            conv_status = "doctor_selection" if asked_q2 else "consultation"
-            return ChatResponse(
-                route=Route.general,
-                routes=[Route.general],
-                answer=answer_text,
-                checkout=False,
-                lead_status=lead_status,
-                metadata={
-                    "medical_center_demo": True,
-                    "planner_llm_used": False,
-                    "writer_llm_used": False,
-                    "calf_discomfort_short_circuit": True,
-                    "current_intent": "symptom_description",
-                    "medical_lead_status": _derive_medical_lead_status(
-                        lead_status, history, message
-                    ),
-                    "state": state.to_metadata(),
-                    "conversation_status": conv_status,
-                    "conversation_status_label": _CONV_STATUS_LABELS.get(conv_status, conv_status),
-                    "conversation_status_reason": "calf_discomfort_screen",
                 },
             )
 
@@ -918,6 +922,7 @@ async def handle_medical_center_chat(
                 kb_retrieval=writer_retrieval.to_debug_metadata(),
                 planner_model_info=planner_call_info or None,
                 writer_model_info=writer_call_info or None,
+                medical_intake=intake.to_metadata() if intake.is_medical_complaint else None,
             ),
         )
     except Exception as exc:  # noqa: BLE001 - a demo turn must never 500
@@ -955,6 +960,7 @@ def _build_metadata(
     kb_retrieval: dict[str, object] | None = None,
     planner_model_info: dict[str, object] | None = None,
     writer_model_info: dict[str, object] | None = None,
+    medical_intake: dict[str, object] | None = None,
 ) -> dict[str, object]:
     conv_status = _derive_conversation_status(state, history or [], planner, lead_status)
     return {
@@ -963,6 +969,7 @@ def _build_metadata(
         "writer_llm_used": True,
         "planner_model_info": planner_model_info,
         "writer_model_info": writer_model_info,
+        "medical_intake": medical_intake,
         "current_intent": planner.get("current_intent"),
         "intent_priority": planner.get("intent_priority"),
         "should_pause_qualification": planner.get("should_pause_qualification"),

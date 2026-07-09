@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING
 
 from .medical_center_routing import route_symptom
 from .medical_center_slots import (
@@ -27,6 +28,9 @@ from .medical_center_slots import (
     specialty_display,
 )
 from .schemas import ChatHistoryMessage
+
+if TYPE_CHECKING:
+    from .medical_center_intake import MedicalIntake
 
 # ---------------------------------------------------------------------------
 # Deterministic detectors (safety only, NOT conversation drivers)
@@ -171,8 +175,8 @@ _RED_FLAG_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Calf/leg discomfort combined with breathing/chest-pain, or a sudden
     # asymmetric swelling — the classic urgent-care combination. Deliberately
     # narrow: bare calf discomfort alone (no breathing/swelling clue) must NOT
-    # trigger here — it goes through the calf-safety clarification short-circuit
-    # instead (detect_calf_discomfort / medical_center_demo.py).
+    # trigger here — it goes through the generic intake safety screen instead
+    # (medical_center_intake.py / medical_center_demo.py).
     ("leg_swelling_emergency", re.compile(
         r"(?:икр\w*|голен(?!остоп)\w*)[^.!?]{0,60}(?:одышк\w*|тяжело\s+дыш\w*|трудно\s+дыш\w*|боль\w*\s+в\s+груди)"
         r"|(?:одышк\w*|тяжело\s+дыш\w*|трудно\s+дыш\w*|боль\w*\s+в\s+груди)[^.!?]{0,60}(?:икр\w*|голен(?!остоп)\w*)"
@@ -219,21 +223,6 @@ _SYMPTOM_SPECIALTY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"температур|\bорви\b|простуд|кашель|насморк|слабость|ломота", re.IGNORECASE),
      "терапевт (для ребёнка — педиатр)"),
 )
-
-
-# Calf/lower-leg discomfort (икра/голень — muscle, not the ankle joint —
-# "голеностоп" is excluded via the negative lookahead) is deliberately NOT
-# routed straight to a specialist by route_symptom: unlike a joint complaint,
-# it needs a brief safety screen first (one leg or both, swelling, redness,
-# trauma, numbness, breathlessness/chest pain) before any routing suggestion.
-# True red flags (breathing/chest pain/asymmetric swelling combos) are caught
-# earlier by detect_red_flags and never reach this detector.
-_CALF_DISCOMFORT_RE = re.compile(r"икр\w*|голен(?!остоп)\w*", re.IGNORECASE)
-
-
-def detect_calf_discomfort(text: str) -> bool:
-    """True if the message mentions calf/lower-leg discomfort (icra/goleny)."""
-    return bool(_CALF_DISCOMFORT_RE.search(text or ""))
 
 
 def detect_symptom_specialty(text: str) -> str | None:
@@ -358,6 +347,15 @@ class ConversationState:
     specialty: str = ""
     symptoms_or_goal: str = ""
     preferred_time: str = ""
+    # Structured understanding of the complaint (medical_center_intake.py).
+    # Deliberately NOT in SLOT_FIELDS: the planner neither reports nor overwrites
+    # these — they are derived deterministically from the transcript every turn,
+    # so the summary panel keeps showing the complaint even when the planner
+    # returns nothing for symptoms_or_goal.
+    complaint_type: str = ""
+    body_part: str = ""
+    child_case: bool = False
+    self_patient: str = "unknown"  # "true" | "false" | "unknown"
     # The concrete demo slot the user picked (e.g. "завтра 15:30"). Set
     # deterministically from the controlled demo availability, never by the LLM.
     selected_slot: str = ""
@@ -551,6 +549,25 @@ def reconstruct_selected_slot(
         elif pending_suggestion and is_affirmation(message or ""):
             latest = pending_suggestion
     return latest
+
+
+def apply_intake_seed(state: ConversationState, intake: "MedicalIntake") -> ConversationState:
+    """Seed the state with the deterministically understood complaint.
+
+    Runs before the planner, so every turn (including the short-circuits that
+    never call an LLM) carries the complaint into metadata and the summary panel.
+    ``symptoms_or_goal`` is only seeded when empty — a later planner value or a
+    routing rule's own complaint label is more specific and must win.
+    """
+    if not intake.is_medical_complaint:
+        return state
+    if not state.symptoms_or_goal:
+        state.symptoms_or_goal = intake.symptoms_or_goal
+    state.complaint_type = intake.complaint_type
+    state.body_part = intake.body_part
+    state.child_case = intake.child_case
+    state.self_patient = "true" if intake.self_patient else "false"
+    return state
 
 
 def apply_planner_updates(state: ConversationState, planner: dict) -> ConversationState:

@@ -15,8 +15,6 @@ import json
 import pytest
 
 from app.medical_center_demo import (
-    CALF_SCREEN_Q1,
-    CALF_SCREEN_Q2,
     INJECTION_REFUSAL_ANSWER,
     INVALID_CONTACT_ANSWER,
     MEDICAL_CENTER_INSTANCE_ID,
@@ -28,6 +26,11 @@ from app.medical_center_guardrails import (
     kb_doctor_names,
     kb_price_set,
     validate_answer,
+)
+from app.medical_center_intake import (
+    build_safety_question,
+    extract_conversation_intake,
+    extract_medical_intake,
 )
 from app.medical_center_kb import get_full_kb_context
 from app.medical_center_rag import retrieve_medical_kb_context
@@ -42,7 +45,6 @@ from app.medical_center_state import (
     apply_planner_updates,
     build_conversation_state,
     classify_contact,
-    detect_calf_discomfort,
     detect_red_flags,
     detect_symptom_specialty,
     extract_contact,
@@ -1594,15 +1596,17 @@ def test_red_flags_preempt_regardless_of_retrieval() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Regression: calf/leg discomfort RAG regression (reported live incident).
+# Generic medical intake layer (medical_center_intake.py).
 #
-# With no KB rule for calf pain, retrieval scored nothing, fell back to a
-# chunk that (pre-fix) bundled the clinic address with everything else, and
-# the writer confidently named a doctor/specialty nothing in the message
-# warranted. Fixed with (a) a deterministic safety-screen short-circuit for
-# calf/leg discomfort (zero LLM calls, so it can't be derailed by a bad
-# retrieval or a timeout fallback), (b) splitting the FAQ/"О клинике" mega-
-# chunks into granular, gated pieces, and (c) a safer no-match fallback.
+# Origin: a live incident where "дискомфорт в икрах" produced a re-ask, a
+# confident wrong routing and an unrelated address. The first fix was a
+# calf-specific short-circuit; these tests exist to prove the SECOND fix
+# generalises — a cut tongue, a strained biceps, a pinched finger and a bumped
+# head all get sensible safety questions from the same complaint-TYPE layer,
+# with no new body-part-specific code.
+#
+# Everything here runs with a FakeGemini that has nothing queued: the screen is
+# deterministic and must never call the planner or the writer.
 # ---------------------------------------------------------------------------
 
 INTRO_MSG = (
@@ -1612,92 +1616,266 @@ INTRO_MSG = (
 )
 
 
-def test_calf_discomfort_first_mention_acknowledges_complaint_and_asks_safety_qs() -> None:
-    history = [_msg("assistant", INTRO_MSG)]
-    gem = FakeGemini()  # no planner/writer queued — must not be called
-    resp = _run(handle_medical_center_chat(
-        gem, _request("здравствуйте, у меня дискомфорт в икрах", history=history)
-    ))
-    assert resp.answer == CALF_SCREEN_Q1
+def _screen(message: str, history=None):
+    """Run one deterministic intake-screen turn and return (response, lowered answer)."""
+    gem = FakeGemini()  # nothing queued — an LLM call would raise
+    resp = _run(handle_medical_center_chat(gem, _request(message, history=history or [])))
     assert gem.planner_calls == 0 and gem.writer_calls == 0
-    low = resp.answer.casefold()
-    assert "икр" in low  # acknowledges the complaint already given
-    assert "опишите" not in low and "что вас беспокоит" not in low  # no re-asking
-    assert "травматолог" not in low and "терапевт" not in low  # no specialist named yet
-    assert "астана" not in low and "тауелсиздик" not in low  # no unrelated address
-    assert "баймагамбетов" not in low  # no invented/unwarranted doctor name
-    assert resp.metadata["state"]["specialty"] == ""
-    assert resp.metadata["calf_discomfort_short_circuit"] is True
+    return resp, resp.answer.casefold()
 
 
-def test_calf_discomfort_repeated_message_gets_narrower_clarification() -> None:
-    history = [
-        _msg("assistant", INTRO_MSG),
-        _msg("user", "здравствуйте, у меня дискомфорт в икрах"),
-        _msg("assistant", CALF_SCREEN_Q1),
-    ]
-    gem = FakeGemini()
-    resp = _run(handle_medical_center_chat(
-        gem, _request("у меня дискомфорт в икрах", history=history)
-    ))
-    assert resp.answer == CALF_SCREEN_Q2
-    assert gem.planner_calls == 0 and gem.writer_calls == 0
+def _assert_no_diagnosis_or_invention(low: str) -> None:
+    """The screen may ask and route; it must never diagnose, treat or invent."""
+    for forbidden in (
+        "тромбоз", "перелом", "разрыв связок", "сотрясение",  # diagnoses
+        "выпейте", "примите", "мазь", "таблетк", "ибупрофен",  # treatment
+        "баймагамбетов", "сейдахметова", "ахметов",             # doctor names
+        "₸", "тенге",                                            # prices
+        "тауелсиздик", "астана",                                 # address
+        "—",                                                     # em dash (style rule)
+    ):
+        assert forbidden not in low, f"unexpected {forbidden!r} in: {low}"
 
 
-def test_calf_discomfort_filler_reply_does_not_invent_new_information() -> None:
-    # "и" carries no new information — must not be treated as an answer that
+def test_intake_calf_discomfort_asks_age_directly_and_relevant_red_flags() -> None:
+    resp, low = _screen("здравствуйте, у меня дискомфорт в икрах",
+                        history=[_msg("assistant", INTRO_MSG)])
+    assert "сколько вам лет?" in low          # direct wording, not "возраст пациента"
+    assert "возраст пациента" not in low
+    assert "отёк" in low and "покраснение" in low and "одышка" in low
+    assert not low.startswith("поняла") and not low.startswith("спасибо")  # no echo
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["complaint_type"] == "pain_discomfort"
+    assert "икр" in intake["body_part"]
+    assert intake["symptoms_or_goal"]
+    assert resp.metadata["state"]["specialty"] == ""  # nothing routed yet
+    assert resp.metadata["intake_screen_short_circuit"] is True
+
+
+def test_intake_biceps_strain_asks_load_movement_and_swelling() -> None:
+    resp, low = _screen("как будто надорвал бицепс")
+    assert "нагрузк" in low and "резкого движения" in low
+    assert "двигать рукой" in low
+    assert "отёк" in low and "синяк" in low and "онемение" in low
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["complaint_type"] == "strain_or_sprain"
+    assert intake["body_part"] == "бицепс"
+    assert "надрыв" in intake["symptoms_or_goal"]
+
+
+def test_intake_tongue_cut_asks_bleeding_depth_and_swallowing() -> None:
+    resp, low = _screen("порезал язык")
+    assert "кровь сейчас идёт?" in low
+    assert "порез глубокий?" in low
+    assert "глотать" in low and "дышать" in low  # mouth-specific
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["complaint_type"] == "cut_or_wound"
+    assert intake["body_part"] == "язык"
+    assert intake["symptoms_or_goal"] == "порез языка"
+    assert intake["self_patient"] is True
+
+
+def test_intake_child_cut_asks_child_age_never_the_childs_phone() -> None:
+    resp, low = _screen("сын порезал палец")
+    assert "сколько лет ребёнку?" in low
+    assert "сколько вам лет" not in low
+    assert "кровь сейчас идёт?" in low
+    # The contact always belongs to the adult — never ask a child for a phone.
+    assert "номер ребёнка" not in low and "его номер" not in low
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["child_case"] is True
+    assert intake["self_patient"] is False
+    assert intake["complaint_type"] == "cut_or_wound"
+    assert intake["body_part"] == "палец"
+
+
+def test_intake_shoulder_strain_after_training_skips_the_known_event_question() -> None:
+    resp, low = _screen("потянул плечо после тренировки")
+    # The user already told us the event — don't ask "после нагрузки?" again.
+    assert "после нагрузки или резкого движения?" not in low
+    assert "двигать плечом" in low
+    assert "отёк" in low and "синяк" in low and "онемение" in low
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["complaint_type"] == "strain_or_sprain"
+    assert intake["body_part"] == "плечо"
+    assert intake["event_context"] == "после нагрузки"
+
+
+def test_intake_head_impact_asks_consciousness_vomiting_and_confusion() -> None:
+    resp, low = _screen("ударился головой")
+    assert "была потеря сознания?" in low
+    assert "рвота" in low and "спутанность" in low and "сонливость" in low
+    assert "рана или кровотечение" in low
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["complaint_type"] == "impact_or_head_injury"
+    assert intake["body_part"] == "голова"
+
+
+def test_intake_pinched_finger_asks_pain_swelling_movement_and_wound() -> None:
+    resp, low = _screen("прищемил палец")
+    assert "сильная боль" in low
+    assert "отёк, синяк или онемение" in low
+    assert "двигать" in low
+    assert "рана или кровь" in low
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["complaint_type"] == "impact_or_head_injury"
+    assert intake["body_part"] == "палец"
+    assert intake["event_context"] == "защемление"
+
+
+def test_intake_wrist_pain_after_training_is_treated_as_a_strain() -> None:
+    resp, low = _screen("болит запястье после тренировки")
+    assert "двигать запястьем" in low
+    assert "отёк" in low and "онемение" in low
+    _assert_no_diagnosis_or_invention(low)
+
+    intake = resp.metadata["medical_intake"]
+    assert intake["complaint_type"] == "strain_or_sprain"
+    assert intake["body_part"] == "запястье"
+    assert intake["event_context"] == "после нагрузки"
+
+
+def test_intake_filler_reply_repeats_the_question_and_invents_nothing() -> None:
+    # "и" carries no new information — it must not be read as an answer that
     # unlocks a confident specialty/doctor recommendation.
+    question = build_safety_question(extract_medical_intake("у меня дискомфорт в икрах"))
     history = [
         _msg("assistant", INTRO_MSG),
-        _msg("user", "здравствуйте, у меня дискомфорт в икрах"),
-        _msg("assistant", CALF_SCREEN_Q1),
+        _msg("user", "у меня дискомфорт в икрах"),
+        _msg("assistant", question),
     ]
-    gem = FakeGemini()
-    resp = _run(handle_medical_center_chat(gem, _request("и", history=history)))
-    assert resp.answer == CALF_SCREEN_Q2
-    assert gem.planner_calls == 0 and gem.writer_calls == 0
-    low = resp.answer.casefold()
-    assert "травматолог" not in low and "баймагамбетов" not in low and "14 000" not in low
+    resp, low = _screen("и", history=history)
+    assert resp.answer == question
+    assert resp.metadata["intake_screen_stage"] == "repeated"
+    _assert_no_diagnosis_or_invention(low)
 
 
-def test_calf_discomfort_after_two_screens_hands_off_to_therapist_safely() -> None:
-    # Two clarifying rounds with no red flag surfacing anywhere -> a safe,
-    # non-diagnostic hand-off (never the word "тромбоз", never a random doctor).
+def test_intake_answered_screen_routes_safely_without_policy_language() -> None:
+    question = build_safety_question(extract_medical_intake("у меня дискомфорт в икрах"))
     history = [
         _msg("assistant", INTRO_MSG),
-        _msg("user", "здравствуйте, у меня дискомфорт в икрах"),
-        _msg("assistant", CALF_SCREEN_Q1),
-        _msg("user", "и"),
-        _msg("assistant", CALF_SCREEN_Q2),
+        _msg("user", "у меня дискомфорт в икрах"),
+        _msg("assistant", question),
     ]
-    gem = FakeGemini()
-    resp = _run(handle_medical_center_chat(gem, _request("в обеих, отёка нет", history=history)))
-    low = resp.answer.casefold()
+    resp, low = _screen("35 лет, в обеих, отёка нет", history=history)
     assert "терапевт" in low
-    assert "тромбоз" not in low
-    assert "баймагамбетов" not in low and "травматолог" not in low
-    assert gem.planner_calls == 0 and gem.writer_calls == 0
+    assert "могу подобрать ближайшее окно" in low
+    # Natural conditional phrasing, not the old dry policy sentence.
+    assert "по описанию" not in low and "требуют срочной очной оценки" not in low
+    _assert_no_diagnosis_or_invention(low)
     assert resp.metadata["state"]["specialty"] == "терапевт"
+    assert resp.metadata["intake_screen_stage"] == "routed"
 
 
-def test_calf_discomfort_with_breathing_red_flag_goes_to_emergency_not_screen() -> None:
-    # A real red flag (calf discomfort + shortness of breath) must preempt the
-    # calf-safety screen entirely and go straight to the emergency answer.
+def test_intake_answered_strain_screen_routes_to_orthopedist() -> None:
+    question = build_safety_question(extract_medical_intake("как будто надорвал бицепс"))
+    history = [
+        _msg("assistant", INTRO_MSG),
+        _msg("user", "как будто надорвал бицепс"),
+        _msg("assistant", question),
+    ]
+    resp, low = _screen("после тренировки, двигать могу, отёка нет", history=history)
+    assert "травматолог" in low
+    _assert_no_diagnosis_or_invention(low)
+    assert resp.metadata["state"]["specialty"] == "травматолог-ортопед"
+
+
+def test_intake_complaint_persists_into_state_and_summary() -> None:
+    # Summary panel must never show "Жалоба: —" once a complaint was given.
+    question = build_safety_question(extract_medical_intake("порезал язык"))
+    history = [
+        _msg("assistant", INTRO_MSG),
+        _msg("user", "порезал язык"),
+        _msg("assistant", question),
+    ]
+    resp, _ = _screen("кровь остановилась, порез неглубокий", history=history)
+    state = resp.metadata["state"]
+    assert state["symptoms_or_goal"] == "порез языка"
+    assert state["complaint_type"] == "cut_or_wound"
+    assert state["body_part"] == "язык"
+
+
+def test_intake_red_flag_preempts_the_screen_entirely() -> None:
+    # A real red flag (calf discomfort + shortness of breath) goes straight to
+    # the emergency answer, never through the intake screen.
     gem = FakeGemini()
-    resp = _run(handle_medical_center_chat(
-        gem, _request("дискомфорт в икре и сильная одышка")
-    ))
+    resp = _run(handle_medical_center_chat(gem, _request("дискомфорт в икре и сильная одышка")))
     assert resp.answer == EMERGENCY_ANSWER
     assert resp.metadata["emergency_short_circuit"] is True
     assert gem.planner_calls == 0 and gem.writer_calls == 0
 
 
-def test_detect_calf_discomfort_matches_calf_not_ankle() -> None:
-    assert detect_calf_discomfort("у меня дискомфорт в икрах") is True
-    assert detect_calf_discomfort("тянет голень после пробежки") is True
-    # голеностоп (ankle) is a joint word handled by route_symptom, not this flow.
-    assert detect_calf_discomfort("болит голеностоп") is False
-    assert detect_calf_discomfort("сколько стоит кардиолог") is False
+def test_intake_complaint_with_a_routing_rule_skips_the_screen() -> None:
+    # A knee complaint already has a correct destination — it must keep going
+    # straight to the orthopedist instead of being slowed by a generic screen.
+    resp, low = _screen("здравствуйте, колено болит уже месяц")
+    assert "травматолог" in low  # declined form ("травматологу-ортопеду")
+    assert resp.metadata["symptom_routing"] == "травматолог-ортопед"
+    assert "intake_screen_short_circuit" not in resp.metadata
+
+
+def test_intake_ignores_price_questions_and_non_complaints() -> None:
+    assert extract_medical_intake("сколько стоит лечение боли в спине").is_medical_complaint is False
+    assert extract_medical_intake("Какие услуги предоставляете?").is_medical_complaint is False
+    assert extract_medical_intake("").is_medical_complaint is False
+
+
+def test_intake_extractor_understands_who_the_patient_is() -> None:
+    assert extract_medical_intake("порезал язык").self_patient is True
+    assert extract_medical_intake("сын порезал палец").child_case is True
+    assert extract_medical_intake("у мамы болит колено").self_patient is False
+
+
+def test_intake_extractor_reads_side_and_denials_from_the_reply() -> None:
+    history = [_msg("user", "у меня дискомфорт в икрах")]
+    merged = extract_conversation_intake(history, "в обеих, отёка нет, одышки нет")
+    assert merged.complaint_type == "pain_discomfort"  # recovered from history
+    assert merged.body_side == "both"
+    assert "отёк" in merged.red_flags_denied
+    assert "одышка" in merged.red_flags_denied
+
+
+def test_intake_denied_symptom_is_never_read_as_a_new_complaint() -> None:
+    # "одышки нет" answers a safety question; it is not a breathing complaint.
+    assert extract_medical_intake("отёка нет, одышки нет").is_medical_complaint is False
+
+
+def test_asking_when_windows_are_free_offers_slots_instead_of_deferring() -> None:
+    # "а когда окно есть?" with a known specialty must show the windows, not
+    # fall through to a generic "администратор свяжется".
+    history = [
+        _msg("user", "болит колено"),
+        _msg("assistant", "Могу подобрать ближайшее окно к травматологу-ортопеду?"),
+    ]
+    # The booking flow runs after the planner, but the ANSWER is deterministic:
+    # the writer is never reached, so no invented windows are possible.
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking"))
+    resp = _run(handle_medical_center_chat(gem, _request("а когда окно есть?", history=history)))
+    assert resp.metadata["conversation_status"] == "slots_offered"
+    assert "администратор свяжется" not in resp.answer.casefold()
+    assert gem.writer_calls == 0
+
+
+def test_turn_plan_tells_the_writer_how_to_phrase_the_age_question() -> None:
+    child = ConversationState(child_case=True, self_patient="false")
+    assert "Сколько лет ребёнку?" in build_turn_plan(child, _default_planner())
+
+    adult = ConversationState(self_patient="true")
+    assert "Сколько вам лет?" in build_turn_plan(adult, _default_planner())
 
 
 # ---------------------------------------------------------------------------

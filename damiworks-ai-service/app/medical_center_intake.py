@@ -1,0 +1,536 @@
+"""Generic medical-complaint understanding for the Medical Center demo.
+
+Deterministic, zero-LLM. Turns a free-text complaint into a small structured
+record — *what happened, where, to whom, how risky, what to ask next* — so the
+demo understands the SHAPE of a complaint instead of recognising one hardcoded
+body part at a time. "Дискомфорт в икрах", "надорвал бицепс", "порезал язык",
+"сын порезал палец", "ударился головой" and "прищемил палец" all flow through
+the same three detectors (complaint type, body part, who) and the same
+complaint-type-driven safety screen.
+
+This layer never diagnoses and never treats. It only:
+- names the complaint in plain Russian (for state/summary),
+- asks the safety questions that the complaint TYPE warrants,
+- picks a starting specialty (administrative routing, from the KB's list).
+
+True emergencies (``detect_red_flags``) short-circuit before this module runs.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import asdict, dataclass, replace
+
+from .schemas import ChatHistoryMessage
+
+# Complaint taxonomy. Response rules key off THIS, never off a body part, so a
+# new body part never needs a new flow.
+COMPLAINT_TYPES = (
+    "pain_discomfort",
+    "strain_or_sprain",
+    "cut_or_wound",
+    "impact_or_head_injury",
+    "swelling",
+    "numbness_or_weakness",
+    "respiratory_or_chest",
+    "infection_or_fever",
+    "child_case",
+    "unknown",
+)
+
+# Injury-type complaints always get a safety screen: the user already told us an
+# event happened, and "есть ли травма?" would be a silly question. A plain
+# pain/discomfort complaint is screened only when nothing routes it (see
+# ``needs_safety_screen``) — a knee or stomach complaint has a routing rule and
+# must keep going straight to the right specialist.
+_SCREEN_COMPLAINT_TYPES = frozenset({
+    "strain_or_sprain", "cut_or_wound", "impact_or_head_injury",
+})
+
+
+@dataclass(frozen=True)
+class BodyPart:
+    nom: str   # "икры"
+    gen: str   # "икры"      -> "порез икры"
+    prep: str  # "в икрах"   -> "дискомфорт в икрах"
+    region: str  # arm | leg | head | mouth | torso | other
+
+
+# Most specific first: "запястье" must win over the generic "рука", "икра" over
+# "нога". A trailing generic entry keeps an unmapped part from breaking anything.
+_BODY_PARTS: tuple[tuple[re.Pattern[str], BodyPart], ...] = (
+    (re.compile(r"икр\w*", re.I), BodyPart("икры", "икры", "в икрах", "leg")),
+    (re.compile(r"голен(?!остоп)\w*", re.I), BodyPart("голень", "голени", "в голени", "leg")),
+    (re.compile(r"бицепс\w*", re.I), BodyPart("бицепс", "бицепса", "в бицепсе", "arm")),
+    (re.compile(r"трицепс\w*", re.I), BodyPart("трицепс", "трицепса", "в трицепсе", "arm")),
+    (re.compile(r"запяст\w*", re.I), BodyPart("запястье", "запястья", "в запястье", "arm")),
+    (re.compile(r"предплеч\w*", re.I), BodyPart("предплечье", "предплечья", "в предплечье", "arm")),
+    (re.compile(r"локот\w*|локт\w*", re.I), BodyPart("локоть", "локтя", "в локте", "arm")),
+    (re.compile(r"плеч\w*", re.I), BodyPart("плечо", "плеча", "в плече", "arm")),
+    (re.compile(r"кист[ьияей]\w*", re.I), BodyPart("кисть", "кисти", "в кисти", "arm")),
+    (re.compile(r"пальц\w*|палец", re.I), BodyPart("палец", "пальца", "на пальце", "arm")),
+    (re.compile(r"колен\w*", re.I), BodyPart("колено", "колена", "в колене", "leg")),
+    (re.compile(r"голеностоп\w*", re.I), BodyPart("голеностоп", "голеностопа", "в голеностопе", "leg")),
+    (re.compile(r"лодыжк\w*", re.I), BodyPart("лодыжка", "лодыжки", "в лодыжке", "leg")),
+    (re.compile(r"стоп[аеуы]\w*", re.I), BodyPart("стопа", "стопы", "в стопе", "leg")),
+    (re.compile(r"голов\w*", re.I), BodyPart("голова", "головы", "в голове", "head")),
+    (re.compile(r"язык\w*|языч\w*", re.I), BodyPart("язык", "языка", "на языке", "mouth")),
+    (re.compile(r"губ[аыуе]\w*", re.I), BodyPart("губа", "губы", "на губе", "mouth")),
+    (re.compile(r"д[ёе]сн\w*", re.I), BodyPart("десна", "десны", "на десне", "mouth")),
+    (re.compile(r"горл\w*", re.I), BodyPart("горло", "горла", "в горле", "mouth")),
+    (re.compile(r"спин[аыуе]\w*", re.I), BodyPart("спина", "спины", "в спине", "torso")),
+    (re.compile(r"поясниц\w*", re.I), BodyPart("поясница", "поясницы", "в пояснице", "torso")),
+    (re.compile(r"живот\w*", re.I), BodyPart("живот", "живота", "в животе", "torso")),
+    (re.compile(r"груд[ьи]\w*", re.I), BodyPart("грудь", "груди", "в груди", "torso")),
+    (re.compile(r"рук[ауиеой]\w*", re.I), BodyPart("рука", "руки", "в руке", "arm")),
+    (re.compile(r"ног[ауиеой]\w*", re.I), BodyPart("нога", "ноги", "в ноге", "leg")),
+)
+
+# Complaint-type markers, checked in this order (an event beats a sensation:
+# "порезал палец, болит" is a cut, not a pain complaint).
+_CUT_RE = re.compile(r"пор[еє]з\w*|разрез\w*|рассек\w*|ран[аиуы]\w*|ранил\w*|кровоточ\w*", re.I)
+_IMPACT_RE = re.compile(
+    r"удар\w*|стукнул\w*|прищем\w*|защем\w*|упал\w*|падени\w*|ушиб\w*|прибил\w*",
+    re.I,
+)
+_STRAIN_VERB_RE = re.compile(r"надорв\w*|надрыв\w*|потяну\w*|растяну\w*|растяжени\w*|подверн\w*|вывих\w*|перенапряг\w*", re.I)
+_LOAD_CONTEXT_RE = re.compile(r"после\s+(?:тренировк\w*|нагрузк\w*|пробежк\w*|занят\w*|бега)", re.I)
+_SHARP_MOVE_RE = re.compile(r"резк\w+\s+движени\w*", re.I)
+_SWELLING_RE = re.compile(r"от[ёе]к\w*|опух\w*|припух\w*", re.I)
+_NUMBNESS_RE = re.compile(r"онемен\w*|немеет|неметь|покалыван\w*|слабост\w+\s+в\s+\w+", re.I)
+_RESP_CHEST_RE = re.compile(r"одышк\w*|тяжело\s+дыш\w*|трудно\s+дыш\w*|бол\w*\s+в\s+груди", re.I)
+_FEVER_RE = re.compile(r"температур\w*|\bорви\b|простуд\w*|кашель|кашля\w*|насморк\w*|озноб\w*", re.I)
+_PAIN_RE = re.compile(r"бол[иья]\w*|болит|болят|бол[ьи]\b|дискомфорт\w*|ноет|ноющ\w*|тянет|беспокоит|жж[ёе]т|саднит", re.I)
+
+# Price/admin questions are never a complaint ("сколько стоит лечение боли в
+# спине" must not open a safety screen). Mirrors medical_center_routing's guard.
+_PRICE_OR_ADMIN_RE = re.compile(r"сколько\s+сто|стоимост|цена|прайс|поч[её]м|оплат|скидк", re.I)
+
+# Who is the patient.
+_CHILD_RE = re.compile(
+    r"\bсын\w*|\bдоч\w*|\bреб[ёе]н\w*|\bдет[еия]\w*|малыш\w*|внук\w*|внучк\w*|\bмладен\w*|груднич\w*",
+    re.I,
+)
+_OTHER_ADULT_RE = re.compile(r"\bмам[аыуе]\w*|\bпап[аыуе]\w*|\bжен[аыуе]\b|\bмуж[аыуе]?\b|бабушк\w*|дедушк\w*", re.I)
+
+_SIDE_BOTH_RE = re.compile(r"\bоб[ео]их\w*|\bоба\b|\bобе\b|с\s+двух\s+сторон|двусторон", re.I)
+_SIDE_ONE_RE = re.compile(r"\bодной\b|\bодна\b|\bодном\b|с\s+одной\s+стороны|только\s+справа|только\s+слева", re.I)
+_SIDE_LEFT_RE = re.compile(r"\bлев\w+", re.I)
+_SIDE_RIGHT_RE = re.compile(r"\bправ\w+", re.I)
+
+# "нет отёка", "без отёка", "отёка нет", "кровь не идёт", "сознание не терял".
+_DENIAL_TOKENS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("отёк", re.compile(r"(?:нет|без)\s+(?:сильного\s+)?от[ёе]к\w*|от[ёе]к\w*\s+нет", re.I)),
+    ("покраснение", re.compile(r"(?:нет|без)\s+покраснени\w*|покраснени\w*\s+нет", re.I)),
+    ("травма", re.compile(r"(?:нет|без)\s+травм\w*|травм\w*\s+не\s+было|не\s+ударял\w*", re.I)),
+    ("онемение", re.compile(r"(?:нет|без)\s+онемени\w*|онемени\w*\s+нет|не\s+немеет", re.I)),
+    ("одышка", re.compile(r"(?:нет|без)\s+одышк\w*|одышк\w*\s+нет", re.I)),
+    ("кровь", re.compile(r"кров[ьи]\w*\s+(?:уже\s+)?нет|кровь\s+не\s+ид[ёе]т|кровотечени\w*\s+нет|кровь\s+останов\w*", re.I)),
+    ("потеря сознания", re.compile(r"сознани\w*\s+не\s+тер\w*|без\s+потери\s+сознани\w*|не\s+теря\w*\s+сознани\w*", re.I)),
+    ("рвота", re.compile(r"(?:нет|без)\s+рвот\w*|рвот\w*\s+нет|не\s+тошнит", re.I)),
+)
+
+# Substrings of the questions this module generates, used to detect "we already
+# ran the safety screen" from the assistant's last turn (the demo server is
+# stateless — the screen state lives in the transcript, like every other
+# medical_center_demo marker).
+SCREEN_MARKERS: tuple[str, ...] = (
+    "кровь сейчас идёт",
+    "была потеря сознания",
+    "есть отёк, синяк или онемение",
+    "синяк, онемение или сильная боль",
+    "получается нормально двигать",
+    "покраснение, онемение",
+)
+
+# A reply that carries no new information ("и", "а?", "ну", "дальше"). The screen
+# repeats its question rather than routing on an empty answer.
+_FILLER_RE = re.compile(r"^\W*(?:и|а|ну|ок|угу|ага|дальше|что|дальше\?)\W*$", re.I)
+
+
+def is_filler_reply(text: str) -> bool:
+    """True when the message carries no new information (a continuation grunt)."""
+    return bool(_FILLER_RE.match((text or "").strip()))
+
+
+def assistant_asked_safety_screen(text: str) -> bool:
+    """True if this assistant message is one of our generated safety screens."""
+    low = (text or "").casefold()
+    return any(marker in low for marker in SCREEN_MARKERS)
+
+
+@dataclass(frozen=True)
+class MedicalIntake:
+    is_medical_complaint: bool = False
+    symptoms_or_goal: str = ""
+    complaint_type: str = "unknown"
+    body_part: str = ""
+    region: str = ""
+    body_side: str = "unknown"
+    event_context: str = "неизвестно"
+    self_patient: bool = True
+    child_case: bool = False
+    red_flags_mentioned: tuple[str, ...] = ()
+    red_flags_denied: tuple[str, ...] = ()
+    missing_safety_questions: tuple[str, ...] = ()
+    suggested_next_step: str = "none"
+
+    def to_metadata(self) -> dict[str, object]:
+        data = asdict(self)
+        for key in ("red_flags_mentioned", "red_flags_denied", "missing_safety_questions"):
+            data[key] = list(data[key])
+        return data
+
+
+def _match_body_part(text: str) -> BodyPart | None:
+    for pattern, part in _BODY_PARTS:
+        if pattern.search(text):
+            return part
+    return None
+
+
+def _classify_complaint(text: str) -> str:
+    if _CUT_RE.search(text):
+        return "cut_or_wound"
+    if _IMPACT_RE.search(text):
+        return "impact_or_head_injury"
+    if _STRAIN_VERB_RE.search(text):
+        return "strain_or_sprain"
+    # "болит запястье после тренировки" — a load context turns a pain complaint
+    # into a strain picture, which is what the safety questions must address.
+    if _PAIN_RE.search(text) and (_LOAD_CONTEXT_RE.search(text) or _SHARP_MOVE_RE.search(text)):
+        return "strain_or_sprain"
+    if _RESP_CHEST_RE.search(text):
+        return "respiratory_or_chest"
+    if _NUMBNESS_RE.search(text):
+        return "numbness_or_weakness"
+    if _FEVER_RE.search(text):
+        return "infection_or_fever"
+    if _SWELLING_RE.search(text):
+        return "swelling"
+    if _PAIN_RE.search(text):
+        return "pain_discomfort"
+    return "unknown"
+
+
+def _event_context(text: str, complaint_type: str) -> str:
+    if _LOAD_CONTEXT_RE.search(text):
+        return "после нагрузки"
+    if _SHARP_MOVE_RE.search(text):
+        return "резкое движение"
+    if complaint_type == "cut_or_wound":
+        return "порез"
+    if complaint_type == "impact_or_head_injury":
+        return "защемление" if re.search(r"прищем\w*|защем\w*", text, re.I) else "удар"
+    if complaint_type == "strain_or_sprain":
+        return "возможная нагрузка или резкое движение"
+    return "неизвестно"
+
+
+def _body_side(text: str) -> str:
+    if _SIDE_BOTH_RE.search(text):
+        return "both"
+    if _SIDE_ONE_RE.search(text):
+        return "one"
+    if _SIDE_LEFT_RE.search(text):
+        return "left"
+    if _SIDE_RIGHT_RE.search(text):
+        return "right"
+    return "unknown"
+
+
+def _denied_flags(text: str) -> tuple[str, ...]:
+    return tuple(name for name, pattern in _DENIAL_TOKENS if pattern.search(text))
+
+
+def _strip_denials(text: str) -> str:
+    """Blank out denied symptoms before classification.
+
+    "отёка нет, одышки нет" answers a safety question; it must not be read as a
+    swelling/breathing COMPLAINT just because the words appear in the sentence.
+    """
+    for _name, pattern in _DENIAL_TOKENS:
+        text = pattern.sub(" ", text)
+    return text
+
+
+def _complaint_label(text: str, complaint_type: str, part: BodyPart | None, child: bool) -> str:
+    """Short human-readable complaint for the state/summary panel."""
+    where_prep = part.prep if part else ""
+    where_gen = part.gen if part else ""
+
+    if complaint_type == "cut_or_wound":
+        label = f"порез {where_gen}".strip() if where_gen else "порез"
+    elif complaint_type == "strain_or_sprain":
+        if re.search(r"надорв\w*|надрыв\w*", text, re.I):
+            label = f"ощущение надрыва {where_prep}".strip() if where_prep else "ощущение надрыва"
+        elif re.search(r"потяну\w*|растяну\w*|растяжени\w*", text, re.I):
+            label = f"растяжение {where_gen}".strip() if where_gen else "растяжение"
+        else:
+            label = f"боль {where_prep} после нагрузки".strip() if where_prep else "боль после нагрузки"
+    elif complaint_type == "impact_or_head_injury":
+        if part and part.region == "head":
+            label = "удар головой"
+        elif re.search(r"прищем\w*|защем\w*", text, re.I):
+            label = f"защемление {where_gen}".strip() if where_gen else "защемление"
+        else:
+            label = f"ушиб {where_gen}".strip() if where_gen else "ушиб"
+    elif complaint_type == "swelling":
+        label = f"отёк {where_gen}".strip() if where_gen else "отёк"
+    elif complaint_type == "numbness_or_weakness":
+        label = f"онемение {where_gen}".strip() if where_gen else "онемение"
+    elif complaint_type == "infection_or_fever":
+        label = "температура или простудные симптомы"
+    elif complaint_type == "respiratory_or_chest":
+        label = "жалобы на дыхание или грудную клетку"
+    else:  # pain_discomfort / unknown
+        word = "дискомфорт" if re.search(r"дискомфорт", text, re.I) else "боль"
+        label = f"{word} {where_prep}".strip() if where_prep else word
+
+    return f"ребёнок: {label}" if child else label
+
+
+def _missing_safety_questions(complaint_type: str, region: str, denied: tuple[str, ...]) -> tuple[str, ...]:
+    if complaint_type == "cut_or_wound":
+        wanted = ["кровотечение", "глубина раны"]
+        if region == "mouth":
+            wanted.append("дыхание и глотание")
+    elif complaint_type == "impact_or_head_injury" and region == "head":
+        wanted = ["потеря сознания", "рвота", "головная боль", "рана"]
+    elif complaint_type == "impact_or_head_injury":
+        wanted = ["сильная боль", "отёк", "онемение", "подвижность", "рана"]
+    elif complaint_type == "strain_or_sprain":
+        wanted = ["обстоятельства травмы", "подвижность", "отёк", "онемение"]
+    elif complaint_type == "pain_discomfort":
+        wanted = ["возраст", "отёк", "покраснение", "онемение"]
+        if region == "leg":
+            wanted += ["одышка", "боль в груди"]
+    else:
+        wanted = []
+    denied_set = {d for d in denied}
+    return tuple(q for q in wanted if q not in denied_set)
+
+
+def extract_medical_intake(message: str) -> MedicalIntake:
+    """Structure a single free-text message into a MedicalIntake record."""
+    text = (message or "").strip()
+    if not text or _PRICE_OR_ADMIN_RE.search(text):
+        return MedicalIntake()
+
+    denied = _denied_flags(text)
+    asserted = _strip_denials(text)
+    complaint_type = _classify_complaint(asserted)
+    if complaint_type == "unknown":
+        return MedicalIntake()
+
+    part = _match_body_part(asserted)
+    child = bool(_CHILD_RE.search(text))
+    other_adult = bool(_OTHER_ADULT_RE.search(text))
+    region = part.region if part else ""
+
+    missing = _missing_safety_questions(complaint_type, region, denied)
+    if complaint_type in ("respiratory_or_chest",):
+        next_step = "emergency"
+    elif missing:
+        next_step = "ask_clarifying"
+    else:
+        next_step = "route_to_specialist"
+
+    return MedicalIntake(
+        is_medical_complaint=True,
+        symptoms_or_goal=_complaint_label(asserted, complaint_type, part, child),
+        complaint_type=complaint_type,
+        body_part=part.nom if part else "",
+        region=region,
+        body_side=_body_side(text),
+        event_context=_event_context(text, complaint_type),
+        self_patient=not (child or other_adult),
+        child_case=child,
+        red_flags_denied=denied,
+        missing_safety_questions=missing,
+        suggested_next_step=next_step,
+    )
+
+
+def extract_conversation_intake(
+    history: list[ChatHistoryMessage],
+    message: str,
+) -> MedicalIntake:
+    """The complaint currently under discussion, recovered from the transcript.
+
+    The demo server is stateless, so a complaint stated three turns ago must
+    still be recoverable when the user answers a safety question with "кровь
+    остановилась, порез неглубокий" — a reply that names the complaint type but
+    has lost the body part. The most recent complaint that still names a body
+    part therefore wins over a vaguer, more recent one; the current message
+    always contributes its side ("в обеих") and denials ("отёка нет") on top.
+    """
+    text = message or ""
+    candidates = [m.content or "" for m in (history or []) if m.role == "user"]
+    candidates.append(text)
+
+    found = [
+        intake
+        for intake in (extract_medical_intake(c) for c in reversed(candidates))
+        if intake.is_medical_complaint
+    ]
+    if not found:
+        return MedicalIntake()
+
+    base = next((i for i in found if i.body_part), found[0])
+
+    denied = tuple(sorted(set(base.red_flags_denied) | set(_denied_flags(text))))
+    side = _body_side(text)
+    merged = replace(
+        base,
+        body_side=side if side != "unknown" else base.body_side,
+        red_flags_denied=denied,
+    )
+    return replace(
+        merged,
+        missing_safety_questions=_missing_safety_questions(
+            merged.complaint_type, merged.region, denied
+        ),
+    )
+
+
+def needs_safety_screen(intake: MedicalIntake, has_routing_rule: bool) -> bool:
+    """Whether this complaint must be screened before any routing suggestion.
+
+    Injury-shaped complaints (strain / cut / impact) always are — the user told
+    us an event happened and we owe them the event's safety questions. A plain
+    pain/discomfort complaint is screened only when nothing in the deterministic
+    routing tables covers it: a knee or stomach complaint already has a correct,
+    specific destination and must not be slowed down by a generic questionnaire.
+    """
+    if not intake.is_medical_complaint:
+        return False
+    if intake.complaint_type in _SCREEN_COMPLAINT_TYPES:
+        return True
+    return intake.complaint_type == "pain_discomfort" and not has_routing_rule
+
+
+def _age_question(intake: MedicalIntake) -> str:
+    if intake.child_case:
+        return "Сколько лет ребёнку?"
+    if intake.self_patient:
+        return "Сколько вам лет?"
+    return "Сколько лет пациенту?"
+
+
+# Instrumental case for the "can you still move it?" question, for the parts
+# where naming the part itself reads better than the whole limb.
+_MOVE_INSTRUMENTAL = {
+    "палец": "пальцем",
+    "кисть": "кистью",
+    "запястье": "запястьем",
+    "локоть": "локтем",
+    "плечо": "плечом",
+    "стопа": "стопой",
+    "колено": "коленом",
+}
+
+
+def _move_question(intake: MedicalIntake) -> str:
+    part = _MOVE_INSTRUMENTAL.get(intake.body_part)
+    if part:
+        suffix = " и наступать" if intake.region == "leg" else ""
+        return f"Получается нормально двигать {part}{suffix}?"
+    if intake.region == "leg":
+        return "Получается нормально двигать ногой и наступать?"
+    if intake.region == "arm":
+        return "Получается нормально двигать рукой?"
+    return "Получается нормально двигать этой областью?"
+
+
+def build_safety_question(intake: MedicalIntake, age_known: bool = False) -> str:
+    """The safety questions this complaint TYPE warrants. Never a diagnosis."""
+    parts: list[str] = []
+    ct, region = intake.complaint_type, intake.region
+
+    if intake.child_case and not age_known:
+        parts.append(_age_question(intake))
+
+    if ct == "cut_or_wound":
+        parts.append("Кровь сейчас идёт?")
+        parts.append("Порез глубокий?")
+        if region == "mouth":
+            parts.append("Трудно говорить, глотать или дышать?")
+    elif ct == "impact_or_head_injury" and region == "head":
+        parts.append("Была потеря сознания?")
+        parts.append("Есть рвота, сильная головная боль, спутанность или сонливость?")
+        parts.append("Есть рана или кровотечение?")
+    elif ct == "impact_or_head_injury":
+        parts.append("Сильная боль есть?")
+        parts.append("Есть отёк, синяк или онемение?")
+        parts.append(_move_question(intake))
+        parts.append("Есть рана или кровь?")
+    elif ct == "strain_or_sprain":
+        if intake.event_context not in ("после нагрузки", "резкое движение"):
+            parts.append("Боль появилась после нагрузки или резкого движения?")
+        parts.append(_move_question(intake))
+        parts.append("Есть отёк, синяк, онемение или сильная боль?")
+    else:  # pain_discomfort
+        if not age_known and not intake.child_case:
+            parts.append(_age_question(intake))
+        if region == "leg":
+            parts.append("Есть отёк, покраснение, онемение, одышка или боль в груди?")
+        else:
+            parts.append("Есть отёк, покраснение, онемение или температура?")
+
+    return " ".join(parts)
+
+
+def specialty_for_intake(intake: MedicalIntake) -> str:
+    """Starting specialty from the KB list. Administrative routing, not a diagnosis."""
+    ct, region = intake.complaint_type, intake.region
+    if ct == "cut_or_wound":
+        return "стоматолог" if region == "mouth" else "травматолог-ортопед"
+    if ct == "strain_or_sprain":
+        return "травматолог-ортопед" if region in ("arm", "leg") else "терапевт"
+    if ct == "impact_or_head_injury":
+        return "терапевт" if region == "head" else "травматолог-ортопед"
+    return "терапевт"
+
+
+def build_routing_answer(intake: MedicalIntake, dative: str) -> str:
+    """Post-screen routing: a natural "if X then plan, if Y then urgent" pair.
+
+    Deliberately conversational rather than policy-flavoured, and free of the em
+    dash (see the writer's style rules). Never names a diagnosis, a doctor or a
+    price; the booking CTA is the only next step offered.
+    """
+    ct, region = intake.complaint_type, intake.region
+
+    if ct == "cut_or_wound":
+        caveat = (
+            f"Если кровь остановилась и порез неглубокий, можно спокойно показаться {dative}. "
+            "Если кровь не останавливается, рана глубокая или трудно глотать и дышать, "
+            "нужна срочная очная помощь."
+        )
+    elif ct == "impact_or_head_injury" and region == "head":
+        caveat = (
+            f"Если сознание не терялось и нет рвоты, сильной головной боли или сонливости, "
+            f"можно начать с приёма у {dative}. Если появится хотя бы один из этих признаков, "
+            "лучше обратиться очно как можно скорее."
+        )
+    elif ct in ("impact_or_head_injury", "strain_or_sprain"):
+        caveat = (
+            f"Если движение сохраняется и боль терпимая, можно начать с {dative}. "
+            "Если боль резкая, место сильно отекает или есть онемение, лучше обратиться "
+            "очно как можно скорее."
+        )
+    elif region == "leg":
+        caveat = (
+            f"Если нет сильного отёка, онемения, одышки или боли в груди, можно начать с {dative}. "
+            "Если боль резкая, нога отекает или трудно наступать, лучше обратиться очно "
+            "как можно скорее."
+        )
+    else:
+        caveat = (
+            f"Если самочувствие не ухудшается и сильной боли нет, можно начать с {dative}. "
+            "Если боль усиливается или появляются новые симптомы, лучше показаться врачу "
+            "очно как можно скорее."
+        )
+
+    return f"{caveat}\n\nМогу подобрать ближайшее окно к {dative}?"
