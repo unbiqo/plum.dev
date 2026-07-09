@@ -154,6 +154,20 @@ def _assistant_in_slot_selection(history: list[ChatHistoryMessage]) -> bool:
     return "демо-окна" in low or "правильно понял, хотите" in low
 
 
+# Markers that the assistant's last turn invited booking (a CTA), so a bare
+# "хорошо"/"давайте" is an agreement to book, not a dead-end "Принято.".
+_BOOKING_INVITE_MARKERS = (
+    "окн", "подобрать", "удобное время", "записать вас", "к записи",
+    "перейти к запис", "показать ближайш",
+)
+
+
+def _assistant_invited_booking(history: list[ChatHistoryMessage]) -> bool:
+    """True if the assistant's last turn made a booking invitation/CTA."""
+    low = _last_assistant(history)
+    return any(marker in low for marker in _BOOKING_INVITE_MARKERS)
+
+
 def _assistant_asked_for_contact(history: list[ChatHistoryMessage]) -> bool:
     """True if the assistant's last turn already asked for a phone/Telegram."""
     low = _last_assistant(history)
@@ -176,6 +190,10 @@ def _is_booking_turn(
     if state.selected_slot:
         return True
     if state.specialty and resolve_slot(state.specialty, message)[0] != "none":
+        return True
+    # The user agreed to a booking invitation ("хорошо"/"давайте") — offer slots
+    # instead of a dead-end acknowledgement.
+    if state.specialty and is_affirmation(message) and _assistant_invited_booking(history):
         return True
     if _assistant_in_slot_selection(history):
         # The user is replying to a slot offer/suggestion with a choice, an
@@ -238,21 +256,30 @@ def _resolve_booking_turn(
             "booking_created",
         )
 
+    already_asked = _assistant_asked_for_contact(history)
+    slot_picked_now = resolve_slot(state.specialty, message)[0] == "matched"
+
     if not state.contact:
-        if _assistant_asked_for_contact(history):
-            # We already asked and the reply had no usable contact.
-            return (INVALID_CONTACT_ANSWER, "awaiting_contact")
-        ask_fields: list[str] = []
-        if not name:
-            ask_fields.append("имя")
-        if not state.is_known("age"):
-            ask_fields.append("возраст")
-        ask_fields.append("WhatsApp или телефон")
-        return (
-            f"Отлично, {state.selected_slot} к {dative}.\n\n"
-            f"Для записи оставьте, пожалуйста, {', '.join(ask_fields)}.",
-            "awaiting_contact",
-        )
+        # Acknowledge a (re)chosen slot and (re)ask for the missing fields —
+        # a slot change must never be mistaken for a failed contact. The harsh
+        # "Не вижу контакт" is only for a reply that was meant as the contact.
+        if slot_picked_now or not already_asked:
+            ask_fields: list[str] = []
+            if not name:
+                ask_fields.append("имя")
+            if not state.is_known("age"):
+                ask_fields.append("возраст")
+            ask_fields.append("телефон или WhatsApp")
+            if already_asked:
+                lead, tail = "Хорошо, выбрали", "Для завершения записи оставьте"
+            else:
+                lead, tail = "Отлично,", "Для записи оставьте"
+            return (
+                f"{lead} {state.selected_slot} к {dative}.\n\n"
+                f"{tail}, пожалуйста, {', '.join(ask_fields)}.",
+                "awaiting_contact",
+            )
+        return (INVALID_CONTACT_ANSWER, "awaiting_contact")
 
     # Contact is on file but we still need a name to finalize.
     return (

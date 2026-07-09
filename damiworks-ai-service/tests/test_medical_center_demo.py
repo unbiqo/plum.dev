@@ -759,7 +759,7 @@ def test_price_intent_appends_booking_cta_hint() -> None:
         recommended_next_step="none",
     )
     plan = build_turn_plan(state, planner)
-    assert "приглашение записаться" in plan.casefold()
+    assert "приглашение к записи" in plan.casefold()
     # The pause line must not suppress the CTA for a price question.
     assert "на паузе" not in plan.casefold()
 
@@ -768,10 +768,10 @@ def test_price_cta_suppressed_once_offered_or_contact_known() -> None:
     planner = _default_planner(current_intent="ask_price", recommended_next_step="none")
     # Already offered booking → no repeat CTA.
     offered = ConversationState(booking_cta_mentioned=True, greeting_already_sent=True)
-    assert "приглашение записаться" not in build_turn_plan(offered, planner).casefold()
+    assert "приглашение к записи" not in build_turn_plan(offered, planner).casefold()
     # Contact already on file → no CTA (do not re-push booking).
     have_contact = ConversationState(contact="+7 701 222 33 44", greeting_already_sent=True)
-    assert "приглашение записаться" not in build_turn_plan(have_contact, planner).casefold()
+    assert "приглашение к записи" not in build_turn_plan(have_contact, planner).casefold()
 
 
 def test_detect_symptom_specialty_routes_common_complaints() -> None:
@@ -838,8 +838,10 @@ def _booking_history() -> list:
 
 def test_symptom_turn_plan_invites_slots() -> None:
     state = ConversationState(specialty="терапевт", greeting_already_sent=True)
-    plan = build_turn_plan(state, _default_planner(current_intent="symptom_description"))
-    assert "покажу ближайшие окна" in plan.casefold()
+    plan = build_turn_plan(state, _default_planner(current_intent="symptom_description")).casefold()
+    assert "приглашение к записи" in plan
+    # The plan must steer the writer to rephrase, not repeat verbatim.
+    assert "перефраз" in plan
 
 
 def test_specialty_normalized_to_russian() -> None:
@@ -1030,6 +1032,44 @@ def test_invalid_contact_in_booking_reasks_internationally() -> None:
     assert "международном формате" in low
     assert "11 цифр" not in low  # never country-specific
     assert resp.metadata["conversation_status"] != "booking_created"
+
+
+def test_reschedule_after_contact_ask_acknowledges_change() -> None:
+    # Slot chosen (завтра 16:00), we asked for contact, user changes to
+    # "послезавтра днём" -> acknowledge the NEW slot, never "Не вижу контакт".
+    history = _lor_offer_history() + [
+        _msg("user", "в 4 завтра"),
+        _msg("assistant", "Отлично, завтра 16:00 к ЛОРу.\n\nДля записи оставьте, пожалуйста, имя, возраст, телефон или WhatsApp."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="wants_booking"))
+    resp = _run(handle_medical_center_chat(
+        gem, _request("а нет, давайте послезавтра днём", history=history)
+    ))
+    low = resp.answer.casefold()
+    assert "не вижу контакт" not in low
+    assert "выбрали послезавтра 12:00 к лору" in low  # acknowledges the change
+    assert "демо-окна" not in low                     # does not re-list slots
+    assert "оставьте" in low                          # asks for the missing contact
+    assert resp.metadata["state"]["selected_slot"] == "послезавтра 12:00"
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
+    assert gem.writer_calls == 0                       # deterministic, no dead-end LLM
+
+
+def test_affirmation_after_price_cta_offers_slots_not_dead_end() -> None:
+    # "хорошо" after the assistant invited booking must offer slots, not "Принято.".
+    history = [
+        _msg("user", "болит ухо"),
+        _msg("assistant", "Если болит ухо, лучше начать с ЛОР-врача. Принимает Тимур Серикович Ахметов."),
+        _msg("user", "сколько стоит?"),
+        _msg("assistant", "Первичный приём у ЛОР-врача стоит 10 500 ₸.\n\nМогу показать ближайшие окна к ЛОРу."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="smalltalk"))
+    resp = _run(handle_medical_center_chat(gem, _request("хорошо", history=history)))
+    low = resp.answer.casefold()
+    assert "демо-окна" in low and "11:00" in low  # offers concrete slots
+    assert "принято" not in low
+    assert resp.metadata["conversation_status"] == "slots_offered"
+    assert gem.writer_calls == 0
 
 
 def test_symptom_normalization_sneezing_redness() -> None:
