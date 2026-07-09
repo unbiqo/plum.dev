@@ -28,14 +28,16 @@ from app.medical_center_guardrails import (
     validate_answer,
 )
 from app.medical_center_intake import (
+    build_routing_answer,
     build_safety_question,
     extract_conversation_intake,
     extract_medical_intake,
+    specialty_for_intake,
 )
 from app.medical_center_kb import get_full_kb_context
 from app.medical_center_rag import retrieve_medical_kb_context
 from app.medical_center_routing import route_symptom
-from app.medical_center_slots import normalize_symptom_terms, resolve_slot
+from app.medical_center_slots import normalize_symptom_terms, resolve_slot, specialty_dative
 from app.medical_center_planner import (
     reclassify_discount_question,
     reclassify_medical_advice_question,
@@ -1852,6 +1854,26 @@ def test_intake_extractor_reads_side_and_denials_from_the_reply() -> None:
 def test_intake_denied_symptom_is_never_read_as_a_new_complaint() -> None:
     # "одышки нет" answers a safety question; it is not a breathing complaint.
     assert extract_medical_intake("отёка нет, одышки нет").is_medical_complaint is False
+
+
+def test_routing_answer_declines_the_specialty_correctly_for_every_complaint() -> None:
+    # The specialty arrives in the dative, so every sentence must use a verb that
+    # governs it. "начать с терапевту" (caught live on prod) is ungrammatical:
+    # "с" wants the genitive. Guard all complaint types at once.
+    for message in (
+        "у меня дискомфорт в икрах",     # pain, leg
+        "как будто надорвал бицепс",      # strain
+        "порезал язык",                   # cut, mouth
+        "ударился головой",               # impact, head
+        "прищемил палец",                 # impact, limb
+        "болит спина",                    # pain, generic branch
+    ):
+        intake = extract_medical_intake(message)
+        specialty = specialty_for_intake(intake)
+        answer = build_routing_answer(intake, specialty_dative(specialty))
+        assert f"с {specialty_dative(specialty)}" not in answer, answer
+        assert "—" not in answer
+        assert f"к {specialty_dative(specialty)}?" in answer  # the booking CTA
 
 
 def test_asking_when_windows_are_free_offers_slots_instead_of_deferring() -> None:

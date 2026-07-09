@@ -499,6 +499,10 @@ def build_routing_answer(intake: MedicalIntake, dative: str) -> str:
     Deliberately conversational rather than policy-flavoured, and free of the em
     dash (see the writer's style rules). Never names a diagnosis, a doctor or a
     price; the booking CTA is the only next step offered.
+
+    ``dative`` is the specialty in the dative case, so every sentence here must
+    use a verb that governs it ("показаться терапевту", "обратиться к терапевту")
+    and never a preposition that wants another case ("начать с терапевта").
     """
     ct, region = intake.complaint_type, intake.region
 
@@ -510,27 +514,27 @@ def build_routing_answer(intake: MedicalIntake, dative: str) -> str:
         )
     elif ct == "impact_or_head_injury" and region == "head":
         caveat = (
-            f"Если сознание не терялось и нет рвоты, сильной головной боли или сонливости, "
-            f"можно начать с приёма у {dative}. Если появится хотя бы один из этих признаков, "
-            "лучше обратиться очно как можно скорее."
+            "Если сознание не терялось и нет рвоты, сильной головной боли или сонливости, "
+            f"можно показаться {dative} в плановом порядке. Если появится хотя бы один из "
+            "этих признаков, лучше обратиться очно как можно скорее."
         )
     elif ct in ("impact_or_head_injury", "strain_or_sprain"):
         caveat = (
-            f"Если движение сохраняется и боль терпимая, можно начать с {dative}. "
+            f"Если движение сохраняется и боль терпимая, можно показаться {dative}. "
             "Если боль резкая, место сильно отекает или есть онемение, лучше обратиться "
             "очно как можно скорее."
         )
     elif region == "leg":
         caveat = (
-            f"Если нет сильного отёка, онемения, одышки или боли в груди, можно начать с {dative}. "
+            f"Если нет сильного отёка, онемения, одышки или боли в груди, можно показаться {dative}. "
             "Если боль резкая, нога отекает или трудно наступать, лучше обратиться очно "
             "как можно скорее."
         )
     else:
         caveat = (
-            f"Если самочувствие не ухудшается и сильной боли нет, можно начать с {dative}. "
-            "Если боль усиливается или появляются новые симптомы, лучше показаться врачу "
-            "очно как можно скорее."
+            f"Если самочувствие не ухудшается и сильной боли нет, можно показаться {dative}. "
+            "Если боль усиливается или появляются новые симптомы, лучше обратиться очно "
+            "как можно скорее."
         )
 
     return f"{caveat}\n\nМогу подобрать ближайшее окно к {dative}?"
