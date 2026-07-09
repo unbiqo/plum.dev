@@ -306,6 +306,7 @@ async def plan_conversation_turn(
     state: ConversationState,
     kb_context: str,
     gemini: "GeminiService",
+    call_info: dict[str, object] | None = None,
 ) -> dict:
     """Run the planner LLM. Never raises — returns a safe default plan on failure."""
     prompt = _build_prompt(message, history, state, kb_context)
@@ -313,12 +314,14 @@ async def plan_conversation_turn(
         raw = await gemini._generate_text(
             model=gemini.settings.general_model,
             model_pool=gemini.settings.general_model_pool,
+            model_profile="medical_planner",
             prompt=prompt,
             system_instruction=_PLANNER_SYSTEM,
             temperature=0.0,
             max_output_tokens=512,
             response_mime_type="application/json",
             response_schema=PLANNER_SCHEMA,
+            call_info=call_info,
         )
         plan = json.loads(raw)
     except Exception as exc:  # noqa: BLE001 - planner must degrade gracefully

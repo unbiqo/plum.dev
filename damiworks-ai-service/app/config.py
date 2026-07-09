@@ -8,12 +8,71 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TEXT_GENERATION_MODEL = "gemini-2.5-flash-lite"
+TEXT_GENERATION_MODEL = "gemini-3.1-flash-lite"
 # Fallback model tried when the primary is unavailable (e.g. 503 "high demand").
 # _generate_text walks the whole pool inside a single attempt, so a second model
 # rescues the turn without waiting for the tenacity retry/timeout to expire.
-TEXT_GENERATION_FALLBACK_MODEL = "gemini-2.5-flash"
+# NOTE: gemini-2.5-flash (no "-lite") was retired by Google and must never be
+# the sole fallback again — gemini-2.5-flash-lite stays as the cheap emergency
+# fallback across every pool below.
+TEXT_GENERATION_FALLBACK_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_TEXT_MODEL_POOL = (TEXT_GENERATION_MODEL, TEXT_GENERATION_FALLBACK_MODEL)
+
+# ---------------------------------------------------------------------------
+# Task-specific model profiles.
+#
+# Each live LLM call site passes model_profile=<name> to GeminiService.
+# _generate_text (see gemini_service.py); the profile resolves to a model pool
+# here. Call sites that don't pass model_profile keep using their existing
+# model/model_pool fields untouched (see Settings below) — this is purely
+# additive, nothing is removed.
+#
+# Tiers (cost roughly ascending):
+#   DEFAULT_FAST_MODEL    — cheap-but-good default for most live traffic.
+#   FALLBACK_CHEAP_MODEL  — emergency fallback only (provider errors/outage),
+#                           not "a slightly better model" — never a profile's
+#                           primary choice.
+#   ESCALATION_MODEL      — stronger live model for tasks where a bad answer
+#                           costs more than the extra tokens (sales/RAG
+#                           grounding, medical planning/repair, extraction).
+#   PREMIUM_MODEL         — reserved for rare premium/offline/eval work, never
+#                           a live-chat default.
+# ---------------------------------------------------------------------------
+DEFAULT_FAST_MODEL = "gemini-3.1-flash-lite"
+FALLBACK_CHEAP_MODEL = "gemini-2.5-flash-lite"
+ESCALATION_MODEL = "gemini-3-flash-preview"
+PREMIUM_MODEL = "gemini-3.5-flash"
+
+MODEL_PROFILES: dict[str, tuple[str, ...]] = {
+    "router": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "classifier": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "sales_writer": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "rag_writer": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "custom_demo_writer": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
+    "attachment_extraction": (ESCALATION_MODEL, PREMIUM_MODEL, DEFAULT_FAST_MODEL),
+    "memory_summary": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
+    "medical_planner": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "medical_writer": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "medical_repair": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "quality_eval": (PREMIUM_MODEL, ESCALATION_MODEL),
+    "default": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+}
+# Env var name for each profile's pool override (CSV), e.g.
+# MEDICAL_PLANNER_MODEL_POOL=gemini-3-flash-preview,gemini-3.1-flash-lite
+_PROFILE_ENV_VARS: dict[str, str] = {
+    "router": "ROUTER_MODEL_POOL",  # reuses the pre-existing env var
+    "classifier": "CLASSIFIER_MODEL_POOL",
+    "sales_writer": "SALES_WRITER_MODEL_POOL",
+    "rag_writer": "RAG_WRITER_MODEL_POOL",
+    "custom_demo_writer": "CUSTOM_DEMO_WRITER_MODEL_POOL",
+    "attachment_extraction": "ATTACHMENT_EXTRACTION_MODEL_POOL",
+    "memory_summary": "MEMORY_SUMMARY_MODEL_POOL",
+    "medical_planner": "MEDICAL_PLANNER_MODEL_POOL",
+    "medical_writer": "MEDICAL_WRITER_MODEL_POOL",
+    "medical_repair": "MEDICAL_REPAIR_MODEL_POOL",
+    "quality_eval": "QUALITY_EVAL_MODEL_POOL",
+    "default": "DEFAULT_MODEL_POOL",
+}
 
 
 @dataclass(frozen=True)
@@ -35,6 +94,10 @@ class Settings:
     general_model_pool: tuple[str, ...] = DEFAULT_TEXT_MODEL_POOL
     rag_model_pool: tuple[str, ...] = DEFAULT_TEXT_MODEL_POOL
     embedding_model_pool: tuple[str, ...] = ("text-embedding-004", "gemini-embedding-001")
+    # Task-specific pools (see MODEL_PROFILES) — populated with defaults plus
+    # any per-profile env override; unknown/missing profile name at call time
+    # falls back to MODEL_PROFILES["default"] (see GeminiService._generate_text).
+    model_profiles: dict[str, tuple[str, ...]] = None  # type: ignore[assignment]
     supabase_rag_table: str = "rag_documents"
     max_history_messages: int = 15
     rag_match_count: int = 3
@@ -114,6 +177,19 @@ def load_gemini_api_keys() -> tuple[GeminiApiKey, ...]:
     return (GeminiApiKey("GEMINI_API_KEY", require_env("GEMINI_API_KEY")),)
 
 
+def load_model_profiles() -> dict[str, tuple[str, ...]]:
+    """MODEL_PROFILES with each profile's pool overridable via its own env var.
+
+    Missing/unset env vars keep the MODEL_PROFILES default — nothing breaks if
+    none of the new *_MODEL_POOL vars are set.
+    """
+    return {
+        profile: env_csv(env_var, list(pool))
+        for profile, pool in MODEL_PROFILES.items()
+        for env_var in [_PROFILE_ENV_VARS[profile]]
+    }
+
+
 def get_settings() -> Settings:
     router_model = TEXT_GENERATION_MODEL
     general_model = TEXT_GENERATION_MODEL
@@ -140,6 +216,7 @@ def get_settings() -> Settings:
         general_model_pool=general_model_pool,
         rag_model_pool=rag_model_pool,
         embedding_model_pool=embedding_model_pool,
+        model_profiles=load_model_profiles(),
         supabase_rag_table=os.getenv("SUPABASE_RAG_TABLE", "rag_documents"),
         max_history_messages=env_int(
             "MAX_HISTORY_MESSAGES",

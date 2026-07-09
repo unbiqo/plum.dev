@@ -2782,6 +2782,16 @@ async def chat(
             combined_predicted_route = combined_answer.get("predicted_route")
             combined_json_valid = bool(combined_answer.get("json_valid"))
             answer = str(combined_answer.get("text_response") or "").strip()
+            model_info = combined_answer.get("model_info") or {}
+            if model_info:
+                logger.info(
+                    "sales rag_writer model_info: profile=%s selected=%s pool=%s fallback=%s latency_ms=%s",
+                    model_info.get("model_profile"),
+                    model_info.get("selected_model"),
+                    model_info.get("model_pool"),
+                    model_info.get("fallback_used"),
+                    model_info.get("latency_ms"),
+                )
             # M3: model-native phone extraction — model handles all formats incl. Russian words.
             # This branch is only reached outside roleplay (else-of-if-roleplay_demo_active).
             if combined_json_valid:

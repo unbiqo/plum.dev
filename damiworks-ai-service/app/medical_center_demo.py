@@ -772,10 +772,12 @@ async def handle_medical_center_chat(
         )
 
         # ---- planner (JSON, temp 0) ----
+        planner_call_info: dict[str, object] = {}
         try:
             planner = await asyncio.wait_for(
                 plan_conversation_turn(
-                    message, history, state, planner_retrieval.context, gemini
+                    message, history, state, planner_retrieval.context, gemini,
+                    call_info=planner_call_info,
                 ),
                 timeout=_PLANNER_TIMEOUT,
             )
@@ -854,9 +856,13 @@ async def handle_medical_center_chat(
         )
 
         # ---- writer (free-text, temp 0.35) ----
+        writer_call_info: dict[str, object] = {}
         try:
             answer = await asyncio.wait_for(
-                write_response(message, history, state, planner, writer_retrieval.context, gemini),
+                write_response(
+                    message, history, state, planner, writer_retrieval.context, gemini,
+                    call_info=writer_call_info,
+                ),
                 timeout=_WRITER_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -874,7 +880,7 @@ async def handle_medical_center_chat(
                 answer = await asyncio.wait_for(
                     write_response(
                         message, history, state, planner, writer_retrieval.context, gemini,
-                        repair=validation.fix,
+                        repair=validation.fix, call_info=writer_call_info,
                     ),
                     timeout=_REPAIR_TIMEOUT,
                 )
@@ -910,6 +916,8 @@ async def handle_medical_center_chat(
                 fallback_reason=fallback_reason,
                 planner_kb_retrieval=planner_retrieval.to_debug_metadata(),
                 kb_retrieval=writer_retrieval.to_debug_metadata(),
+                planner_model_info=planner_call_info or None,
+                writer_model_info=writer_call_info or None,
             ),
         )
     except Exception as exc:  # noqa: BLE001 - a demo turn must never 500
@@ -945,12 +953,16 @@ def _build_metadata(
     fallback_reason: str | None = None,
     planner_kb_retrieval: dict[str, object] | None = None,
     kb_retrieval: dict[str, object] | None = None,
+    planner_model_info: dict[str, object] | None = None,
+    writer_model_info: dict[str, object] | None = None,
 ) -> dict[str, object]:
     conv_status = _derive_conversation_status(state, history or [], planner, lead_status)
     return {
         "medical_center_demo": True,
         "planner_llm_used": "_error" not in planner,
         "writer_llm_used": True,
+        "planner_model_info": planner_model_info,
+        "writer_model_info": writer_model_info,
         "current_intent": planner.get("current_intent"),
         "intent_priority": planner.get("intent_priority"),
         "should_pause_qualification": planner.get("should_pause_qualification"),
@@ -966,6 +978,8 @@ def _build_metadata(
         "state": state.to_metadata(),
         "validation_result": validation.to_metadata(),
         "repaired_answer": repaired,
+        "escalation_used": repaired,
+        "escalation_reason": "guardrail_validation_failed" if repaired else None,
         "planner_timeout": planner_timeout,
         "writer_timeout": writer_timeout,
         "repair_timeout": repair_timeout,

@@ -270,8 +270,15 @@ async def write_response(
     kb_context: str,
     gemini: "GeminiService",
     repair: str | None = None,
+    call_info: dict[str, object] | None = None,
 ) -> str:
-    """Generate the natural assistant answer. ``repair`` adds correction instructions."""
+    """Generate the natural assistant answer. ``repair`` adds correction instructions.
+
+    A repair pass uses a stronger profile ("medical_repair") than a normal
+    writer pass ("medical_writer") — the guardrails already found a problem
+    with the cheaper model's answer, so retrying with the same weak model
+    would likely just repeat it.
+    """
     turn_plan = build_turn_plan(state, planner)
     system = f"{_WRITER_SYSTEM}\n\n{turn_plan}"
     if repair:
@@ -283,8 +290,10 @@ async def write_response(
     raw = await gemini._generate_text(
         model=gemini.settings.general_model,
         model_pool=gemini.settings.general_model_pool,
+        model_profile="medical_repair" if repair else "medical_writer",
         prompt=full_prompt,
         system_instruction=system,
         temperature=0.35 if not repair else 0.2,
+        call_info=call_info,
     )
     return raw.strip()

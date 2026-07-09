@@ -7,6 +7,7 @@ import difflib
 import json
 import logging
 import re
+import time
 from threading import Lock
 from urllib import request as urllib_request
 from urllib.parse import urlparse
@@ -662,6 +663,7 @@ class GeminiService:
             text = await self._generate_text(
                 model=self.settings.router_model,
                 model_pool=self.settings.router_model_pool,
+                model_profile="router",
                 prompt=prompt,
                 system_instruction=self._ensure_exit_roleplay_router_rule(
                     self._resolve_system_prompt(
@@ -706,6 +708,7 @@ class GeminiService:
             text = await self._generate_text(
                 model=self.settings.router_model,
                 model_pool=self.settings.router_model_pool,
+                model_profile="classifier",
                 prompt=prompt,
                 system_instruction=SALES_STAGE_ROUTER_PROMPT,
                 temperature=0,
@@ -745,6 +748,7 @@ class GeminiService:
             text = await self._generate_text(
                 model=self.settings.router_model,
                 model_pool=self.settings.router_model_pool,
+                model_profile="classifier",
                 prompt=prompt,
                 system_instruction=CONTENT_FOLLOWUP_ROUTER_PROMPT,
                 temperature=0,
@@ -771,6 +775,7 @@ class GeminiService:
         return await self._generate_text(
             model=self.settings.general_model,
             model_pool=self.settings.general_model_pool,
+            model_profile="sales_writer",
             prompt=prompt,
             system_instruction=self._resolve_system_prompt(
                 system_prompt,
@@ -802,6 +807,7 @@ class GeminiService:
             rewritten = await self._generate_text(
                 model=self.settings.router_model,
                 model_pool=self.settings.router_model_pool,
+                model_profile="router",
                 prompt=prompt,
                 system_instruction=self._resolve_system_prompt(
                     system_prompt,
@@ -870,6 +876,7 @@ class GeminiService:
                 await self._generate_text(
                     model=self.settings.general_model,
                     model_pool=self.settings.general_model_pool,
+                    model_profile="custom_demo_writer",
                     prompt=prompt,
                     system_instruction=system_instruction,
                     temperature=0.2,
@@ -935,6 +942,7 @@ class GeminiService:
         final_answer = await self._generate_text(
             model=self.settings.rag_model,
             model_pool=self.settings.rag_model_pool,
+            model_profile="rag_writer",
             prompt=prompt,
             system_instruction=system_instruction,
             temperature=0.2,
@@ -1074,17 +1082,21 @@ class GeminiService:
                 system_instruction
             )
 
+        model_info: dict[str, object] = {}
         raw_text = await self._generate_text(
             model=self.settings.rag_model,
             model_pool=self.settings.rag_model_pool,
+            model_profile="rag_writer",
             prompt=prompt,
             system_instruction=system_instruction,
             temperature=0.2,
             max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
             response_mime_type="application/json",
             response_schema=COMBINED_ROUTE_ANSWER_SCHEMA,
+            call_info=model_info,
         )
         parsed = self._parse_combined_route_answer(raw_text)
+        parsed["model_info"] = model_info
         answer = str(parsed.get("text_response") or "").strip()
         if answer:
             answer = self._avoid_repeated_closing_phrase(answer, chat_history)
@@ -1125,6 +1137,7 @@ class GeminiService:
         return await self._generate_multimodal_text(
             model=self.settings.general_model,
             model_pool=self.settings.general_model_pool,
+            model_profile="attachment_extraction",
             prompt=prompt,
             system_instruction=(
                 "You extract temporary sales-demo context from user-provided files. "
@@ -1157,6 +1170,7 @@ class GeminiService:
         return await self._generate_text(
             model=self.settings.general_model,
             model_pool=self.settings.general_model_pool,
+            model_profile="attachment_extraction",
             prompt=prompt,
             system_instruction=(
                 "You extract temporary sales-demo context from user-provided text. "
@@ -1197,6 +1211,7 @@ class GeminiService:
         answer = await self._generate_text(
             model=self.settings.general_model,
             model_pool=self.settings.general_model_pool,
+            model_profile="custom_demo_writer",
             prompt=prompt,
             system_instruction=ROLEPLAY_DEMO_SYSTEM_PROMPT,
             temperature=0.2,
@@ -1239,6 +1254,7 @@ class GeminiService:
         raw_text = await self._generate_text(
             model=self.settings.general_model,
             model_pool=self.settings.general_model_pool,
+            model_profile="custom_demo_writer",
             prompt=prompt,
             system_instruction="\n\n".join(
                 [
@@ -1306,6 +1322,7 @@ class GeminiService:
             rewritten = await self._generate_text(
                 model=self.settings.general_model,
                 model_pool=self.settings.general_model_pool,
+                model_profile="sales_writer",
                 prompt=prompt,
                 system_instruction="\n\n".join(
                     [
@@ -1369,6 +1386,7 @@ class GeminiService:
         return await self._generate_text(
             model=self.settings.router_model,
             model_pool=self.settings.router_model_pool,
+            model_profile="memory_summary",
             prompt=prompt,
             system_instruction=self._resolve_system_prompt(
                 system_prompt,
@@ -1658,6 +1676,7 @@ class GeminiService:
             rewritten = await self._generate_text(
                 model=self.settings.general_model,
                 model_pool=self.settings.general_model_pool,
+                model_profile="rag_writer",
                 prompt=prompt,
                 system_instruction="\n\n".join(
                     [
@@ -1923,13 +1942,27 @@ class GeminiService:
         *,
         model: str,
         model_pool: tuple[str, ...] | None = None,
+        model_profile: str | None = None,
         prompt: str,
         system_instruction: str,
         temperature: float,
         max_output_tokens: int | None = None,
         response_mime_type: str | None = None,
         response_schema: dict[object, object] | None = None,
+        call_info: dict[str, object] | None = None,
     ) -> str:
+        """``model_profile`` (see config.MODEL_PROFILES) resolves the model pool
+        for task-specific routing; an unknown/unset profile falls back to the
+        legacy ``model_pool``/``model`` args untouched — existing call sites
+        that don't pass model_profile behave exactly as before.
+
+        ``call_info``, if given an empty dict by the caller, is filled in
+        place with which model actually answered (selected_model, whether a
+        pool fallback happened, latency) — kept as an out-param rather than a
+        return-type change so this stays purely additive, and as a plain
+        per-call dict (not an attribute on self) so concurrent requests on a
+        shared GeminiService instance can't race on it.
+        """
         def call_model() -> str:
             base_max_output_tokens = (
                 max_output_tokens
@@ -1940,7 +1973,11 @@ class GeminiService:
             if base_max_output_tokens < COMPLETION_RETRY_MAX_OUTPUT_TOKENS:
                 output_token_budgets.append(COMPLETION_RETRY_MAX_OUTPUT_TOKENS)
 
-            candidates = model_pool or (model,)
+            profile_pool = (
+                self.settings.model_profiles.get(model_profile) if model_profile else None
+            )
+            candidates = profile_pool or model_pool or (model,)
+            call_start = time.monotonic()
             last_exc: BaseException | None = None
             local_limit_errors: list[BaseException] = []
 
@@ -2063,10 +2100,28 @@ class GeminiService:
                             output_token_budget,
                         )
                         self._set_active_key(api_key.name)
+                        if call_info is not None:
+                            call_info.update({
+                                "model_profile": model_profile,
+                                "model_pool": candidates,
+                                "selected_model": candidate_model,
+                                "fallback_used": candidate_model != candidates[0],
+                                "fallback_reason": str(last_exc) if last_exc else None,
+                                "latency_ms": round((time.monotonic() - call_start) * 1000),
+                            })
                         return text
 
             if last_exc is None and local_limit_errors:
                 last_exc = local_limit_errors[-1]
+            if call_info is not None:
+                call_info.update({
+                    "model_profile": model_profile,
+                    "model_pool": candidates,
+                    "selected_model": None,
+                    "fallback_used": True,
+                    "fallback_reason": str(last_exc) if last_exc else "all candidates exhausted",
+                    "latency_ms": round((time.monotonic() - call_start) * 1000),
+                })
             raise RuntimeError(
                 f"Gemini API error for model pool {candidates}: {last_exc}"
             ) from last_exc
@@ -2084,11 +2139,13 @@ class GeminiService:
         *,
         model: str,
         model_pool: tuple[str, ...] | None = None,
+        model_profile: str | None = None,
         prompt: str,
         system_instruction: str,
         attachments: list[ChatAttachment],
         temperature: float,
         max_output_tokens: int | None = None,
+        call_info: dict[str, object] | None = None,
     ) -> str:
         parts = self._attachment_parts(attachments)
         if not parts:
@@ -2102,7 +2159,11 @@ class GeminiService:
                 max_output_tokens=output_token_budget,
                 safety_settings=SAFETY_SETTINGS_ALLOW_ALL,
             )
-            candidates = model_pool or (model,)
+            profile_pool = (
+                self.settings.model_profiles.get(model_profile) if model_profile else None
+            )
+            candidates = profile_pool or model_pool or (model,)
+            call_start = time.monotonic()
             last_exc: BaseException | None = None
             local_limit_errors: list[BaseException] = []
             estimated_tokens = estimate_tokens(
@@ -2166,10 +2227,28 @@ class GeminiService:
                         ),
                     )
                     self._set_active_key(api_key.name)
+                    if call_info is not None:
+                        call_info.update({
+                            "model_profile": model_profile,
+                            "model_pool": candidates,
+                            "selected_model": candidate_model,
+                            "fallback_used": candidate_model != candidates[0],
+                            "fallback_reason": str(last_exc) if last_exc else None,
+                            "latency_ms": round((time.monotonic() - call_start) * 1000),
+                        })
                     return text
 
             if last_exc is None and local_limit_errors:
                 last_exc = local_limit_errors[-1]
+            if call_info is not None:
+                call_info.update({
+                    "model_profile": model_profile,
+                    "model_pool": candidates,
+                    "selected_model": None,
+                    "fallback_used": True,
+                    "fallback_reason": str(last_exc) if last_exc else "all candidates exhausted",
+                    "latency_ms": round((time.monotonic() - call_start) * 1000),
+                })
             raise RuntimeError(
                 f"Gemini multimodal API error for model pool {candidates}: {last_exc}"
             ) from last_exc
