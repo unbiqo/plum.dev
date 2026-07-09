@@ -812,7 +812,7 @@ const en: Dict = {
       resetLabel: 'Reset',
       errorMessage: 'Something went wrong. Please try again.',
       introMessage:
-        'Hello! I am the AI administrator for MedNova Clinic. I can help choose a doctor, check prices, explain visit preparation, and pass your appointment request to the administrator. Please describe what is bothering you or which specialist you want to see.',
+        "Hello! 💚 My name is Aigul, I'm the administrator at MedNova Clinic. I can help choose a doctor, guide you on pricing, and book your appointment. Could you tell me — is the patient an adult or a child, and what's bothering you?",
       quickReplies: [
         'Book a doctor',
         'Prices',
@@ -1532,7 +1532,7 @@ const ru: Dict = {
       resetLabel: 'Сброс',
       errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
       introMessage:
-        'Здравствуйте! Я AI-администратор MedNova Clinic. Помогу выбрать врача, узнать стоимость, подготовку к приему и записаться на консультацию. Опишите, пожалуйста, что вас беспокоит или к какому специалисту хотите попасть.',
+        'Здравствуйте! 💚 Меня зовут Айгуль, я администратор MedNova Clinic. Помогу подобрать врача, сориентировать по стоимости и записать на приём. Подскажите, пожалуйста, пациент взрослый или ребёнок, и что вас беспокоит?',
       quickReplies: [
         'Записаться к врачу',
         'Цены',
