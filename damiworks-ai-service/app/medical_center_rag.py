@@ -25,12 +25,24 @@ This module only affects what gets sent to the planner/writer prompts.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 
-from .medical_center_kb import get_raw_markdown
+from .medical_center_kb import get_full_kb_context, get_raw_markdown
 from .medical_center_slots import normalize_specialty, specialty_display
 from .schemas import ChatHistoryMessage
+
+
+def _rag_enabled() -> bool:
+    """Rollback switch: MEDICAL_CENTER_RAG_ENABLED=false reverts to sending the
+    whole KB every turn (the pre-RAG stable behavior), bypassing all retrieval/
+    scoring/gating in this module. Use if retrieval quality regresses in a way
+    that isn't fixed quickly — flip this while the underlying issue is fixed
+    properly, rather than leaving prod degraded."""
+    return os.getenv("MEDICAL_CENTER_RAG_ENABLED", "true").strip().lower() not in (
+        "false", "0", "no",
+    )
 
 # ---------------------------------------------------------------------------
 # Chunk model
@@ -45,6 +57,15 @@ class KbChunk:
     tags: tuple[str, ...]
     text: str
     priority: int = 0
+    # If set, this chunk is only eligible when the RAW (pre-alias-expansion)
+    # query tokens intersect this set — regardless of tag/text score. Used for
+    # a small number of sensitive, easily-triggered-by-accident facts (address,
+    # licenses) so a query about something else entirely can't drag them in via
+    # incidental word overlap. See the incident this defends against: a calf-
+    # discomfort query with no real keyword match fell back to a chunk bundling
+    # the clinic address with everything else, and the address ended up in an
+    # answer nobody asked about it in.
+    gate: frozenset[str] | None = None
 
 
 @dataclass
@@ -54,6 +75,7 @@ class RetrievedKbContext:
     chunks: list[KbChunk]
     context: str  # core + selected chunks, ready to inject into the prompt
     query_terms: tuple[str, ...]
+    full_kb_injected: bool = False
 
     def to_debug_metadata(self) -> dict[str, object]:
         return {
@@ -63,7 +85,7 @@ class RetrievedKbContext:
             "chunk_count": len(self.chunks),
             "query_terms": list(self.query_terms),
             "core_included": bool(self.core_context),
-            "full_kb_injected": False,
+            "full_kb_injected": self.full_kb_injected,
         }
 
 
@@ -120,6 +142,20 @@ _TOPIC_ALIASES: dict[str, tuple[str, ...]] = {
     "доступность": ("свободно", "занято", "слот", "окна", "окно", "ближайшее время", "доступ"),
     "преимущества": ("лучше", "преимущества", "почему вы", "чем вы"),
 }
+
+# Hard gates: a chunk tagged with one of these is only eligible when the RAW
+# (unexpanded) query contains one of the listed words — see KbChunk.gate.
+_ADDRESS_GATE_WORDS = frozenset({
+    "где", "адрес", "адреса", "локация", "находитесь", "находится", "добраться",
+    "карта", "парковка", "контакты", "телефон", "whatsapp", "город", "городе",
+})
+_LICENSE_GATE_WORDS = frozenset({
+    "лицензия", "лицензии", "лицензию", "документы", "license", "licenses",
+})
+# Heuristic: does this FAQ item's OWN question text concern address/licenses?
+# (Used to gate individual split FAQ bullets — see _split_faq.)
+_ADDRESS_TOPIC_HINTS = ("где ", "адрес", "наход", "город", "добраться", "парковк")
+_LICENSE_TOPIC_HINTS = ("лицензи", "документ")
 
 _WORD_RE = re.compile(r"[а-яёa-z0-9\-]+", re.IGNORECASE)
 
@@ -196,6 +232,91 @@ def _split_directions(body: str) -> list[KbChunk]:
     return chunks
 
 
+_FAQ_ITEM_RE = re.compile(r"(?m)^- (.+)$")
+
+
+def _split_faq(body: str) -> list[KbChunk]:
+    """Split "Частые вопросы" into one chunk per bullet (each is "- Q? A.").
+
+    Each FAQ item started life as one entry in a single monolithic chunk that
+    bundled address, licenses, doctor names, discounts and everything else
+    together — meaning ANY tag/text overlap on ANY bullet pulled in ALL of
+    them. Splitting confines each fact to its own small, narrowly-tagged
+    chunk, and address/license bullets get an extra hard gate (see KbChunk.gate)
+    so incidental word overlap can't surface them for an unrelated question.
+    """
+    chunks: list[KbChunk] = []
+    for i, m in enumerate(_FAQ_ITEM_RE.finditer(body)):
+        item_text = m.group(1).strip()
+        low = item_text.lower()
+        # Directory-style bullets ("Как зовут врачей?", "Какие услуги
+        # предоставляете?") answer by enumerating EVERY specialty/doctor —
+        # tagging from the full answer would make them match almost any
+        # specialty-related query at full weight. Alias tagging is derived
+        # from the QUESTION only; the answer still contributes via the
+        # weaker whole-item text-overlap signal (chunk_text_tokens).
+        question_part = item_text.split("?", 1)[0]
+        qlow = question_part.lower()
+        tags = _tokenize(question_part)
+        for keywords in _TOPIC_ALIASES.values():
+            if any(k in qlow for k in keywords):
+                tags.update(keywords)
+        for canonical, aliases in _SPECIALTY_ALIASES.items():
+            if canonical in qlow or any(a in qlow for a in aliases):
+                tags.update(aliases)
+                tags.add(canonical)
+        gate: frozenset[str] | None = None
+        if any(h in low for h in _ADDRESS_TOPIC_HINTS):
+            gate = _ADDRESS_GATE_WORDS
+        elif any(h in low for h in _LICENSE_TOPIC_HINTS):
+            gate = _LICENSE_GATE_WORDS
+        title = item_text.split("?", 1)[0].strip()[:60] or item_text[:60]
+        chunks.append(KbChunk(
+            id=f"faq_{i}",
+            title=title,
+            section="faq",
+            tags=tuple(tags) or (low,),
+            text=f"- {item_text}",
+            priority=0,
+            gate=gate,
+        ))
+    return chunks
+
+
+_CONTACTS_MARKER = "Контакты и режим работы:"
+
+
+def _split_about(body: str) -> list[KbChunk]:
+    """Split "О клинике" into a general description chunk (specialty list,
+    positioning — safe to surface for any generic services question) and a
+    separate, gated contacts/address/hours chunk.
+
+    Un-split, this section's specialty-list sentence and the clinic address
+    lived in the SAME chunk — any generic "what services" query that matched
+    the specialty list dragged the physical address along with it, address
+    wasn't even asked about. Same bug class as the FAQ split above.
+    """
+    marker_idx = body.find(_CONTACTS_MARKER)
+    if marker_idx == -1:
+        return [KbChunk(
+            id="section_о_клинике", title="О клинике", section="services",
+            tags=_tokenize(body) or ("клинике",), text=f"## О клинике\n\n{body}",
+        )]
+    general = body[:marker_idx].strip()
+    contacts = body[marker_idx:].strip()
+    return [
+        KbChunk(
+            id="section_о_клинике", title="О клинике", section="services",
+            tags=_tokenize(general) or ("клинике",), text=f"## О клинике\n\n{general}",
+        ),
+        KbChunk(
+            id="section_контакты_и_режим_работы", title="Контакты и режим работы",
+            section="faq", tags=_tokenize(contacts), text=contacts,
+            gate=_ADDRESS_GATE_WORDS,
+        ),
+    ]
+
+
 def _split_scenarios(body: str) -> list[KbChunk]:
     chunks: list[KbChunk] = []
     for m in _SCENARIO_ITEM_RE.finditer(body):
@@ -237,6 +358,9 @@ def _parse_kb() -> tuple[str, list[KbChunk]]:
         if heading in _CORE_HEADINGS:
             core_parts.append(f"## {heading}\n\n{body}")
             continue
+        if heading == "О клинике":
+            chunks.extend(_split_about(body))
+            continue
         if heading == "Направления — подробно":
             chunks.extend(_split_directions(body))
             continue
@@ -245,6 +369,9 @@ def _parse_kb() -> tuple[str, list[KbChunk]]:
             continue
         if heading == "Примеры диалогов":
             chunks.extend(_split_scenarios(body))
+            continue
+        if heading == "Частые вопросы":
+            chunks.extend(_split_faq(body))
             continue
 
         section_type = _SECTION_BY_HEADING.get(heading, "faq")
@@ -260,6 +387,7 @@ def _parse_kb() -> tuple[str, list[KbChunk]]:
             tags=tuple(tags) or (heading.lower(),),
             text=f"## {heading}\n\n{body}",
             priority=1 if section_type in ("prices", "licenses", "advantages") else 0,
+            gate=_LICENSE_GATE_WORDS if section_type == "licenses" else None,
         ))
 
     core = (
@@ -285,8 +413,11 @@ def _get_parsed() -> tuple[str, list[KbChunk], dict[str, frozenset[str]]]:
 
 _WRITER_TOP_K = 6
 _PLANNER_TOP_K = 4
-# Generic fallback shown when nothing scores above zero (e.g. pure smalltalk).
-_FALLBACK_CHUNK_IDS = ("section_направления_и_услуги", "section_частые_вопросы")
+# Generic fallback shown when nothing scores above zero (e.g. pure smalltalk,
+# or a symptom the KB has no specific rule for). Deliberately narrow: general
+# services list + routing rules only — no address, no specific doctor, no
+# prices. Those are exactly the facts that must never appear unprompted.
+_FALLBACK_CHUNK_IDS = ("section_направления_и_услуги", "section_маршрутизация_по_частым_запросам")
 
 
 def _expand_query_terms(raw_tokens: set[str]) -> set[str]:
@@ -317,6 +448,7 @@ def _score_chunk(
     query_terms: set[str],
     boost_specialty: str | None,
     chunk_text_tokens: dict[str, frozenset[str]],
+    raw_tokens: set[str],
 ) -> float:
     """Keyword/tag overlap score. Uses whole-token intersection for the text
     signal (not raw substring containment) — a short query token like "про"
@@ -324,7 +456,12 @@ def _score_chunk(
     ``priority`` is a tie-breaker ONLY among chunks that already matched
     something — it must never by itself make an unrelated chunk look relevant
     (that would defeat the no-match fallback and could leak unrelated KB
-    content into e.g. a prompt-injection probe)."""
+    content into e.g. a prompt-injection probe). A ``gate`` (address/licenses)
+    forces the score to 0 unless the user's own words (pre-alias-expansion)
+    actually ask about that topic — tag/text overlap alone isn't enough for
+    these, since they're the facts most likely to leak in by accident."""
+    if chunk.gate is not None and not (chunk.gate & raw_tokens):
+        return 0.0
     tag_set = set(chunk.tags)
     base = 2.0 * len(tag_set & query_terms)
     base += 0.5 * len(chunk_text_tokens[chunk.id] & query_terms)
@@ -350,7 +487,21 @@ def retrieve_medical_kb_context(
     (not the whole history), and known state (specialty/symptoms) — never the
     full conversation. ``mode="planner"`` returns fewer, compact chunks;
     ``mode="writer"`` returns more, for a fuller answer.
+
+    Rollback: MEDICAL_CENTER_RAG_ENABLED=false sends the whole KB instead (see
+    ``_rag_enabled``) — a safety net if retrieval quality ever regresses badly
+    enough that reverting beats waiting for a proper fix.
     """
+    if not _rag_enabled():
+        return RetrievedKbContext(
+            mode=mode,
+            core_context="",
+            chunks=[],
+            context=get_full_kb_context(),
+            query_terms=(),
+            full_kb_injected=True,
+        )
+
     core, chunks, text_tokens = _get_parsed()
 
     recent_user_msgs = [m.content or "" for m in (history or []) if m.role == "user"][-3:]
@@ -365,7 +516,7 @@ def retrieve_medical_kb_context(
 
     top_k = _PLANNER_TOP_K if mode == "planner" else _WRITER_TOP_K
     scored = [
-        (chunk, _score_chunk(chunk, query_terms, canonical_specialty, text_tokens))
+        (chunk, _score_chunk(chunk, query_terms, canonical_specialty, text_tokens, raw_tokens))
         for chunk in chunks
     ]
     scored = [(c, s) for c, s in scored if s > 0]

@@ -168,6 +168,17 @@ _RED_FLAG_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"|температур\w*[^.!?]{0,40}(?:сустав|колен)\w*\s+горяч",
         re.IGNORECASE,
     )),
+    # Calf/leg discomfort combined with breathing/chest-pain, or a sudden
+    # asymmetric swelling — the classic urgent-care combination. Deliberately
+    # narrow: bare calf discomfort alone (no breathing/swelling clue) must NOT
+    # trigger here — it goes through the calf-safety clarification short-circuit
+    # instead (detect_calf_discomfort / medical_center_demo.py).
+    ("leg_swelling_emergency", re.compile(
+        r"(?:икр\w*|голен(?!остоп)\w*)[^.!?]{0,60}(?:одышк\w*|тяжело\s+дыш\w*|трудно\s+дыш\w*|боль\w*\s+в\s+груди)"
+        r"|(?:одышк\w*|тяжело\s+дыш\w*|трудно\s+дыш\w*|боль\w*\s+в\s+груди)[^.!?]{0,60}(?:икр\w*|голен(?!остоп)\w*)"
+        r"|сильн\w+\s+от[её]к\w*\s+(?:на\s+)?одной\s+ноги|от[её]к\w*\s+(?:на\s+)?одной\s+ноги",
+        re.IGNORECASE,
+    )),
 )
 
 
@@ -208,6 +219,21 @@ _SYMPTOM_SPECIALTY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"температур|\bорви\b|простуд|кашель|насморк|слабость|ломота", re.IGNORECASE),
      "терапевт (для ребёнка — педиатр)"),
 )
+
+
+# Calf/lower-leg discomfort (икра/голень — muscle, not the ankle joint —
+# "голеностоп" is excluded via the negative lookahead) is deliberately NOT
+# routed straight to a specialist by route_symptom: unlike a joint complaint,
+# it needs a brief safety screen first (one leg or both, swelling, redness,
+# trauma, numbness, breathlessness/chest pain) before any routing suggestion.
+# True red flags (breathing/chest pain/asymmetric swelling combos) are caught
+# earlier by detect_red_flags and never reach this detector.
+_CALF_DISCOMFORT_RE = re.compile(r"икр\w*|голен(?!остоп)\w*", re.IGNORECASE)
+
+
+def detect_calf_discomfort(text: str) -> bool:
+    """True if the message mentions calf/lower-leg discomfort (icra/goleny)."""
+    return bool(_CALF_DISCOMFORT_RE.search(text or ""))
 
 
 def detect_symptom_specialty(text: str) -> str | None:
@@ -461,12 +487,22 @@ def reconstruct_specialty_from_history(history: list[ChatHistoryMessage]) -> str
     listing services, or the user's own objection/negation, will not match —
     see module note above on _SPECIALTY_MENTION_RE for why this is both
     false-positive-safe and negation-safe.
+
+    A HEDGED mention ("обычно обращаются к травматологу-ортопеду или терапевту")
+    is not a committed routing decision — it's the writer naming two possible
+    options, not confirming one. Skip any match immediately followed by "или"
+    (an alternative) instead of locking onto whichever specialty happens to be
+    named first.
     """
     for msg in reversed(list(history or [])):
         if msg.role != "assistant":
             continue
-        for word in reversed(_SPECIALTY_MENTION_RE.findall(msg.content or "")):
-            canonical = normalize_specialty(word)
+        content = msg.content or ""
+        for m in reversed(list(_SPECIALTY_MENTION_RE.finditer(content))):
+            tail = content[m.end():m.end() + 40]
+            if re.match(r"\s*или\b", tail, re.IGNORECASE):
+                continue
+            canonical = normalize_specialty(m.group(1))
             if canonical:
                 return specialty_display(canonical)
     return ""

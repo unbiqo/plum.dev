@@ -47,6 +47,7 @@ from .medical_center_state import (
     ConversationState,
     apply_planner_updates,
     build_conversation_state,
+    detect_calf_discomfort,
     detect_red_flags,
     is_affirmation,
     looks_like_invalid_phone,
@@ -75,6 +76,23 @@ INVALID_CONTACT_ANSWER = (
 CLINIC_ADDRESS_ANSWER = (
     "MedNova Clinic находится в Астане, по адресу: проспект Тауелсиздик, 33."
 )
+
+# Calf/leg discomfort safety screen (deterministic, two rounds then a safe
+# hand-off). Real red flags (breathing/chest pain/asymmetric swelling) are
+# caught earlier by detect_red_flags and never reach this flow.
+CALF_SCREEN_Q1 = (
+    "Поняла, дискомфорт в икрах. Подскажите, пожалуйста, возраст пациента и есть ли "
+    "отёк, покраснение, травма, онемение, одышка или боль в груди?"
+)
+CALF_SCREEN_Q2 = (
+    "Уточните, пожалуйста: дискомфорт в одной икре или в обеих? Есть ли отёк, "
+    "покраснение или травма?"
+)
+# Substrings of the casefolded questions above, used to detect "have we already
+# asked this" from the assistant's last turn — same pattern as
+# _assistant_asked_for_contact / _assistant_in_slot_selection below.
+CALF_SCREEN_Q1_MARKER = "подскажите, пожалуйста, возраст пациента и есть ли"
+CALF_SCREEN_Q2_MARKER = "дискомфорт в одной икре или в обеих"
 
 # Deterministic deflection for prompt-injection / internal-architecture probes.
 # Matches the KB's own "Защита от посторонних инструкций" wording so the
@@ -674,6 +692,70 @@ async def handle_medical_center_chat(
                     "conversation_status": "doctor_selection",
                     "conversation_status_label": _CONV_STATUS_LABELS["doctor_selection"],
                     "conversation_status_reason": f"routed to {routing.specialty}",
+                },
+            )
+
+        # ---- CALF/LEG DISCOMFORT SAFETY SCREEN (deterministic, before the planner) ----
+        # Calf/leg discomfort ("икра"/"голень") isn't an obvious joint/nerve
+        # complaint, so route_symptom above correctly leaves it to the normal
+        # flow — but that used to mean it hit the planner/writer with no KB
+        # rule to ground on, retrieval fell back to a generic chunk set, and
+        # the writer confidently named a specialist/doctor the safety screen
+        # never actually warranted. Ask the screening questions deterministically
+        # instead of letting LLM+retrieval improvise a routing guess.
+        #
+        # Stays in this flow once started even if a later reply doesn't repeat
+        # "икра"/"голень" itself (e.g. "и", or "в обеих, отёка нет" answering
+        # the screen) — otherwise a normal follow-up reply would fall through
+        # to the LLM mid-screen, the exact failure mode this short-circuit
+        # exists to prevent.
+        last_assistant = _last_assistant(history)
+        asked_q1 = CALF_SCREEN_Q1_MARKER in last_assistant
+        asked_q2 = CALF_SCREEN_Q2_MARKER in last_assistant
+        if (
+            (detect_calf_discomfort(message) or asked_q1 or asked_q2)
+            and not _booking_confirmation_sent(history)
+            and not _assistant_in_slot_selection(history)
+            and not _assistant_asked_for_contact(history)
+        ):
+            state.symptoms_or_goal = state.symptoms_or_goal or "дискомфорт в икрах"
+            if asked_q2:
+                # Two screening rounds done, no red flag surfaced (those short-
+                # circuit earlier via detect_red_flags) — hand off to a
+                # therapist (KB has no vascular specialist) with an honest
+                # caveat, never a diagnosis word.
+                answer_text = (
+                    "Спасибо. По описанию явных тревожных признаков нет, но некоторые "
+                    "сочетания симптомов требуют срочной очной оценки — для начала лучше "
+                    "показаться терапевту, он решит, нужен ли осмотр другого специалиста.\n\n"
+                    "Могу подобрать ближайшее окно к терапевту?"
+                )
+                state.specialty = "терапевт"
+            elif asked_q1:
+                answer_text = CALF_SCREEN_Q2
+            else:
+                answer_text = CALF_SCREEN_Q1
+            lead_status = _derive_lead_status(state, history)
+            conv_status = "doctor_selection" if asked_q2 else "consultation"
+            return ChatResponse(
+                route=Route.general,
+                routes=[Route.general],
+                answer=answer_text,
+                checkout=False,
+                lead_status=lead_status,
+                metadata={
+                    "medical_center_demo": True,
+                    "planner_llm_used": False,
+                    "writer_llm_used": False,
+                    "calf_discomfort_short_circuit": True,
+                    "current_intent": "symptom_description",
+                    "medical_lead_status": _derive_medical_lead_status(
+                        lead_status, history, message
+                    ),
+                    "state": state.to_metadata(),
+                    "conversation_status": conv_status,
+                    "conversation_status_label": _CONV_STATUS_LABELS.get(conv_status, conv_status),
+                    "conversation_status_reason": "calf_discomfort_screen",
                 },
             )
 
