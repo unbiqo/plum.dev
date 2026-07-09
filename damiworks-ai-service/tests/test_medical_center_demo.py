@@ -539,7 +539,7 @@ def test_contact_collection_sets_lead_status() -> None:
         gem, _request("Хочу записаться к кардиологу, мой номер +7 701 222 33 44")
     ))
     assert resp.metadata["conversation_status"] == "slots_offered"
-    assert "демо-окна" in resp.answer.casefold()
+    assert "ближайшие окна" in resp.answer.casefold()
     assert resp.lead_status == "contact_collected"  # contact already on file
     assert resp.metadata["state"]["contact"]
     assert resp.metadata["booking_stage"] == "slots_offered"
@@ -858,7 +858,7 @@ def test_booking_offers_slots_and_keeps_specialty() -> None:
         gem, _request("Можете записать?", history=_booking_history())
     ))
     low = resp.answer.casefold()
-    assert "демо-окна" in low
+    assert "ближайшие окна" in low
     assert "завтра 10:00" in low and "15:30" in low
     assert resp.metadata["conversation_status"] == "slots_offered"
     # Does NOT re-ask the specialist, does NOT defer to the administrator.
@@ -882,7 +882,7 @@ def test_date_question_returns_concrete_slots() -> None:
 def test_no_booking_confirm_before_contact() -> None:
     history = _booking_history() + [
         _msg("user", "Можете записать?"),
-        _msg("assistant", "К терапевту есть демо-окна: завтра 10:00, завтра 15:30 или послезавтра 11:00.\n\nКакое время вам удобнее?"),
+        _msg("assistant", "К терапевту есть ближайшие окна: завтра 10:00, завтра 15:30 или послезавтра 11:00.\n\nКакое время вам удобнее?"),
     ]
     gem = FakeGemini(planner=_default_planner(
         current_intent="wants_booking", slots={"specialty": "терапевт"},
@@ -917,14 +917,14 @@ def test_booking_confirmed_when_all_fields_present() -> None:
 def test_emergency_preempts_booking_flow() -> None:
     history = _booking_history() + [
         _msg("user", "Можете записать?"),
-        _msg("assistant", "К терапевту есть демо-окна: завтра 10:00, завтра 15:30 или послезавтра 11:00.\n\nКакое время вам удобнее?"),
+        _msg("assistant", "К терапевту есть ближайшие окна: завтра 10:00, завтра 15:30 или послезавтра 11:00.\n\nКакое время вам удобнее?"),
     ]
     gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
     resp = _run(handle_medical_center_chat(
         gem, _request("Сильная боль в груди и трудно дышать", history=history)
     ))
     assert resp.answer == EMERGENCY_ANSWER
-    assert "демо-окна" not in resp.answer.casefold()
+    assert "ближайшие окна" not in resp.answer.casefold()
     assert gem.planner_calls == 0  # short-circuit before any LLM
 
 
@@ -949,7 +949,7 @@ def _lor_offer_history() -> list:
     return [
         _msg("user", "покраснение и чихаю"),
         _msg("assistant", "По описанным симптомам вам может помочь ЛОР-врач."),
-        _msg("assistant", "К ЛОРу есть демо-окна: завтра 11:00, завтра 16:00 или послезавтра 12:00.\n\nКакое время вам удобнее?"),
+        _msg("assistant", "К ЛОРу есть ближайшие окна: завтра 11:00, завтра 16:00 или послезавтра 12:00.\n\nКакое время вам удобнее?"),
     ]
 
 
@@ -964,7 +964,7 @@ def test_natural_slot_selection_advances_to_contact() -> None:
     gem = FakeGemini(planner=_lor_planner())
     resp = _run(handle_medical_center_chat(gem, _request("В 16", history=_lor_offer_history())))
     low = resp.answer.casefold()
-    assert "демо-окна" not in low          # no repeated slot list
+    assert "ближайшие окна" not in low          # no repeated slot list
     assert "завтра 16:00" in low
     assert "оставьте" in low                # asks for name/contact
     assert resp.metadata["conversation_status"] == "awaiting_contact"
@@ -976,7 +976,7 @@ def test_ambiguous_slot_asks_confirmation_not_relist() -> None:
     resp = _run(handle_medical_center_chat(gem, _request("В 4", history=_lor_offer_history())))
     low = resp.answer.casefold()
     assert "правильно понял, хотите завтра 16:00" in low
-    assert "демо-окна" not in low  # a confirmation, not the full list again
+    assert "ближайшие окна" not in low  # a confirmation, not the full list again
 
 
 def test_affirmation_confirms_suggested_slot() -> None:
@@ -996,7 +996,7 @@ def test_unmapped_reply_after_offer_clarifies_once() -> None:
     gem = FakeGemini(planner=_lor_planner(current_intent="wants_booking"))
     resp = _run(handle_medical_center_chat(gem, _request("давайте не уверен", history=_lor_offer_history())))
     low = resp.answer.casefold()
-    assert "демо-окна" not in low  # must NOT repeat the same list
+    assert "ближайшие окна" not in low  # must NOT repeat the same list
     assert "не совсем понял" in low and "например" in low
     assert gem.writer_calls == 0  # deterministic clarification, no LLM loop
 
@@ -1048,7 +1048,7 @@ def test_reschedule_after_contact_ask_acknowledges_change() -> None:
     low = resp.answer.casefold()
     assert "не вижу контакт" not in low
     assert "выбрали послезавтра 12:00 к лору" in low  # acknowledges the change
-    assert "демо-окна" not in low                     # does not re-list slots
+    assert "ближайшие окна" not in low                     # does not re-list slots
     assert "оставьте" in low                          # asks for the missing contact
     assert resp.metadata["state"]["selected_slot"] == "послезавтра 12:00"
     assert resp.metadata["conversation_status"] == "awaiting_contact"
@@ -1066,7 +1066,7 @@ def test_affirmation_after_price_cta_offers_slots_not_dead_end() -> None:
     gem = FakeGemini(planner=_lor_planner(current_intent="smalltalk"))
     resp = _run(handle_medical_center_chat(gem, _request("хорошо", history=history)))
     low = resp.answer.casefold()
-    assert "демо-окна" in low and "11:00" in low  # offers concrete slots
+    assert "ближайшие окна" in low and "11:00" in low  # offers concrete slots
     assert "принято" not in low
     assert resp.metadata["conversation_status"] == "slots_offered"
     assert gem.writer_calls == 0
@@ -1076,6 +1076,94 @@ def test_symptom_normalization_sneezing_redness() -> None:
     out = normalize_symptom_terms("redness and sneezing")
     assert "покраснение" in out and "чихание" in out
     assert "redness" not in out.lower() and "sneezing" not in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# Clinic address + post-booking behaviour (no repeated confirmation)
+# ---------------------------------------------------------------------------
+
+def _booked_history() -> list:
+    return _lor_offer_history() + [
+        _msg("user", "послезавтра в 12"),
+        _msg("assistant", "Отлично, послезавтра 12:00 к ЛОРу.\n\nДля записи оставьте, пожалуйста, имя, возраст, телефон или WhatsApp."),
+        _msg("user", "Дамир 23 77777102402"),
+        _msg("assistant", "Готово, Дамир! Записали вас на послезавтра 12:00 к ЛОРу. С вами свяжутся для подтверждения деталей."),
+    ]
+
+
+def test_kb_has_astana_address() -> None:
+    kb = get_full_kb_context()
+    assert "Тауелсиздик, 33" in kb
+    assert "Астан" in kb
+    assert "Байтурсынова" not in kb  # old Almaty address removed
+
+
+def test_address_before_booking() -> None:
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_services"))
+    resp = _run(handle_medical_center_chat(gem, _request("где находится клиника?")))
+    low = resp.answer.casefold()
+    assert "астан" in low and "тауелсиздик, 33" in low
+    assert gem.planner_calls == 0  # deterministic short-circuit, no LLM
+
+
+def test_address_intent_variations() -> None:
+    for q in ("адрес какой?", "куда приезжать?", "где вы находитесь?",
+              "это в Алматы или Астане?", "в каком городе?", "как к вам проехать?"):
+        gem = FakeGemini(planner=_default_planner())
+        resp = _run(handle_medical_center_chat(gem, _request(q)))
+        assert "тауелсиздик, 33" in resp.answer.casefold(), q
+        assert gem.planner_calls == 0, q
+
+
+def test_address_after_booking_is_not_confirmation() -> None:
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_services"))
+    resp = _run(handle_medical_center_chat(gem, _request("адрес какой?", history=_booked_history())))
+    low = resp.answer.casefold()
+    assert "тауелсиздик, 33" in low
+    assert not low.startswith("готово, дамир")   # not the booking confirmation
+    assert "записали вас на" not in low           # main answer is the address
+
+
+def test_post_booking_general_question_defers_to_llm() -> None:
+    gem = FakeGemini(
+        planner=_lor_planner(current_intent="ask_preparation"),
+        writer_texts=["Возьмите список лекарств и предыдущие анализы."],
+    )
+    resp = _run(handle_medical_center_chat(gem, _request("а как подготовиться?", history=_booked_history())))
+    low = resp.answer.casefold()
+    assert "записали вас на" not in low     # does NOT repeat the confirmation
+    assert "возьмите" in low                # the new question is actually answered
+
+
+def test_appointment_details_question_restates_concisely() -> None:
+    gem = FakeGemini(planner=_lor_planner(current_intent="answer_question"))
+    resp = _run(handle_medical_center_chat(gem, _request("на когда я записан?", history=_booked_history())))
+    low = resp.answer.casefold()
+    assert "вы записаны" in low and "послезавтра 12:00" in low
+    assert gem.writer_calls == 0            # concise deterministic restatement
+
+
+def test_final_confirmation_not_repeated_on_unrelated_message() -> None:
+    # Two different follow-ups must NOT both return the same booking confirmation.
+    gem = FakeGemini(planner=_default_planner(current_intent="ask_services"))
+    r1 = _run(handle_medical_center_chat(gem, _request("а где находится клиника?", history=_booked_history())))
+    gem2 = FakeGemini(planner=_default_planner(current_intent="ask_services"))
+    r2 = _run(handle_medical_center_chat(gem2, _request("адрес какой?", history=_booked_history())))
+    for r in (r1, r2):
+        assert "записали вас на" not in r.answer.casefold()
+        assert "тауелсиздик, 33" in r.answer.casefold()
+
+
+def test_no_demo_wording_in_slot_offer() -> None:
+    history = [
+        _msg("user", "болит ухо"),
+        _msg("assistant", "Если болит ухо, лучше начать с ЛОР-врача. Могу показать ближайшие окна к ЛОРу."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="smalltalk"))
+    resp = _run(handle_medical_center_chat(gem, _request("давайте", history=history)))
+    low = resp.answer.casefold()
+    assert "ближайшие окна" in low
+    assert "демо" not in low and "тестов" not in low
 
 
 def test_build_state_sticky_emergency_from_history() -> None:

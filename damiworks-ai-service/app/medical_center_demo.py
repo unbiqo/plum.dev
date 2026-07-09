@@ -70,6 +70,42 @@ INVALID_CONTACT_ANSWER = (
     "международном формате или Telegram."
 )
 
+# Single source of truth for the patient-facing clinic address.
+CLINIC_ADDRESS_ANSWER = (
+    "MedNova Clinic находится в Астане, по адресу: проспект Тауелсиздик, 33."
+)
+
+# Address / location questions ("где находится", "адрес какой", "куда ехать",
+# "в каком городе"). Deliberately does NOT match "куда я записан" (that is an
+# appointment-detail question handled separately).
+_ADDRESS_RE = re.compile(
+    r"\bадрес\b|адрес\s+клиник"
+    r"|где\s+(?:вы\s+|ваша\s+|вас\s+)?(?:наход|клиник|располож)"
+    r"|\bвы\s+где\b"
+    r"|как\s+(?:к\s+вам\s+)?(?:про)?ехать|как\s+вас\s+найти|как\s+(?:к\s+вам\s+)?добра"
+    r"|куда\s+(?:мне\s+)?(?:при)?ехать|куда\s+приезжать|куда\s+подъезж|куда\s+подход"
+    r"|\bлокаци|в\s+каком\s+городе|это\s+в\s+(?:алмат|астан)|город\s+какой",
+    re.IGNORECASE,
+)
+
+# "Am I booked / when / where am I booked?" — allowed to re-state details.
+_APPT_DETAILS_RE = re.compile(
+    r"на\s+когда\s+(?:я\s+)?запис|когда\s+(?:у\s+меня\s+)?(?:при[её]м|запис)"
+    r"|во\s+сколько\s+(?:у\s+меня\s+)?(?:при[её]м|запис)"
+    r"|точно\s+(?:ли\s+)?(?:меня\s+)?запис|(?:я\s+)?(?:точно\s+)?записал\w*\s*\??$"
+    r"|куда\s+я\s+запис|напомн\w+\s+(?:о\s+)?(?:запис|врем|при[её]м)"
+    r"|подтверд\w+\s+(?:мою\s+)?запис|детали\s+(?:моей\s+)?запис|мо[яю]\s+запис",
+    re.IGNORECASE,
+)
+
+# The assistant's booking confirmation, used to recover the confirmed slot and
+# to know a booking already happened (so we don't keep re-confirming).
+_CONFIRM_MARKER = "записали вас на"
+_LAST_CONFIRM_RE = re.compile(
+    r"записали вас на\s+(послезавтра|завтра|сегодня)\s+(\d{1,2}:\d{2})",
+    re.IGNORECASE,
+)
+
 # Per-stage LLM timeouts (same budget rationale as the English School demo:
 # worst case planner + writer + repair must stay inside the frontend proxy abort).
 _PLANNER_TIMEOUT = 8.0
@@ -151,7 +187,51 @@ def _last_assistant(history: list[ChatHistoryMessage]) -> str:
 def _assistant_in_slot_selection(history: list[ChatHistoryMessage]) -> bool:
     """True if the assistant's last turn offered slots or proposed a specific one."""
     low = _last_assistant(history)
-    return "демо-окна" in low or "правильно понял, хотите" in low
+    return "какое время вам удобнее" in low or "правильно понял, хотите" in low
+
+
+def _booking_confirmation_sent(history: list[ChatHistoryMessage]) -> bool:
+    """True if the assistant already sent the final booking confirmation."""
+    return any(
+        msg.role == "assistant" and _CONFIRM_MARKER in (msg.content or "").casefold()
+        for msg in (history or [])
+    )
+
+
+def _last_confirmed_slot(history: list[ChatHistoryMessage]) -> str:
+    """The slot from the most recent confirmation, e.g. "послезавтра 12:00"."""
+    slot = ""
+    for msg in history or []:
+        if msg.role == "assistant":
+            m = _LAST_CONFIRM_RE.search(msg.content or "")
+            if m:
+                slot = f"{m.group(1).lower()} {m.group(2)}"
+    return slot
+
+
+def _appointment_details_answer(state: "ConversationState") -> str:
+    """Concise re-statement of the existing appointment (only when asked)."""
+    return (
+        f"Вы записаны на {state.selected_slot} к {specialty_dative(state.specialty)}. "
+        "С вами свяжутся для подтверждения деталей."
+    )
+
+
+def _resolve_address_turn(
+    state: "ConversationState",
+    message: str,
+    history: list[ChatHistoryMessage],
+) -> str | None:
+    """Deterministic address/location answer (works before or after booking)."""
+    if not _ADDRESS_RE.search(message):
+        return None
+    answer = CLINIC_ADDRESS_ANSWER
+    if _booking_confirmation_sent(history) and state.selected_slot and state.specialty:
+        answer += (
+            f" Вы записаны на {state.selected_slot} к {specialty_dative(state.specialty)}, "
+            "поэтому лучше приехать за 10 минут до приёма."
+        )
+    return answer
 
 
 # Markers that the assistant's last turn invited booking (a CTA), so a bare
@@ -221,6 +301,22 @@ def _resolve_booking_turn(
     """
     if state.urgency_flag == "emergency":
         return None
+
+    # After the booking was confirmed, do NOT keep re-confirming. Re-state the
+    # details only when explicitly asked; a brand-new slot is a reschedule;
+    # everything else defers to the normal flow so follow-up questions (address,
+    # price, preparation, …) get real answers instead of the confirmation again.
+    if _booking_confirmation_sent(history):
+        if _APPT_DETAILS_RE.search(message) and state.selected_slot and state.specialty:
+            return (_appointment_details_answer(state), "booking_created")
+        rescheduling = (
+            resolve_slot(state.specialty, message)[0] == "matched"
+            and state.selected_slot
+            and state.selected_slot != _last_confirmed_slot(history)
+        )
+        if not rescheduling:
+            return None  # defer to the LLM for a genuinely new question
+
     if not _is_booking_turn(state, planner, message, history):
         return None
     if not state.specialty:
@@ -242,7 +338,7 @@ def _resolve_booking_turn(
                 "slots_offered",
             )
         return (
-            f"К {dative} есть демо-окна: {format_slots(slots_for(state.specialty))}.\n\n"
+            f"К {dative} есть ближайшие окна: {format_slots(slots_for(state.specialty))}.\n\n"
             "Какое время вам удобнее?",
             "slots_offered",
         )
@@ -459,6 +555,41 @@ async def handle_medical_center_chat(
                     **_derive_conversation_status(state, history, {}, lead_status),
                 },
             )
+
+        # ---- ADDRESS SHORT-CIRCUIT (deterministic, before the planner) ----
+        # A clinic address / location question is answered from the KB address
+        # instantly — even after booking, so it never re-runs the confirmation.
+        if _ADDRESS_RE.search(message):
+            if not state.specialty:
+                state.specialty = reconstruct_specialty_from_history(history)
+            state.selected_slot = reconstruct_selected_slot(history, message, state.specialty)
+            address_answer = _resolve_address_turn(state, message, history)
+            if address_answer:
+                lead_status = _derive_lead_status(state, history)
+                booked = _booking_confirmation_sent(history)
+                conv_status = "booking_created" if booked else "exploring"
+                return ChatResponse(
+                    route=Route.general,
+                    routes=[Route.general],
+                    answer=address_answer,
+                    checkout=False,
+                    lead_status=lead_status,
+                    metadata={
+                        "medical_center_demo": True,
+                        "planner_llm_used": False,
+                        "writer_llm_used": False,
+                        "address_short_circuit": True,
+                        "current_intent": "ask_services",
+                        "medical_lead_status": (
+                            "appointment_created" if booked
+                            else _derive_medical_lead_status(lead_status, history, message)
+                        ),
+                        "state": state.to_metadata(),
+                        "conversation_status": conv_status,
+                        "conversation_status_label": _CONV_STATUS_LABELS.get(conv_status, conv_status),
+                        "conversation_status_reason": f"address_short_circuit booked={booked}",
+                    },
+                )
 
         # ---- planner (JSON, temp 0) ----
         try:
