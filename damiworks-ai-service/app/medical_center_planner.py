@@ -144,6 +144,16 @@ _PLANNER_SYSTEM = """\
     и т.п.), но ни жалоба, ни специальность ещё не названы — recommended_next_step =
     ask_symptoms (спроси, что беспокоит, и возраст пациента при необходимости), а НЕ
     offer_booking.
+- Если дан блок «Предварительный разбор жалобы»: это ЧЕРНОВИК быстрого разбора, а не истина.
+  * Подтверди его, дополни недостающее или ИСПРАВЬ, если он ошибся (не та часть тела, не тот
+    тип жалобы, перепутал, кто пациент). Результат клади в slots.symptoms_or_goal и slots.age.
+  * Если жалоб несколько или формулировка неясная/сленговая — recommended_next_step =
+    ask_symptoms, задай ОДИН уточняющий вопрос. НЕ угадывай специальность.
+  * Разбор жалобы не даёт права ставить диагноз или назначать лечение. Ты только уточняешь,
+    что беспокоит, и выбираешь направление из базы.
+- slots.specialty может быть ТОЛЬКО из списка направлений базы. Если подходящего специалиста
+  в базе нет — оставь specialty пустым и handoff_recommended = true (администратор уточнит),
+  либо предложи терапевта как первичное звено. НЕ называй врача, которого нет в клинике.
 - ask_schedule: расписание врачей и режим работы есть в базе — отвечай по базе, но точное
   свободное время подтверждает администратор.
 - ask_discount: в базе есть ТОЛЬКО скидка пенсионерам 10% (будни до 13:00) и семейная
@@ -258,8 +268,16 @@ def _build_prompt(
     history: list[ChatHistoryMessage],
     state: ConversationState,
     kb_context: str,
+    intake_draft: str = "",
 ) -> str:
     parts: list[str] = [kb_context]
+
+    if intake_draft:
+        parts.append(
+            "Предварительный разбор жалобы (ЧЕРНОВИК быстрого детерминированного "
+            "разбора, он мог ошибиться). Подтверди, дополни или ИСПРАВЬ его в slots:\n"
+            f"{intake_draft}"
+        )
 
     known = state.known_slots()
     if known:
@@ -307,9 +325,15 @@ async def plan_conversation_turn(
     kb_context: str,
     gemini: "GeminiService",
     call_info: dict[str, object] | None = None,
+    intake_draft: str = "",
 ) -> dict:
-    """Run the planner LLM. Never raises — returns a safe default plan on failure."""
-    prompt = _build_prompt(message, history, state, kb_context)
+    """Run the planner LLM. Never raises — returns a safe default plan on failure.
+
+    ``intake_draft`` is the deterministic first pass (medical_center_intake). It
+    is advisory: the planner may correct the complaint type, the body part or
+    who the patient is, but it still may not diagnose or prescribe.
+    """
+    prompt = _build_prompt(message, history, state, kb_context, intake_draft)
     try:
         raw = await gemini._generate_text(
             model=gemini.settings.general_model,

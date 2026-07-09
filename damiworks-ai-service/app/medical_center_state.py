@@ -122,8 +122,10 @@ _RED_FLAG_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"|отда[её]т\s+в\s+(?:лев\w+\s+)?(?:руку|челюсть|лопатку)",
         re.IGNORECASE,
     )),
+    # Both word orders: "трудно дышать" and "дышать тяжело" are the same red flag.
     ("breathing", re.compile(
-        r"(?:не\s+мо(?:гу|жет)|трудно|тяжело)\s+дышать|задыха|одышка\s+в\s+покое|посинел\w*\s+губ",
+        r"(?:не\s+мо(?:гу|жет)|трудно|тяжело)\s+дыш\w*|дыш\w*\s+(?:трудно|тяжело)"
+        r"|задыха|одышка\s+в\s+покое|посинел\w*\s+губ",
         re.IGNORECASE,
     )),
     ("stroke", re.compile(
@@ -589,7 +591,13 @@ def apply_planner_updates(state: ConversationState, planner: dict) -> Conversati
             continue
         # RU-normalize known values so the summary panel never shows English.
         if key == "specialty":
-            value = specialty_display(value) or value
+            # KB-bound: the planner may only name a specialty MedNova actually
+            # has. An unknown one is dropped rather than written into state,
+            # so the booking flow can never offer slots for a doctor who does
+            # not exist (it refuses to run without a specialty).
+            if not normalize_specialty(value):
+                continue
+            value = specialty_display(value)
         elif key == "symptoms_or_goal":
             value = normalize_symptom_terms(value) or value
         if key in _FREE_TEXT_SLOTS:

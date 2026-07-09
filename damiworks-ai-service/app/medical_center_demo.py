@@ -216,6 +216,24 @@ _DATE_QUESTION_RE = re.compile(
 )
 
 
+def _intake_metadata(intake, planner_reviewed: bool) -> dict[str, object] | None:
+    """The intake record as the caller sees it, tagged with who produced it.
+
+    ``deterministic`` — the first pass was confident and nothing else touched it.
+    ``hybrid``        — the first pass drafted it and the planner reviewed it.
+    ``llm``           — the first pass could not classify the complaint at all.
+    """
+    if not intake.is_medical_complaint and not intake.needs_llm_review:
+        return None
+    if not planner_reviewed:
+        source = "deterministic"
+    elif intake.is_medical_complaint:
+        source = "hybrid"
+    else:
+        source = "llm"
+    return intake.with_source(source).to_metadata()
+
+
 def _last_assistant(history: list[ChatHistoryMessage]) -> str:
     for msg in reversed(list(history or [])):
         if msg.role == "assistant":
@@ -681,11 +699,12 @@ async def handle_medical_center_chat(
         # the symptom -> specialty table): "болит живот" already lands on a
         # gastroenterologist and must not be slowed down by a generic screen.
         screen_asked = assistant_asked_safety_screen(_last_assistant(history))
+        current_intake = extract_medical_intake(message)
         if (
             (
                 screen_asked
                 or needs_safety_screen(
-                    extract_medical_intake(message),
+                    current_intake,
                     has_routing_rule=detect_symptom_specialty(message) is not None,
                 )
             )
@@ -716,7 +735,8 @@ async def handle_medical_center_chat(
                     "writer_llm_used": False,
                     "intake_screen_short_circuit": True,
                     "intake_screen_stage": screen_stage,
-                    "medical_intake": intake.to_metadata(),
+                    "medical_intake": _intake_metadata(intake, planner_reviewed=False),
+                    "planner_used_for_intake": False,
                     "current_intent": "symptom_description",
                     "medical_lead_status": _derive_medical_lead_status(
                         lead_status, history, message
@@ -731,9 +751,16 @@ async def handle_medical_center_chat(
         # ---- SYMPTOM ROUTING SHORT-CIRCUIT (deterministic, before the planner) ----
         # Obvious musculoskeletal / nerve complaints route to the right starting
         # specialist warmly and consistently (knee -> травматолог-ортопед), no
-        # LLM guessing. Only on a fresh symptom turn — never mid-booking.
+        # LLM guessing. Only on a fresh symptom turn — never mid-booking, and
+        # never when the intake first pass RECOGNISED the complaint but flagged
+        # it as ambiguous (e.g. neuro signs after exertion, where this table
+        # would confidently pick one of two equally plausible specialists).
+        # A complaint the first pass could not classify at all ("пятно на коже")
+        # is not blocked: this table may well have a rule the extractor lacks.
+        ambiguous_recognized = current_intake.is_medical_complaint and current_intake.needs_llm_review
         if (
             routing is not None
+            and not ambiguous_recognized
             and not _booking_confirmation_sent(history)
             and not _assistant_in_slot_selection(history)
             and not _assistant_asked_for_contact(history)
@@ -776,12 +803,17 @@ async def handle_medical_center_chat(
         )
 
         # ---- planner (JSON, temp 0) ----
+        # Reaching here means the deterministic first pass either found nothing
+        # or was not confident, so this existing planner call doubles as the
+        # intake reviewer — no extra LLM call is introduced for the hybrid path.
+        planner_used_for_intake = intake.needs_llm_review
         planner_call_info: dict[str, object] = {}
         try:
             planner = await asyncio.wait_for(
                 plan_conversation_turn(
                     message, history, state, planner_retrieval.context, gemini,
                     call_info=planner_call_info,
+                    intake_draft=intake.as_planner_draft() if intake.needs_llm_review else "",
                 ),
                 timeout=_PLANNER_TIMEOUT,
             )
@@ -922,7 +954,8 @@ async def handle_medical_center_chat(
                 kb_retrieval=writer_retrieval.to_debug_metadata(),
                 planner_model_info=planner_call_info or None,
                 writer_model_info=writer_call_info or None,
-                medical_intake=intake.to_metadata() if intake.is_medical_complaint else None,
+                medical_intake=_intake_metadata(intake, planner_used_for_intake),
+                planner_used_for_intake=planner_used_for_intake,
             ),
         )
     except Exception as exc:  # noqa: BLE001 - a demo turn must never 500
@@ -961,6 +994,7 @@ def _build_metadata(
     planner_model_info: dict[str, object] | None = None,
     writer_model_info: dict[str, object] | None = None,
     medical_intake: dict[str, object] | None = None,
+    planner_used_for_intake: bool = False,
 ) -> dict[str, object]:
     conv_status = _derive_conversation_status(state, history or [], planner, lead_status)
     return {
@@ -970,6 +1004,7 @@ def _build_metadata(
         "planner_model_info": planner_model_info,
         "writer_model_info": writer_model_info,
         "medical_intake": medical_intake,
+        "planner_used_for_intake": planner_used_for_intake,
         "current_intent": planner.get("current_intent"),
         "intent_priority": planner.get("intent_priority"),
         "should_pause_qualification": planner.get("should_pause_qualification"),

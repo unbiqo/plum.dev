@@ -37,7 +37,12 @@ from app.medical_center_intake import (
 from app.medical_center_kb import get_full_kb_context
 from app.medical_center_rag import retrieve_medical_kb_context
 from app.medical_center_routing import route_symptom
-from app.medical_center_slots import normalize_symptom_terms, resolve_slot, specialty_dative
+from app.medical_center_slots import (
+    normalize_specialty,
+    normalize_symptom_terms,
+    resolve_slot,
+    specialty_dative,
+)
 from app.medical_center_planner import (
     reclassify_discount_question,
     reclassify_medical_advice_question,
@@ -76,10 +81,12 @@ class FakeGemini:
         self._writer_texts = list(writer_texts or [])
         self.planner_calls = 0
         self.writer_calls = 0
+        self.last_planner_prompt = ""
 
     async def _generate_text(self, **kw):
         if kw.get("response_mime_type") == "application/json":
             self.planner_calls += 1
+            self.last_planner_prompt = kw.get("prompt") or ""
             if self._planner_raw is None:
                 raise RuntimeError("planner LLM down")
             return self._planner_raw
@@ -1854,6 +1861,100 @@ def test_intake_extractor_reads_side_and_denials_from_the_reply() -> None:
 def test_intake_denied_symptom_is_never_read_as_a_new_complaint() -> None:
     # "одышки нет" answers a safety question; it is not a breathing complaint.
     assert extract_medical_intake("отёка нет, одышки нет").is_medical_complaint is False
+
+
+# ---------------------------------------------------------------------------
+# Hybrid intake: deterministic first pass, LLM planner review when unsure.
+# The deterministic layer must stay cheap on obvious cases and must hand over
+# anything ambiguous, multi-symptom, neurological or unmapped.
+# ---------------------------------------------------------------------------
+
+def test_hybrid_obvious_complaints_stay_deterministic_and_cost_no_llm_call() -> None:
+    for message in ("порезал язык", "как будто надорвал бицепс", "ударился головой"):
+        resp, _ = _screen(message)  # _screen asserts zero planner/writer calls
+        intake = resp.metadata["medical_intake"]
+        assert intake["needs_llm_review"] is False, message
+        assert intake["intake_source"] == "deterministic", message
+        assert intake["intake_confidence"] >= 0.7, message
+        assert intake["extracted_fields"]["symptoms_or_goal"], message
+        assert resp.metadata["planner_used_for_intake"] is False, message
+
+
+def test_hybrid_ambiguous_neuro_phrase_goes_to_the_planner_with_the_draft() -> None:
+    # "прострелило ... немеют" is a radicular picture a regex must not triage.
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="symptom_description",
+                                 recommended_next_step="ask_symptoms"),
+        writer_texts=["Как давно появилось онемение и после чего оно усилилось?"],
+    )
+    resp = _run(handle_medical_center_chat(
+        gem, _request("после зала руку как будто прострелило и пальцы немеют")
+    ))
+    assert gem.planner_calls == 1  # reused, not an extra call
+    assert resp.metadata["planner_used_for_intake"] is True
+    intake = resp.metadata["medical_intake"]
+    assert intake["needs_llm_review"] is True
+    assert intake["intake_source"] == "hybrid"
+    assert "ambiguous_neuro_cardiac_signs" in intake["review_reason"]
+    # The draft is handed to the planner as a correctable draft, not as truth.
+    assert "Предварительный разбор жалобы" in gem.last_planner_prompt
+    assert "ИСПРАВЬ" in gem.last_planner_prompt
+    low = resp.answer.casefold()
+    assert "грыж" not in low and "невропати" not in low  # no diagnosis
+
+
+def test_hybrid_slangy_phrase_without_a_body_part_goes_to_the_planner() -> None:
+    draft = extract_medical_intake("что-то странно тянет сбоку после тренировки")
+    assert draft.needs_llm_review is True
+    assert draft.review_reason == "body_part_unknown"
+
+    gem = FakeGemini(
+        planner=_default_planner(current_intent="symptom_description",
+                                 recommended_next_step="ask_symptoms"),
+        writer_texts=["Подскажите, с какой стороны тянет и где именно?"],
+    )
+    resp = _run(handle_medical_center_chat(
+        gem, _request("что-то странно тянет сбоку после тренировки")
+    ))
+    assert gem.planner_calls == 1
+    assert resp.metadata["planner_used_for_intake"] is True
+    assert resp.answer.strip()  # a clarifying question, not a guess
+
+
+def test_hybrid_multiple_symptoms_with_a_red_flag_go_to_emergency_not_booking() -> None:
+    # "дышать тяжело" alongside a swollen leg is an emergency; the deterministic
+    # red-flag layer keeps priority over both the screen and the planner.
+    gem = FakeGemini()
+    resp = _run(handle_medical_center_chat(gem, _request("болит нога, отекает и дышать тяжело")))
+    assert resp.answer == EMERGENCY_ANSWER
+    assert resp.metadata["emergency_short_circuit"] is True
+    assert gem.planner_calls == 0 and gem.writer_calls == 0
+    assert resp.metadata["state"]["urgency_flag"] == "emergency"
+    assert "записать" not in resp.answer.casefold()
+
+
+def test_hybrid_multiple_complaints_without_a_red_flag_ask_for_review() -> None:
+    draft = extract_medical_intake("порезал палец и температура")
+    assert draft.needs_llm_review is True
+    assert "multiple_complaints" in draft.review_reason
+
+
+def test_hybrid_routing_never_names_a_specialty_the_clinic_lacks() -> None:
+    # Every deterministic destination must exist in the KB.
+    for message in ("порезал язык", "надорвал бицепс", "ударился головой", "дискомфорт в икрах"):
+        specialty = specialty_for_intake(extract_medical_intake(message))
+        assert normalize_specialty(specialty), f"{specialty} is not a MedNova specialty"
+
+
+def test_planner_cannot_write_a_non_kb_specialty_into_state() -> None:
+    # An LLM naming a specialist MedNova does not employ must not reach state,
+    # or the booking flow would happily offer slots for a doctor who isn't there.
+    state = ConversationState()
+    state = apply_planner_updates(state, _default_planner(slots={"specialty": "нейрохирург"}))
+    assert state.specialty == ""
+
+    state = apply_planner_updates(state, _default_planner(slots={"specialty": "кардиолог"}))
+    assert state.specialty == "кардиолог"
 
 
 def test_routing_answer_declines_the_specialty_correctly_for_every_complaint() -> None:

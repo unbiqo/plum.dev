@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, replace
 
+from .medical_center_slots import normalize_specialty
 from .schemas import ChatHistoryMessage
 
 # Complaint taxonomy. Response rules key off THIS, never off a body part, so a
@@ -94,11 +95,18 @@ _IMPACT_RE = re.compile(
     re.I,
 )
 _STRAIN_VERB_RE = re.compile(r"надорв\w*|надрыв\w*|потяну\w*|растяну\w*|растяжени\w*|подверн\w*|вывих\w*|перенапряг\w*", re.I)
-_LOAD_CONTEXT_RE = re.compile(r"после\s+(?:тренировк\w*|нагрузк\w*|пробежк\w*|занят\w*|бега)", re.I)
+_LOAD_CONTEXT_RE = re.compile(
+    r"после\s+(?:тренировк\w*|нагрузк\w*|пробежк\w*|занят\w*|бега|зала|спортзал\w*)"
+    r"|в\s+(?:спорт)?зале|на\s+тренировк\w*",
+    re.I,
+)
 _SHARP_MOVE_RE = re.compile(r"резк\w+\s+движени\w*", re.I)
 _SWELLING_RE = re.compile(r"от[ёе]к\w*|опух\w*|припух\w*", re.I)
-_NUMBNESS_RE = re.compile(r"онемен\w*|немеет|неметь|покалыван\w*|слабост\w+\s+в\s+\w+", re.I)
-_RESP_CHEST_RE = re.compile(r"одышк\w*|тяжело\s+дыш\w*|трудно\s+дыш\w*|бол\w*\s+в\s+груди", re.I)
+_NUMBNESS_RE = re.compile(r"онемен\w*|неме\w+|покалыван\w*|слабост\w+\s+в\s+\w+", re.I)
+_RESP_CHEST_RE = re.compile(
+    r"одышк\w*|(?:тяжело|трудно)\s+дыш\w*|дыш\w*\s+(?:тяжело|трудно)|бол\w*\s+в\s+груди",
+    re.I,
+)
 _FEVER_RE = re.compile(r"температур\w*|\bорви\b|простуд\w*|кашель|кашля\w*|насморк\w*|озноб\w*", re.I)
 _PAIN_RE = re.compile(r"бол[иья]\w*|болит|болят|бол[ьи]\b|дискомфорт\w*|ноет|ноющ\w*|тянет|беспокоит|жж[ёе]т|саднит", re.I)
 
@@ -174,12 +182,43 @@ class MedicalIntake:
     red_flags_denied: tuple[str, ...] = ()
     missing_safety_questions: tuple[str, ...] = ()
     suggested_next_step: str = "none"
+    # Hybrid routing: this module is the cheap FIRST PASS. When it is not
+    # confident, the turn is handed to the medical planner (an LLM call that
+    # already happens on that path — no extra call is introduced) with this
+    # record attached as a draft it may correct.
+    intake_source: str = "deterministic"  # deterministic | llm | hybrid
+    intake_confidence: float = 0.0
+    needs_llm_review: bool = False
+    review_reason: str = ""
+
+    def with_source(self, source: str) -> "MedicalIntake":
+        return replace(self, intake_source=source)
 
     def to_metadata(self) -> dict[str, object]:
         data = asdict(self)
         for key in ("red_flags_mentioned", "red_flags_denied", "missing_safety_questions"):
             data[key] = list(data[key])
+        data["extracted_fields"] = {
+            "symptoms_or_goal": self.symptoms_or_goal,
+            "complaint_type": self.complaint_type,
+            "body_part": self.body_part,
+            "self_patient": self.self_patient,
+            "child_case": self.child_case,
+            "red_flags": list(self.red_flags_mentioned),
+            "missing_questions": list(self.missing_safety_questions),
+        }
         return data
+
+    def as_planner_draft(self) -> str:
+        """Compact, human-readable draft for the planner prompt."""
+        return "; ".join([
+            f"жалоба={self.symptoms_or_goal or 'не распознана'}",
+            f"тип={self.complaint_type}",
+            f"часть тела={self.body_part or 'не распознана'}",
+            f"пациент={'ребёнок' if self.child_case else ('сам пишущий' if self.self_patient else 'другой взрослый')}",
+            f"уверенность={self.intake_confidence:.2f}",
+            f"причина проверки={self.review_reason or 'нет'}",
+        ])
 
 
 def _match_body_part(text: str) -> BodyPart | None:
@@ -311,6 +350,106 @@ def _missing_safety_questions(complaint_type: str, region: str, denied: tuple[st
     return tuple(q for q in wanted if q not in denied_set)
 
 
+# Confidence floor below which the planner must review the draft.
+LLM_REVIEW_CONFIDENCE_THRESHOLD = 0.7
+
+# Neuro / cardiac clues. On their own these are often triaged correctly by the
+# deterministic routing table (a radicular "боль от поясницы в ногу, немеет
+# стопа" is a textbook neurologist case, and sending it there is right). What a
+# regex genuinely cannot resolve is a CONFLICT: the same signs described after
+# exertion could be musculoskeletal or neurological, and the two point at
+# different specialists. That conflict, not the sign itself, triggers review.
+_AMBIGUOUS_SIGN_RE = re.compile(
+    r"прострел\w*|мурашк\w*|покалыван\w*|онемен\w*|неме\w+"
+    r"|сердцебиен\w*|аритми\w*|перебо\w+\s+в\s+сердц|давит\s+в\s+груди|одышк\w*",
+    re.I,
+)
+# The user is repeating themselves or pushing back — a regex has already failed
+# them once, so let the planner read the whole conversation instead.
+_FRUSTRATION_RE = re.compile(
+    r"\bопять\b|\bснова\b|я\s+же\s+(?:говорил|писал|сказал)|уже\s+(?:говорил|писал|сказал)"
+    r"|вы\s+не\s+пон[яи]|повторяю|сколько\s+можно",
+    re.I,
+)
+# "Major" complaint categories. Two or more in one message means the user
+# described several things at once and the ordering heuristics can't be trusted.
+_MAJOR_CATEGORY_RES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("cut_or_wound", _CUT_RE),
+    ("impact_or_head_injury", _IMPACT_RE),
+    ("strain_or_sprain", _STRAIN_VERB_RE),
+    ("swelling", _SWELLING_RE),
+    ("numbness_or_weakness", _NUMBNESS_RE),
+    ("respiratory_or_chest", _RESP_CHEST_RE),
+    ("infection_or_fever", _FEVER_RE),
+)
+
+
+def _major_categories(asserted: str) -> list[str]:
+    return [name for name, pattern in _MAJOR_CATEGORY_RES if pattern.search(asserted)]
+
+
+def _assess_confidence(
+    *,
+    raw: str,
+    asserted: str,
+    complaint_type: str,
+    body_part: str,
+    event_context: str,
+) -> tuple[float, bool, str]:
+    """Score the draft and decide whether the planner must review it.
+
+    Returns ``(confidence, needs_llm_review, review_reason)``. The deterministic
+    layer earns a clean pass only for the obvious, common, safety-simple shapes;
+    everything hedged, multi-symptom, neurological or unmapped goes to the LLM.
+    """
+    reasons: list[str] = []
+
+    confidence = 0.0
+    if complaint_type != "unknown":
+        confidence += 0.5
+    if body_part:
+        confidence += 0.3
+    if event_context != "неизвестно":
+        confidence += 0.1
+    if complaint_type in _SCREEN_COMPLAINT_TYPES:
+        confidence += 0.1
+    confidence = min(confidence, 1.0)
+
+    if complaint_type == "unknown":
+        reasons.append("complaint_type_unknown")
+    if not body_part:
+        # A symptom is clearly described but we cannot say WHERE. The screen's
+        # questions are body-region-dependent, so guessing here is unsafe.
+        reasons.append("body_part_unknown")
+        confidence = min(confidence, 0.5)
+
+    categories = _major_categories(asserted)
+    if len(categories) >= 2:
+        reasons.append("multiple_complaints")
+        confidence = min(confidence, 0.5)
+
+    # Neuro/cardiac signs described after exertion: musculoskeletal and
+    # neurological explanations point at different specialists and a regex has
+    # no way to choose. Without the exertion context the routing table's own
+    # neuro rule is trustworthy, so we leave it alone.
+    if (
+        _AMBIGUOUS_SIGN_RE.search(asserted)
+        and _LOAD_CONTEXT_RE.search(asserted)
+        and complaint_type not in _SCREEN_COMPLAINT_TYPES
+    ):
+        reasons.append("ambiguous_neuro_cardiac_signs")
+        confidence = min(confidence, 0.5)
+
+    if _FRUSTRATION_RE.search(raw):
+        reasons.append("user_frustrated_or_repeating")
+        confidence = min(confidence, 0.5)
+
+    needs_review = bool(reasons) or confidence < LLM_REVIEW_CONFIDENCE_THRESHOLD
+    if needs_review and not reasons:
+        reasons.append("low_confidence")
+    return round(confidence, 2), needs_review, ",".join(reasons)
+
+
 def extract_medical_intake(message: str) -> MedicalIntake:
     """Structure a single free-text message into a MedicalIntake record."""
     text = (message or "").strip()
@@ -320,16 +459,42 @@ def extract_medical_intake(message: str) -> MedicalIntake:
     denied = _denied_flags(text)
     asserted = _strip_denials(text)
     complaint_type = _classify_complaint(asserted)
-    if complaint_type == "unknown":
-        return MedicalIntake()
-
     part = _match_body_part(asserted)
+
+    if complaint_type == "unknown":
+        # No complaint marker matched. If the message still *looks* like a
+        # symptom (a body part, or a neuro/cardiac sign), the first pass has
+        # simply failed to parse it — say so, so the planner reviews it rather
+        # than the turn being treated as ordinary small talk.
+        looks_symptomatic = bool(part) or bool(_AMBIGUOUS_SIGN_RE.search(asserted))
+        if not looks_symptomatic:
+            return MedicalIntake()
+        return MedicalIntake(
+            body_part=part.nom if part else "",
+            region=part.region if part else "",
+            intake_source="llm",
+            intake_confidence=0.0,
+            needs_llm_review=True,
+            review_reason="complaint_type_unknown",
+            suggested_next_step="ask_clarifying",
+        )
     child = bool(_CHILD_RE.search(text))
     other_adult = bool(_OTHER_ADULT_RE.search(text))
     region = part.region if part else ""
 
     missing = _missing_safety_questions(complaint_type, region, denied)
-    if complaint_type in ("respiratory_or_chest",):
+    event_context = _event_context(text, complaint_type)
+    confidence, needs_review, review_reason = _assess_confidence(
+        raw=text,
+        asserted=asserted,
+        complaint_type=complaint_type,
+        body_part=part.nom if part else "",
+        event_context=event_context,
+    )
+
+    if needs_review:
+        next_step = "ask_clarifying"
+    elif complaint_type == "respiratory_or_chest":
         next_step = "emergency"
     elif missing:
         next_step = "ask_clarifying"
@@ -343,12 +508,15 @@ def extract_medical_intake(message: str) -> MedicalIntake:
         body_part=part.nom if part else "",
         region=region,
         body_side=_body_side(text),
-        event_context=_event_context(text, complaint_type),
+        event_context=event_context,
         self_patient=not (child or other_adult),
         child_case=child,
         red_flags_denied=denied,
         missing_safety_questions=missing,
         suggested_next_step=next_step,
+        intake_confidence=confidence,
+        needs_llm_review=needs_review,
+        review_reason=review_reason,
     )
 
 
@@ -402,8 +570,13 @@ def needs_safety_screen(intake: MedicalIntake, has_routing_rule: bool) -> bool:
     pain/discomfort complaint is screened only when nothing in the deterministic
     routing tables covers it: a knee or stomach complaint already has a correct,
     specific destination and must not be slowed down by a generic questionnaire.
+
+    A draft the first pass isn't confident about (``needs_llm_review``) is never
+    screened here: the deterministic questions are only as good as the fields
+    they key off, so an unmapped body part or a tangle of symptoms goes to the
+    planner instead of getting confidently wrong questions.
     """
-    if not intake.is_medical_complaint:
+    if not intake.is_medical_complaint or intake.needs_llm_review:
         return False
     if intake.complaint_type in _SCREEN_COMPLAINT_TYPES:
         return True
@@ -481,16 +654,30 @@ def build_safety_question(intake: MedicalIntake, age_known: bool = False) -> str
     return " ".join(parts)
 
 
+#: Where we send a complaint whose ideal specialist the clinic does not employ.
+#: The KB always has a therapist, and a first-contact therapist deciding the next
+#: step is honest routing — inventing a specialist the clinic lacks is not.
+FIRST_CONTACT_SPECIALTY = "терапевт"
+
+
 def specialty_for_intake(intake: MedicalIntake) -> str:
-    """Starting specialty from the KB list. Administrative routing, not a diagnosis."""
+    """Starting specialty from the KB list. Administrative routing, not a diagnosis.
+
+    Every branch is validated against the KB (``normalize_specialty`` returns
+    None for a specialty MedNova does not have), so a routing table that grows a
+    specialist the clinic does not employ degrades to the therapist instead of
+    confidently sending the patient to a doctor who is not there.
+    """
     ct, region = intake.complaint_type, intake.region
     if ct == "cut_or_wound":
-        return "стоматолог" if region == "mouth" else "травматолог-ортопед"
-    if ct == "strain_or_sprain":
-        return "травматолог-ортопед" if region in ("arm", "leg") else "терапевт"
-    if ct == "impact_or_head_injury":
-        return "терапевт" if region == "head" else "травматолог-ортопед"
-    return "терапевт"
+        candidate = "стоматолог" if region == "mouth" else "травматолог-ортопед"
+    elif ct == "strain_or_sprain":
+        candidate = "травматолог-ортопед" if region in ("arm", "leg") else FIRST_CONTACT_SPECIALTY
+    elif ct == "impact_or_head_injury":
+        candidate = FIRST_CONTACT_SPECIALTY if region == "head" else "травматолог-ортопед"
+    else:
+        candidate = FIRST_CONTACT_SPECIALTY
+    return candidate if normalize_specialty(candidate) else FIRST_CONTACT_SPECIALTY
 
 
 def build_routing_answer(intake: MedicalIntake, dative: str) -> str:
