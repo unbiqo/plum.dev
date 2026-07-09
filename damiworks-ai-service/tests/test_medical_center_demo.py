@@ -1172,16 +1172,87 @@ def test_no_demo_wording_in_slot_offer() -> None:
 # ---------------------------------------------------------------------------
 
 def test_route_symptom_table() -> None:
+    assert route_symptom("у меня появилось пятно на коже на плече").specialty == "дерматолог"
+    assert route_symptom("сыпь на руке").specialty == "дерматолог"
+    assert route_symptom("чешется кожа на ноге").specialty == "дерматолог"
+    assert route_symptom("родинка на спине изменилась").specialty == "дерматолог"
+    assert route_symptom("покраснение кожи на плече").specialty == "дерматолог"
     assert route_symptom("колено болит уже месяц").specialty == "травматолог-ортопед"
     assert route_symptom("болит колено").specialty == "травматолог-ортопед"
     assert route_symptom("колено опухло").specialty == "травматолог-ортопед"
     assert route_symptom("болит плечо").specialty == "травматолог-ортопед"
+    assert route_symptom("болит плечо после тренировки").specialty == "травматолог-ортопед"
+    assert route_symptom("не могу поднять руку, болит плечо").specialty == "травматолог-ортопед"
+    assert route_symptom("подвернул ногу").specialty == "травматолог-ортопед"
     assert route_symptom("болят колени и кисти, утром скованность").specialty == "ревматолог"
     assert route_symptom("боль идёт от поясницы в ногу, немеет стопа").specialty == "невролог"
+    assert route_symptom("немеет рука").specialty == "невролог"
+    assert route_symptom("боль от шеи в руку, покалывание").specialty == "невролог"
+    assert route_symptom("непонятное ощущение в теле").specialty == "терапевт"
     # Plain knee never goes to neurologist; unrelated complaints defer to the LLM.
     assert route_symptom("болит колено") .specialty != "невролог"
+    assert route_symptom("плечо") is None
     assert route_symptom("болит живот") is None
     assert route_symptom("сколько стоит приём ортопеда") is None
+    assert route_symptom("сколько стоит удаление родинки") is None
+
+
+def test_skin_location_routes_to_dermatologist_not_orthopedist() -> None:
+    gem = FakeGemini(planner=_default_planner())
+    resp = _run(handle_medical_center_chat(
+        gem,
+        _request("здравствуйте, у меня появилось пятно на коже на плече"),
+    ))
+    low = resp.answer.casefold()
+    assert "дерматолог" in low
+    assert "травматолог" not in low and "ортопед" not in low
+    assert "сустав" not in low and "движени" not in low and "нагрузк" not in low
+    assert "крем" not in low
+    assert "окно" in low and "дерматологу" in low
+    assert gem.planner_calls == 0 and gem.writer_calls == 0
+    assert resp.metadata["symptom_routing"] == "дерматолог"
+    assert resp.metadata["state"]["specialty"] == "дерматолог"
+    assert resp.metadata["state"]["symptoms_or_goal"] == "пятно на коже"
+
+
+def test_skin_routing_then_dermatologist_booking_flow() -> None:
+    first = FakeGemini(planner=_default_planner())
+    r1 = _run(handle_medical_center_chat(first, _request("пятно на коже на плече")))
+    history = [
+        _msg("user", "пятно на коже на плече"),
+        _msg("assistant", r1.answer),
+    ]
+
+    second = FakeGemini(planner=_default_planner(current_intent="smalltalk"))
+    r2 = _run(handle_medical_center_chat(second, _request("давайте", history=history)))
+    low2 = r2.answer.casefold()
+    assert "дерматологу" in low2
+    assert "завтра 14:30" in low2
+    assert "послезавтра 11:30" in low2
+    assert "послезавтра 16:00" in low2
+    assert r2.metadata["conversation_status"] == "slots_offered"
+    history.extend([_msg("user", "давайте"), _msg("assistant", r2.answer)])
+
+    third = FakeGemini(planner=_default_planner(current_intent="smalltalk"))
+    r3 = _run(handle_medical_center_chat(third, _request("завтра 14:30", history=history)))
+    assert "завтра 14:30" in r3.answer
+    assert "телефон" in r3.answer.casefold()
+    assert r3.metadata["conversation_status"] == "awaiting_contact"
+    history.extend([_msg("user", "завтра 14:30"), _msg("assistant", r3.answer)])
+
+    final = FakeGemini(planner=_default_planner(
+        current_intent="contact",
+        slots={"patient_name": "Алия", "age": "30", "contact": "+7 701 222 33 44"},
+    ))
+    r4 = _run(handle_medical_center_chat(
+        final,
+        _request("Алия 30 +7 701 222 33 44", history=history),
+    ))
+    low4 = r4.answer.casefold()
+    assert "готово" in low4
+    assert "завтра 14:30" in low4
+    assert "дерматологу" in low4
+    assert r4.metadata["conversation_status"] == "booking_created"
 
 
 def test_kb_has_orthopedist_and_rheumatologist() -> None:
