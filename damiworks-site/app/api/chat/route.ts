@@ -96,22 +96,36 @@ export async function POST(req: NextRequest) {
       }),
     })
 
-    if (!res.ok) return NextResponse.json({ error: 'backend_error' }, { status: 502 })
-
-    const data = (await res.json()) as {
-      answer: string
+    // The backend answers 200 with a safe assistant message even when an LLM
+    // substep failed. Prefer any assistant message in the body over the generic
+    // UI error: a real sentence beats "Что-то пошло не так". request_id, when
+    // present, is logged so a user report can be traced to the backend line.
+    const data = (await res.json().catch(() => null)) as {
+      answer?: string
       lead_status?: string | null
       lead_sent?: boolean
       metadata?: Record<string, unknown> | null
+    } | null
+
+    if (!data?.answer) {
+      const requestId = data?.metadata?.request_id
+      console.error('chat backend_error status=%s request_id=%s', res.status, requestId ?? 'none')
+      return NextResponse.json({ error: 'backend_error' }, { status: 502 })
     }
+
     return NextResponse.json({
       answer: data.answer,
       lead_status: data.lead_status ?? null,
       lead_sent: Boolean(data.lead_sent),
       metadata: data.metadata ?? null,
     })
-  } catch {
-    return NextResponse.json({ error: 'unreachable' }, { status: 503 })
+  } catch (err) {
+    // AbortError means we hit the 55s budget. The backend now bounds its own
+    // model-pool walk well inside that, so an abort is a genuine outage rather
+    // than one slow model.
+    const aborted = err instanceof Error && err.name === 'AbortError'
+    console.error('chat proxy failed aborted=%s', aborted)
+    return NextResponse.json({ error: aborted ? 'timeout' : 'unreachable' }, { status: 503 })
   } finally {
     clearTimeout(timeout)
   }
