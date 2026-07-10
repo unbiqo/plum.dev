@@ -53,6 +53,7 @@ type Conversation = {
   last_user_message?: string | null
   last_assistant_message?: string | null
   metadata?: Record<string, unknown>
+  conversation_cost_summary?: ConversationCostSummary
 }
 
 type ConversationMessage = {
@@ -71,6 +72,58 @@ type ConversationDetail = {
   conversation: Conversation
   messages: ConversationMessage[]
   feedback: FeedbackItem[]
+  conversation_cost?: ConversationCost
+}
+
+type ConversationCostSummary = {
+  total_input_tokens?: number
+  total_output_tokens?: number
+  total_tokens?: number
+  total_cost_usd?: number | null
+  has_estimated_usage?: boolean
+  has_missing_pricing?: boolean
+  llm_call_count?: number
+  fallback_count?: number
+  escalation_count?: number
+  model_count?: number
+  slowest_call_ms?: number
+}
+
+type CostGroup = {
+  model?: string
+  task_type?: string
+  model_profile?: string
+  calls?: number
+  input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
+  cost_usd?: number | null
+  pricing_missing?: boolean
+  estimated?: boolean
+}
+
+type LlmCall = {
+  created_at?: string
+  task_type?: string
+  model_profile?: string | null
+  selected_model?: string | null
+  input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
+  total_cost_usd?: number | null
+  pricing_missing?: boolean
+  estimated?: boolean
+  latency_ms?: number
+  fallback_used?: boolean
+  escalation_used?: boolean
+  success?: boolean
+}
+
+type ConversationCost = ConversationCostSummary & {
+  estimated_cost_usd?: number
+  by_model?: CostGroup[]
+  by_task?: CostGroup[]
+  calls?: LlmCall[]
 }
 
 type ConversationFilters = {
@@ -114,6 +167,15 @@ function statusTone(status?: string | null): string {
   if (status === 'ignored') return 'bg-secondary/10 text-secondary border-border-col'
   if (status === 'open') return 'bg-red-500/10 text-red-500 border-red-500/20'
   return 'bg-accent-soft text-accent border-accent/20'
+}
+
+function formatUsd(value?: number | null): string {
+  if (value === null || value === undefined) return 'pricing missing'
+  return `$${value.toFixed(6)}`
+}
+
+function formatNumber(value?: number | null): string {
+  return typeof value === 'number' ? value.toLocaleString() : '0'
 }
 
 export default function QualityConsoleClient() {
@@ -545,6 +607,11 @@ function ConversationList({
                 {conversation.feedback_count ?? 0} feedback
               </span>
               {conversation.lead_status && <span className="rounded-full border border-border-col bg-bg px-2 py-0.5">{conversation.lead_status}</span>}
+              {conversation.conversation_cost_summary && (
+                <span className="rounded-full border border-border-col bg-bg px-2 py-0.5">
+                  {formatUsd(conversation.conversation_cost_summary.total_cost_usd)}
+                </span>
+              )}
             </div>
           </button>
         ))}
@@ -593,6 +660,7 @@ function ConversationDetailPanel({
           </div>
         </div>
       </div>
+      <CostTokensPanel cost={detail.conversation_cost ?? c.conversation_cost_summary ?? null} />
       <div className="max-h-[760px] space-y-4 overflow-y-auto bg-bg/40 px-5 py-5">
         {detail.messages.map((message) => (
           <ConversationMessageRow
@@ -604,6 +672,119 @@ function ConversationDetailPanel({
         ))}
       </div>
     </section>
+  )
+}
+
+function CostTokensPanel({ cost }: { cost: ConversationCost | ConversationCostSummary | null }) {
+  const [open, setOpen] = useState(false)
+  if (!cost || !cost.llm_call_count) {
+    return (
+      <div className="border-b border-border-col bg-surface px-5 py-3 text-xs text-secondary">
+        Cost / Tokens: no LLM calls recorded for this conversation yet.
+      </div>
+    )
+  }
+  const full = cost as ConversationCost
+  const byModel = full.by_model ?? []
+  const byTask = full.by_task ?? []
+  const calls = full.calls ?? []
+  return (
+    <div className="border-b border-border-col bg-surface px-5 py-4">
+      <div className="grid grid-cols-2 gap-3 text-xs md:grid-cols-6">
+        <CostMetric label="Total cost" value={formatUsd(cost.total_cost_usd)} />
+        <CostMetric label="Tokens" value={`${formatNumber(cost.total_input_tokens)} / ${formatNumber(cost.total_output_tokens)} / ${formatNumber(cost.total_tokens)}`} />
+        <CostMetric label="LLM calls" value={formatNumber(cost.llm_call_count)} />
+        <CostMetric label="Fallbacks" value={formatNumber(cost.fallback_count)} />
+        <CostMetric label="Escalations" value={formatNumber(cost.escalation_count)} />
+        <CostMetric label="Flags" value={`${cost.has_estimated_usage ? 'estimated' : 'real'}${cost.has_missing_pricing ? ' / pricing missing' : ''}`} />
+      </div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="mt-3 rounded-xl border border-border-col px-3 py-2 text-xs text-secondary hover:text-primary"
+      >
+        {open ? 'Hide' : 'Show'} Cost / Tokens breakdown
+      </button>
+      {open && (
+        <div className="mt-4 space-y-4">
+          <CostTable
+            title="By model"
+            columns={['Model', 'Calls', 'Input', 'Output', 'Cost']}
+            rows={byModel.map((row) => [
+              row.model ?? 'unknown',
+              formatNumber(row.calls),
+              formatNumber(row.input_tokens),
+              formatNumber(row.output_tokens),
+              row.pricing_missing ? 'pricing missing' : formatUsd(row.cost_usd),
+            ])}
+          />
+          <CostTable
+            title="By task"
+            columns={['Task', 'Profile', 'Model', 'Calls', 'Tokens', 'Cost']}
+            rows={byTask.map((row) => [
+              row.task_type ?? 'unknown',
+              row.model_profile ?? 'unknown',
+              row.model ?? 'unknown',
+              formatNumber(row.calls),
+              formatNumber(row.total_tokens),
+              row.pricing_missing ? 'pricing missing' : formatUsd(row.cost_usd),
+            ])}
+          />
+          <CostTable
+            title="Detailed calls"
+            columns={['Time', 'Task', 'Model', 'Input', 'Output', 'Cost', 'Latency', 'Fallback']}
+            rows={calls.map((call) => [
+              formatDate(call.created_at),
+              call.task_type ?? 'unknown',
+              call.selected_model ?? 'unknown',
+              `${formatNumber(call.input_tokens)}${call.estimated ? ' est.' : ''}`,
+              formatNumber(call.output_tokens),
+              call.pricing_missing ? 'pricing missing' : formatUsd(call.total_cost_usd),
+              `${formatNumber(call.latency_ms)} ms`,
+              call.fallback_used ? 'yes' : 'no',
+            ])}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CostMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border-col bg-bg px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-secondary">{label}</div>
+      <div className="mt-1 truncate font-mono text-xs text-primary">{value}</div>
+    </div>
+  )
+}
+
+function CostTable({ title, columns, rows }: { title: string; columns: string[]; rows: string[][] }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold text-primary">{title}</div>
+      <div className="overflow-x-auto rounded-xl border border-border-col">
+        <table className="min-w-full text-left text-xs">
+          <thead className="bg-bg text-secondary">
+            <tr>
+              {columns.map((column) => (
+                <th key={column} className="whitespace-nowrap px-3 py-2 font-medium">{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-col">
+            {rows.length ? rows.map((row, index) => (
+              <tr key={`${title}-${index}`} className="bg-surface">
+                {row.map((cell, cellIndex) => (
+                  <td key={`${title}-${index}-${cellIndex}`} className="whitespace-nowrap px-3 py-2 font-mono text-[11px] text-primary">{cell}</td>
+                ))}
+              </tr>
+            )) : (
+              <tr><td colSpan={columns.length} className="px-3 py-4 text-secondary">No rows.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 

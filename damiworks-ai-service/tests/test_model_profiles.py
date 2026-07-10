@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -22,7 +23,7 @@ from app.config import (
     Settings,
     load_model_profiles,
 )
-from app.gemini_service import GeminiService
+from app.gemini_service import GEMINI_ATTEMPT_TIMEOUT_MS, GeminiService, sanitize_history
 from app.medical_center_planner import plan_conversation_turn
 from app.medical_center_state import build_conversation_state
 from app.medical_center_writer import write_response
@@ -52,8 +53,12 @@ def test_router_profile_is_fast_then_cheap_fallback() -> None:
 
 
 def test_medical_planner_profile_escalates_then_falls_back() -> None:
+    # The escalation model sits SECOND, not first: as a preview model it answered
+    # 503 on essentially every live call, and one 503 took ~100s to return, which
+    # exceeded the frontend's 55s abort budget. It is still tried when the cheap
+    # default fails. See the note above MODEL_PROFILES.
     assert MODEL_PROFILES["medical_planner"] == (
-        ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL,
+        DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL,
     )
 
 
@@ -61,17 +66,28 @@ def test_medical_writer_profile_is_fast_then_cheap_fallback() -> None:
     assert MODEL_PROFILES["medical_writer"] == (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL)
 
 
-def test_medical_repair_profile_escalates_above_medical_writer() -> None:
-    # Repair must not reuse the exact same weak-primary pool that produced the
-    # bad answer in the first place.
-    assert MODEL_PROFILES["medical_repair"][0] == ESCALATION_MODEL
+def test_medical_repair_profile_can_still_reach_the_escalation_model() -> None:
+    # Repair must not be limited to the exact pool that produced the bad answer:
+    # it can still climb to the escalation model, which medical_writer cannot.
+    assert ESCALATION_MODEL in MODEL_PROFILES["medical_repair"]
+    assert ESCALATION_MODEL not in MODEL_PROFILES["medical_writer"]
     assert MODEL_PROFILES["medical_repair"] != MODEL_PROFILES["medical_writer"]
 
 
-def test_sales_and_rag_writer_profiles_escalate_then_fall_back() -> None:
-    expected = (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL)
+def test_sales_and_rag_writer_profiles_try_fast_then_escalate() -> None:
+    expected = (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL)
     assert MODEL_PROFILES["sales_writer"] == expected
     assert MODEL_PROFILES["rag_writer"] == expected
+
+
+def test_no_live_profile_starts_with_the_preview_escalation_model() -> None:
+    # The regression that caused "Что-то пошло не так" on prod: a preview model
+    # in front of a live-chat pool. Its 503s cost ~100s each, past the proxy's
+    # 55s abort. Offline/eval profiles are exempt: nothing waits on them.
+    for name, pool in MODEL_PROFILES.items():
+        if name == "quality_eval":
+            continue
+        assert pool[0] != ESCALATION_MODEL, name
 
 
 def test_load_model_profiles_env_override(monkeypatch) -> None:
@@ -328,3 +344,119 @@ def test_classify_content_followup_uses_classifier_profile() -> None:
     history = [ChatHistoryMessage(role="assistant", content="Уточните ваш город?")]
     _run(svc.classify_content_followup("да", history))
     assert seen == ["classifier"]
+
+
+# ---------------------------------------------------------------------------
+# Per-attempt timeout and pool deadline.
+#
+# Prod incident: gemini-3-flash-preview answered 503 only after ~100 seconds.
+# The model fallback then worked perfectly, but the frontend proxy had already
+# aborted at 55s, so the user saw "Что-то пошло не так". A working fallback is
+# worthless if it arrives after the caller has gone.
+# ---------------------------------------------------------------------------
+
+def test_every_attempt_carries_a_request_timeout() -> None:
+    svc = _make_service(medical_writer=("model-a",))
+    seen: list[object] = []
+
+    def fake_generate_content(*, model, contents, config):
+        seen.append(config.http_options)
+        return _FakeResponse("ok")
+
+    svc.clients["TEST"].models.generate_content = fake_generate_content
+    _run(svc._generate_text(
+        model="x", model_pool=None, model_profile="medical_writer",
+        prompt="hi", system_instruction="sys", temperature=0.2,
+    ))
+    assert seen and seen[0] is not None
+    assert seen[0].timeout == GEMINI_ATTEMPT_TIMEOUT_MS
+    assert 0 < GEMINI_ATTEMPT_TIMEOUT_MS <= 30_000  # must stay under the 55s proxy abort
+
+
+def test_pool_walk_stops_once_the_deadline_is_spent(monkeypatch) -> None:
+    # A slow first candidate must not let the walk run past the deadline: the
+    # remaining candidates are skipped and the caller's safe fallback answers.
+    # Uses the real clock with a tiny deadline — patching time.monotonic would
+    # also patch tenacity's own clock, which hangs the retry loop.
+    svc = _make_service(medical_writer=("slow-a", "slow-b", "slow-c"))
+    calls: list[str] = []
+    monkeypatch.setattr("app.gemini_service.GEMINI_POOL_DEADLINE_SECONDS", 0.05)
+
+    def fake_generate_content(*, model, contents, config):
+        calls.append(model)
+        time.sleep(0.1)              # this attempt alone outruns the deadline
+        raise RuntimeError("upstream boom")  # not a 503: no tenacity retry
+
+    svc.clients["TEST"].models.generate_content = fake_generate_content
+
+    with pytest.raises(RuntimeError):
+        _run(svc._generate_text(
+            model="x", model_pool=None, model_profile="medical_writer",
+            prompt="hi", system_instruction="sys", temperature=0.2,
+        ))
+    # The first candidate runs; the deadline is then spent, so the second and
+    # third are never attempted.
+    assert calls == ["slow-a"]
+
+
+def test_a_slow_primary_still_lets_the_fallback_answer_in_time() -> None:
+    # The prod shape: primary 503s, fallback succeeds. It must still return.
+    svc = _make_service(rag_writer=("bad-primary", "good-fallback"))
+    calls: list[str] = []
+
+    def fake_generate_content(*, model, contents, config):
+        calls.append(model)
+        if model == "bad-primary":
+            raise RuntimeError("503 UNAVAILABLE. high demand")
+        return _FakeResponse("answered")
+
+    svc.clients["TEST"].models.generate_content = fake_generate_content
+    info: dict[str, object] = {}
+    text = _run(svc._generate_text(
+        model="x", model_pool=None, model_profile="rag_writer",
+        prompt="hi", system_instruction="sys", temperature=0.2, call_info=info,
+    ))
+    assert text == "answered"
+    assert calls == ["bad-primary", "good-fallback"]
+    assert info["fallback_used"] is True
+    assert "503" in str(info["fallback_reason"])
+
+
+# ---------------------------------------------------------------------------
+# History robustness: one malformed item must not take down the turn.
+# ---------------------------------------------------------------------------
+
+class _Broken:
+    def __init__(self, role=None, content=None):
+        self.role = role
+        self.content = content
+
+
+def test_malformed_history_items_are_skipped_not_fatal() -> None:
+    history = [
+        ChatHistoryMessage(role="user", content="Что за каналы"),
+        _Broken(role="user", content=None),        # null content
+        _Broken(role="system", content="hi"),      # unexpected role
+        _Broken(role="assistant", content=123),    # non-string content
+        _Broken(role="assistant", content="   "),  # whitespace only
+        ChatHistoryMessage(role="assistant", content="Каналы это..."),
+    ]
+    clean = sanitize_history(history)
+    assert [m.content for m in clean] == ["Что за каналы", "Каналы это..."]
+
+
+def test_history_formatting_survives_a_malformed_item() -> None:
+    history = [
+        ChatHistoryMessage(role="user", content="А сколько стоит?"),
+        _Broken(role="assistant", content=None),
+        ChatHistoryMessage(role="assistant", content="Стоимость зависит от каналов."),
+    ]
+    rendered = GeminiService._format_history(history, limit=10)
+    assert "А сколько стоит?" in rendered
+    assert "Стоимость зависит от каналов." in rendered
+    assert "None" not in rendered
+
+
+def test_empty_history_renders_the_placeholder() -> None:
+    assert GeminiService._format_history([], limit=10) == "No previous messages."
+    assert sanitize_history(None) == []

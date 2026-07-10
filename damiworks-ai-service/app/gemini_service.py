@@ -6,6 +6,7 @@ import binascii
 import difflib
 import json
 import logging
+import os
 import re
 import time
 from threading import Lock
@@ -30,6 +31,7 @@ from .gemini_quota import (
     estimate_tokens,
     normalize_model_name,
 )
+from .llm_usage import build_llm_call_log, record_llm_call, usage_from_response
 from .schemas import ChatAttachment, ChatHistoryMessage, Route
 
 
@@ -37,7 +39,51 @@ logger = logging.getLogger(__name__)
 
 ECONOMY_MAX_OUTPUT_TOKENS = 384
 COMPLETION_RETRY_MAX_OUTPUT_TOKENS = 512
+
+# A single provider call must never hang. A live-chat turn that walks a 3-model
+# pool has to finish inside the frontend proxy's own abort budget (55s), and
+# Google has been answering 503 for a preview model only after ~100 seconds —
+# which turned a working model fallback into a user-visible "Что-то пошло не так".
+#
+# ATTEMPT_TIMEOUT bounds one model+key attempt (the SDK raises, and the existing
+# loop simply moves to the next candidate). POOL_DEADLINE bounds the whole walk,
+# so we give up and let the caller answer safely instead of blowing the proxy.
+GEMINI_ATTEMPT_TIMEOUT_MS = int(os.getenv("GEMINI_ATTEMPT_TIMEOUT_MS", "15000"))
+GEMINI_POOL_DEADLINE_SECONDS = float(os.getenv("GEMINI_POOL_DEADLINE_SECONDS", "40"))
+
 MAX_MULTIMODAL_ATTACHMENT_BYTES = 6 * 1024 * 1024
+
+
+def sanitize_history(chat_history) -> list:
+    """Drop history entries a prompt cannot use, instead of crashing on them.
+
+    A replayed transcript can contain an item with an unexpected role, a null
+    content or a non-string body (a client bug, a bad row read back from
+    storage). One such item must not take down the whole turn: skip it, count
+    it, and keep the conversation going. The item's content is never logged —
+    it may hold user PII.
+    """
+    if not chat_history:
+        return []
+    clean, skipped = [], 0
+    for item in chat_history:
+        role = getattr(item, "role", None)
+        content = getattr(item, "content", None)
+        if role not in ("user", "assistant") or not isinstance(content, str) or not content.strip():
+            skipped += 1
+            continue
+        clean.append(item)
+    if skipped:
+        logger.warning("Skipped %s malformed chat history item(s)", skipped)
+    return clean
+ESCALATION_MODEL_PROFILES = {
+    "sales_writer",
+    "rag_writer",
+    "attachment_extraction",
+    "medical_planner",
+    "medical_repair",
+    "quality_eval",
+}
 
 SAFETY_SETTINGS_ALLOW_ALL = [
     types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
@@ -1408,6 +1454,7 @@ class GeminiService:
             raise RuntimeError("Cannot create embedding for empty text")
 
         def call_model() -> list[float]:
+            call_start = time.monotonic()
             estimated_tokens = estimate_embedding_tokens(normalized_text)
             skipped: set[tuple[str, str]] = set()
             last_exc: BaseException | None = None
@@ -1444,6 +1491,31 @@ class GeminiService:
                         )
 
                     self.quota.complete(lease, estimated_tokens)
+                    record_llm_call(
+                        build_llm_call_log(
+                            provider="gemini",
+                            task_type="embedding",
+                            model_profile="embedding",
+                            selected_model=lease.model,
+                            model_pool=self.settings.embedding_model_pool,
+                            usage={
+                                "input_tokens": estimated_tokens,
+                                "output_tokens": 0,
+                                "total_tokens": estimated_tokens,
+                                "cached_input_tokens": 0,
+                                "thinking_tokens": 0,
+                                "estimated": True,
+                            },
+                            latency_ms=round((time.monotonic() - call_start) * 1000),
+                            success=True,
+                            fallback_used=lease.model != self.settings.embedding_model_pool[0],
+                            fallback_reason=str(last_exc) if last_exc else None,
+                            metadata={
+                                "embedding_dimensions": len(values),
+                                "pricing_note": "embedding pricing not configured",
+                            },
+                        )
+                    )
                     logger.debug(
                         "Gemini embedding used model=%s key=%s",
                         lease.model,
@@ -1471,6 +1543,28 @@ class GeminiService:
                     else:
                         raise
 
+            record_llm_call(
+                build_llm_call_log(
+                    provider="gemini",
+                    task_type="embedding",
+                    model_profile="embedding",
+                    selected_model=None,
+                    model_pool=self.settings.embedding_model_pool,
+                    usage={
+                        "input_tokens": estimated_tokens,
+                        "output_tokens": 0,
+                        "total_tokens": estimated_tokens,
+                        "cached_input_tokens": 0,
+                        "thinking_tokens": 0,
+                        "estimated": True,
+                    },
+                    latency_ms=round((time.monotonic() - call_start) * 1000),
+                    success=False,
+                    error_type=type(last_exc).__name__ if last_exc else "RuntimeError",
+                    fallback_used=True,
+                    fallback_reason=str(last_exc) if last_exc else "all candidates exhausted",
+                )
+            )
             raise RuntimeError(
                 f"Gemini API error for embedding models {self.settings.embedding_model_pool}: {last_exc}"
             ) from last_exc
@@ -1973,9 +2067,8 @@ class GeminiService:
             if base_max_output_tokens < COMPLETION_RETRY_MAX_OUTPUT_TOKENS:
                 output_token_budgets.append(COMPLETION_RETRY_MAX_OUTPUT_TOKENS)
 
-            profile_pool = (
-                self.settings.model_profiles.get(model_profile) if model_profile else None
-            )
+            profiles = self.settings.model_profiles or {}
+            profile_pool = profiles.get(model_profile) if model_profile else None
             candidates = profile_pool or model_pool or (model,)
             call_start = time.monotonic()
             last_exc: BaseException | None = None
@@ -1989,6 +2082,7 @@ class GeminiService:
                     response_mime_type=response_mime_type,
                     response_schema=response_schema,
                     safety_settings=SAFETY_SETTINGS_ALLOW_ALL,
+                    http_options=types.HttpOptions(timeout=GEMINI_ATTEMPT_TIMEOUT_MS),
                 )
                 estimated_tokens = estimate_tokens(
                     prompt,
@@ -1997,6 +2091,15 @@ class GeminiService:
                 )
 
                 for candidate_model in candidates:
+                    # Stop walking the pool once the request budget is spent: a
+                    # late answer is worthless because the proxy has already
+                    # aborted, and the caller has a safe fallback for this.
+                    if time.monotonic() - call_start > GEMINI_POOL_DEADLINE_SECONDS:
+                        logger.warning(
+                            "Gemini pool deadline exceeded after %.1fs (profile=%s, tried up to %s)",
+                            time.monotonic() - call_start, model_profile, candidate_model,
+                        )
+                        break
                     key_order = self._ordered_api_keys()
                     for api_key in key_order:
                         lease: GeminiQuotaLease | None = None
@@ -2083,6 +2186,37 @@ class GeminiService:
                             continue
 
                         text = response.text.strip()
+                        latency_ms = round((time.monotonic() - call_start) * 1000)
+                        usage = usage_from_response(
+                            response,
+                            estimated_input_tokens=estimate_tokens(
+                                prompt,
+                                system_instruction,
+                                max_output_tokens=0,
+                            ),
+                            estimated_output_tokens=estimate_tokens(
+                                text,
+                                max_output_tokens=0,
+                            ),
+                        )
+                        call_log = build_llm_call_log(
+                            provider="gemini",
+                            task_type=model_profile,
+                            model_profile=model_profile,
+                            selected_model=candidate_model,
+                            model_pool=candidates,
+                            usage=usage,
+                            latency_ms=latency_ms,
+                            success=True,
+                            fallback_used=candidate_model != candidates[0],
+                            fallback_reason=str(last_exc) if last_exc else None,
+                            escalation_used=(
+                                model_profile in ESCALATION_MODEL_PROFILES
+                                and candidate_model == candidates[0]
+                            ),
+                            metadata={"max_output_tokens": output_token_budget},
+                        )
+                        record_llm_call(call_log)
                         self.quota.complete(
                             lease,
                             self._response_token_count(response)
@@ -2107,12 +2241,46 @@ class GeminiService:
                                 "selected_model": candidate_model,
                                 "fallback_used": candidate_model != candidates[0],
                                 "fallback_reason": str(last_exc) if last_exc else None,
-                                "latency_ms": round((time.monotonic() - call_start) * 1000),
+                                "latency_ms": latency_ms,
+                                "input_tokens": call_log["input_tokens"],
+                                "output_tokens": call_log["output_tokens"],
+                                "total_tokens": call_log["total_tokens"],
+                                "cached_input_tokens": call_log["cached_input_tokens"],
+                                "thinking_tokens": call_log["thinking_tokens"],
+                                "estimated": call_log["estimated"],
+                                "input_cost_usd": call_log["input_cost_usd"],
+                                "output_cost_usd": call_log["output_cost_usd"],
+                                "total_cost_usd": call_log["total_cost_usd"],
+                                "pricing_missing": call_log["pricing_missing"],
+                                "call_id": call_log["call_id"],
                             })
                         return text
 
             if last_exc is None and local_limit_errors:
                 last_exc = local_limit_errors[-1]
+            latency_ms = round((time.monotonic() - call_start) * 1000)
+            failure_usage = {
+                "input_tokens": estimate_tokens(prompt, system_instruction, max_output_tokens=0),
+                "output_tokens": 0,
+                "total_tokens": estimate_tokens(prompt, system_instruction, max_output_tokens=0),
+                "cached_input_tokens": 0,
+                "thinking_tokens": 0,
+                "estimated": True,
+            }
+            failure_call = build_llm_call_log(
+                provider="gemini",
+                task_type=model_profile,
+                model_profile=model_profile,
+                selected_model=None,
+                model_pool=candidates,
+                usage=failure_usage,
+                latency_ms=latency_ms,
+                success=False,
+                error_type=type(last_exc).__name__ if last_exc else "RuntimeError",
+                fallback_used=True,
+                fallback_reason=str(last_exc) if last_exc else "all candidates exhausted",
+            )
+            record_llm_call(failure_call)
             if call_info is not None:
                 call_info.update({
                     "model_profile": model_profile,
@@ -2120,7 +2288,13 @@ class GeminiService:
                     "selected_model": None,
                     "fallback_used": True,
                     "fallback_reason": str(last_exc) if last_exc else "all candidates exhausted",
-                    "latency_ms": round((time.monotonic() - call_start) * 1000),
+                    "latency_ms": latency_ms,
+                    "input_tokens": failure_call["input_tokens"],
+                    "output_tokens": failure_call["output_tokens"],
+                    "total_tokens": failure_call["total_tokens"],
+                    "estimated": failure_call["estimated"],
+                    "pricing_missing": failure_call["pricing_missing"],
+                    "call_id": failure_call["call_id"],
                 })
             raise RuntimeError(
                 f"Gemini API error for model pool {candidates}: {last_exc}"
@@ -2158,10 +2332,10 @@ class GeminiService:
                 temperature=temperature,
                 max_output_tokens=output_token_budget,
                 safety_settings=SAFETY_SETTINGS_ALLOW_ALL,
+                http_options=types.HttpOptions(timeout=GEMINI_ATTEMPT_TIMEOUT_MS),
             )
-            profile_pool = (
-                self.settings.model_profiles.get(model_profile) if model_profile else None
-            )
+            profiles = self.settings.model_profiles or {}
+            profile_pool = profiles.get(model_profile) if model_profile else None
             candidates = profile_pool or model_pool or (model,)
             call_start = time.monotonic()
             last_exc: BaseException | None = None
@@ -2216,6 +2390,41 @@ class GeminiService:
                         continue
 
                     text = response.text.strip()
+                    latency_ms = round((time.monotonic() - call_start) * 1000)
+                    usage = usage_from_response(
+                        response,
+                        estimated_input_tokens=estimate_tokens(
+                            prompt,
+                            system_instruction,
+                            max_output_tokens=0,
+                        ),
+                        estimated_output_tokens=estimate_tokens(
+                            text,
+                            max_output_tokens=0,
+                        ),
+                    )
+                    call_log = build_llm_call_log(
+                        provider="gemini",
+                        task_type=model_profile or "attachment_extraction",
+                        model_profile=model_profile,
+                        selected_model=candidate_model,
+                        model_pool=candidates,
+                        usage=usage,
+                        latency_ms=latency_ms,
+                        success=True,
+                        fallback_used=candidate_model != candidates[0],
+                        fallback_reason=str(last_exc) if last_exc else None,
+                        escalation_used=(
+                            model_profile in ESCALATION_MODEL_PROFILES
+                            and candidate_model == candidates[0]
+                        ),
+                        metadata={
+                            "max_output_tokens": output_token_budget,
+                            "attachment_count": len(attachments),
+                            "multimodal": True,
+                        },
+                    )
+                    record_llm_call(call_log)
                     self.quota.complete(
                         lease,
                         self._response_token_count(response)
@@ -2234,12 +2443,47 @@ class GeminiService:
                             "selected_model": candidate_model,
                             "fallback_used": candidate_model != candidates[0],
                             "fallback_reason": str(last_exc) if last_exc else None,
-                            "latency_ms": round((time.monotonic() - call_start) * 1000),
+                            "latency_ms": latency_ms,
+                            "input_tokens": call_log["input_tokens"],
+                            "output_tokens": call_log["output_tokens"],
+                            "total_tokens": call_log["total_tokens"],
+                            "cached_input_tokens": call_log["cached_input_tokens"],
+                            "thinking_tokens": call_log["thinking_tokens"],
+                            "estimated": call_log["estimated"],
+                            "input_cost_usd": call_log["input_cost_usd"],
+                            "output_cost_usd": call_log["output_cost_usd"],
+                            "total_cost_usd": call_log["total_cost_usd"],
+                            "pricing_missing": call_log["pricing_missing"],
+                            "call_id": call_log["call_id"],
                         })
                     return text
 
             if last_exc is None and local_limit_errors:
                 last_exc = local_limit_errors[-1]
+            latency_ms = round((time.monotonic() - call_start) * 1000)
+            failure_usage = {
+                "input_tokens": estimate_tokens(prompt, system_instruction, max_output_tokens=0),
+                "output_tokens": 0,
+                "total_tokens": estimate_tokens(prompt, system_instruction, max_output_tokens=0),
+                "cached_input_tokens": 0,
+                "thinking_tokens": 0,
+                "estimated": True,
+            }
+            failure_call = build_llm_call_log(
+                provider="gemini",
+                task_type=model_profile or "attachment_extraction",
+                model_profile=model_profile,
+                selected_model=None,
+                model_pool=candidates,
+                usage=failure_usage,
+                latency_ms=latency_ms,
+                success=False,
+                error_type=type(last_exc).__name__ if last_exc else "RuntimeError",
+                fallback_used=True,
+                fallback_reason=str(last_exc) if last_exc else "all candidates exhausted",
+                metadata={"attachment_count": len(attachments), "multimodal": True},
+            )
+            record_llm_call(failure_call)
             if call_info is not None:
                 call_info.update({
                     "model_profile": model_profile,
@@ -2247,7 +2491,13 @@ class GeminiService:
                     "selected_model": None,
                     "fallback_used": True,
                     "fallback_reason": str(last_exc) if last_exc else "all candidates exhausted",
-                    "latency_ms": round((time.monotonic() - call_start) * 1000),
+                    "latency_ms": latency_ms,
+                    "input_tokens": failure_call["input_tokens"],
+                    "output_tokens": failure_call["output_tokens"],
+                    "total_tokens": failure_call["total_tokens"],
+                    "estimated": failure_call["estimated"],
+                    "pricing_missing": failure_call["pricing_missing"],
+                    "call_id": failure_call["call_id"],
                 })
             raise RuntimeError(
                 f"Gemini multimodal API error for model pool {candidates}: {last_exc}"
@@ -3048,12 +3298,13 @@ class GeminiService:
         *,
         limit: int,
     ) -> str:
-        if not chat_history:
+        history = sanitize_history(chat_history)
+        if not history:
             return "No previous messages."
 
         lines = [
             f"{item.role}: {item.content}"
-            for item in chat_history[-limit:]
+            for item in history[-limit:]
         ]
         return "\n".join(lines)
 

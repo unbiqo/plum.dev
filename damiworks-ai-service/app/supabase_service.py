@@ -11,6 +11,7 @@ from typing import Any
 from supabase import Client, create_client
 
 from .config import Settings
+from .llm_usage import aggregate_llm_calls, compact_conversation_cost
 from .schemas import ChatHistoryMessage, Route
 
 
@@ -53,6 +54,7 @@ class SupabaseService:
         self._leads_available = _TableAvailability()
         self._quality_feedback_available = _TableAvailability()
         self._ai_conversations_available = _TableAvailability()
+        self._llm_call_logs_available = _TableAvailability()
 
     async def search_knowledge_base(
         self,
@@ -1001,6 +1003,11 @@ class SupabaseService:
         assistant_mid = assistant_message_id or f"srv_ai_{uuid.uuid4()}"
         source_value = source or channel
         metadata_value = metadata or {}
+        assistant_metadata = dict(metadata_value.get("assistant_message_metadata") or {})
+        if metadata_value.get("llm_calls"):
+            assistant_metadata["llm_calls"] = metadata_value.get("llm_calls")
+        if metadata_value.get("llm_cost"):
+            assistant_metadata["llm_cost"] = metadata_value.get("llm_cost")
 
         try:
             self.client.table("ai_conversations").upsert(
@@ -1037,7 +1044,7 @@ class SupabaseService:
                         "message_id": assistant_mid,
                         "role": "assistant",
                         "content": assistant_answer,
-                        "metadata": metadata_value.get("assistant_message_metadata", {}),
+                        "metadata": assistant_metadata,
                     },
                 ],
                 on_conflict="instance_id,chat_id,message_id",
@@ -1056,6 +1063,12 @@ class SupabaseService:
                     "updated_at": now,
                 }
             ).eq("instance_id", instance_id).eq("chat_id", chat_id).execute()
+            self._insert_llm_call_logs_sync(
+                calls=metadata_value.get("llm_calls") or [],
+                instance_id=instance_id,
+                chat_id=chat_id,
+                assistant_message_id=assistant_mid,
+            )
         except Exception as exc:
             if self._is_missing_table_error(exc):
                 self._ai_conversations_available.mark_unavailable()
@@ -1093,6 +1106,136 @@ class SupabaseService:
             return len(response.data or [])
         except Exception:
             return 0
+
+    def _insert_llm_call_logs_sync(
+        self,
+        *,
+        calls: list[dict[str, Any]],
+        instance_id: str,
+        chat_id: str,
+        assistant_message_id: str,
+    ) -> None:
+        if self._llm_call_logs_available.blocked() or not calls:
+            return
+
+        rows: list[dict[str, Any]] = []
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            rows.append(
+                {
+                    "id": call.get("call_id") or str(uuid.uuid4()),
+                    "conversation_id": call.get("conversation_id") or f"{instance_id}:{chat_id}",
+                    "message_id": call.get("message_id") or assistant_message_id,
+                    "tenant_id": call.get("tenant_id"),
+                    "instance_id": call.get("instance_id") or instance_id,
+                    "provider": call.get("provider") or "gemini",
+                    "model_profile": call.get("model_profile"),
+                    "selected_model": call.get("selected_model"),
+                    "task_type": call.get("task_type"),
+                    "input_tokens": call.get("input_tokens") or 0,
+                    "output_tokens": call.get("output_tokens") or 0,
+                    "total_tokens": call.get("total_tokens") or 0,
+                    "cached_input_tokens": call.get("cached_input_tokens"),
+                    "thinking_tokens": call.get("thinking_tokens"),
+                    "estimated": bool(call.get("estimated")),
+                    "input_cost_usd": call.get("input_cost_usd"),
+                    "output_cost_usd": call.get("output_cost_usd"),
+                    "total_cost_usd": call.get("total_cost_usd"),
+                    "pricing_missing": bool(call.get("pricing_missing")),
+                    "latency_ms": call.get("latency_ms") or 0,
+                    "success": bool(call.get("success", True)),
+                    "error_type": call.get("error_type"),
+                    "fallback_used": bool(call.get("fallback_used")),
+                    "fallback_reason": call.get("fallback_reason"),
+                    "escalation_used": bool(call.get("escalation_used")),
+                    "escalation_reason": call.get("escalation_reason"),
+                    "metadata": call.get("metadata") or {},
+                    "created_at": call.get("created_at"),
+                }
+            )
+        if not rows:
+            return
+
+        try:
+            self.client.table("llm_call_logs").upsert(rows, on_conflict="id").execute()
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._llm_call_logs_available.mark_unavailable()
+                logger.warning("llm_call_logs table unavailable; LLM call log insert skipped")
+                return
+            logger.exception("Failed to insert llm_call_logs")
+            return
+
+        self._llm_call_logs_available.mark_available()
+
+    def _list_llm_call_logs_for_conversations_sync(
+        self,
+        conversation_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        if self._llm_call_logs_available.blocked() or not conversation_ids:
+            return []
+        try:
+            response = (
+                self.client.table("llm_call_logs")
+                .select("*")
+                .in_("conversation_id", conversation_ids)
+                .order("created_at", desc=False)
+                .limit(5000)
+                .execute()
+            )
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._llm_call_logs_available.mark_unavailable()
+                return []
+            logger.exception("Failed to list llm_call_logs")
+            return []
+
+        self._llm_call_logs_available.mark_available()
+        return list(response.data or [])
+
+    def _list_llm_call_logs_for_conversation_sync(
+        self,
+        *,
+        instance_id: str,
+        chat_id: str,
+    ) -> list[dict[str, Any]]:
+        return self._list_llm_call_logs_for_conversations_sync([f"{instance_id}:{chat_id}"])
+
+    def _list_ai_message_metadata_for_conversations_sync(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        instance_ids = sorted({str(row.get("instance_id")) for row in rows if row.get("instance_id")})
+        chat_ids = sorted({str(row.get("chat_id")) for row in rows if row.get("chat_id")})
+        if not instance_ids or not chat_ids:
+            return []
+
+        try:
+            response = (
+                self.client.table("ai_conversation_messages")
+                .select("instance_id,chat_id,metadata")
+                .in_("instance_id", instance_ids)
+                .in_("chat_id", chat_ids)
+                .execute()
+            )
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._ai_conversations_available.mark_unavailable()
+                return []
+            logger.exception("Failed to list AI conversation message metadata")
+            return []
+
+        wanted = {
+            (str(row.get("instance_id")), str(row.get("chat_id")))
+            for row in rows
+            if row.get("instance_id") and row.get("chat_id")
+        }
+        return [
+            message
+            for message in list(response.data or [])
+            if (str(message.get("instance_id")), str(message.get("chat_id"))) in wanted
+        ]
 
     def _list_ai_conversations_sync(
         self,
@@ -1136,7 +1279,9 @@ class SupabaseService:
             return []
 
         self._ai_conversations_available.mark_available()
-        return list(response.data or [])
+        rows = list(response.data or [])
+        self._attach_conversation_cost_summaries(rows)
+        return rows
 
     def _get_ai_conversation_detail_sync(
         self,
@@ -1201,12 +1346,64 @@ class SupabaseService:
                 }
             )
 
+        calls = self._list_llm_call_logs_for_conversation_sync(
+            instance_id=instance_id,
+            chat_id=chat_id,
+        )
+        if not calls:
+            calls = self._extract_llm_calls_from_messages(messages)
+        conversation_cost = aggregate_llm_calls(calls)
+        if isinstance(conversation, dict):
+            conversation["conversation_cost_summary"] = compact_conversation_cost(conversation_cost)
+
         self._ai_conversations_available.mark_available()
         return {
             "conversation": conversation,
             "messages": messages,
             "feedback": feedback,
+            "conversation_cost": conversation_cost,
         }
+
+    def _attach_conversation_cost_summaries(self, rows: list[dict[str, Any]]) -> None:
+        conversation_ids = [
+            f"{row.get('instance_id')}:{row.get('chat_id')}"
+            for row in rows
+            if row.get("instance_id") and row.get("chat_id")
+        ]
+        calls = self._list_llm_call_logs_for_conversations_sync(conversation_ids)
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for call in calls:
+            grouped.setdefault(str(call.get("conversation_id") or ""), []).append(call)
+
+        missing_rows = [
+            row
+            for row in rows
+            if f"{row.get('instance_id')}:{row.get('chat_id')}" not in grouped
+        ]
+        if missing_rows:
+            metadata_messages = self._list_ai_message_metadata_for_conversations_sync(missing_rows)
+            for message in metadata_messages:
+                cid = f"{message.get('instance_id')}:{message.get('chat_id')}"
+                grouped.setdefault(cid, []).extend(self._extract_llm_calls_from_messages([message]))
+
+        for row in rows:
+            cid = f"{row.get('instance_id')}:{row.get('chat_id')}"
+            if cid in grouped:
+                row["conversation_cost_summary"] = compact_conversation_cost(
+                    aggregate_llm_calls(grouped[cid])
+                )
+
+    @staticmethod
+    def _extract_llm_calls_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        calls: list[dict[str, Any]] = []
+        for message in messages:
+            metadata = message.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                continue
+            value = metadata.get("llm_calls") or []
+            if isinstance(value, list):
+                calls.extend(call for call in value if isinstance(call, dict))
+        return calls
 
     def _fetch_recent_chat_history_sync(
         self,

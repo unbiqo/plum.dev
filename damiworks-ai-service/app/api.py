@@ -17,6 +17,12 @@ from fastapi.responses import JSONResponse
 
 from .gemini_service import GeminiService
 from .gemini_quota import GeminiQuotaExhausted
+from .llm_usage import (
+    aggregate_llm_calls,
+    begin_llm_usage_context,
+    current_llm_calls,
+    end_llm_usage_context,
+)
 from .custom_demo_documents import (
     CUSTOM_DEMO_DOCUMENT_TTL_SECONDS,
     format_custom_demo_document_context,
@@ -1995,6 +2001,18 @@ async def chat(
 ) -> ChatResponse:
     gemini: GeminiService = request.app.state.gemini
     supabase: SupabaseService = request.app.state.supabase
+    # Correlates the frontend's "Что-то пошло не так" with this request's log
+    # lines. Never contains user content — safe to surface to the client.
+    request_id = uuid.uuid4().hex[:12]
+    logger.info(
+        "chat request_id=%s instance_id=%s channel=%s",
+        request_id, payload.instance_id, payload.channel,
+    )
+    llm_usage_token = begin_llm_usage_context(
+        instance_id=payload.instance_id,
+        chat_id=payload.chat_id,
+        message_id=payload.response_message_id,
+    )
 
     try:
         asyncio.create_task(
@@ -3207,7 +3225,10 @@ async def chat(
                 },
             )
 
-        logger.exception("Failed to process chat request")
+        logger.exception(
+            "Failed to process chat request request_id=%s instance_id=%s",
+            request_id, payload.instance_id,
+        )
         if not _generation_fallback_enabled():
             return ChatResponse(
                 route=Route.general,
@@ -3218,6 +3239,7 @@ async def chat(
                     "fallback_answer": False,
                     "generation_error": _exception_chain_text(exc),
                     "tenant_found": False,
+                    "request_id": request_id,
                 },
             )
         return ChatResponse(
@@ -3228,8 +3250,11 @@ async def chat(
                 "generation_failed": True,
                 "fallback_answer": True,
                 "tenant_found": False,
+                "request_id": request_id,
             },
         )
+    finally:
+        end_llm_usage_context(llm_usage_token)
 
 
 async def _answer_with_rag_retry(
@@ -4969,6 +4994,10 @@ def _build_create_cart_answer(product: ProductCard) -> str:
 
 def _build_log_metadata(response: ChatResponse) -> dict[str, Any]:
     metadata = dict(response.metadata)
+    calls = current_llm_calls()
+    if calls and "llm_calls" not in metadata:
+        metadata["llm_calls"] = calls
+        metadata["llm_cost"] = aggregate_llm_calls(calls)
     if response.checkout:
         metadata["checkout"] = True
     if response.product_id:
