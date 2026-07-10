@@ -47,6 +47,17 @@ from .medical_center_planner import (
     reclassify_medical_advice_question,
 )
 from .medical_center_routing import route_symptom
+from .medical_center_schedule import (
+    WEEKDAY_ACCUSATIVE,
+    WEEKDAY_NOMINATIVE as _WEEKDAY_NOMINATIVE,
+    hours_on,
+    schedule_sentence,
+    time_within_schedule,
+    weekday_from_text,
+    windows_on,
+    working_days_sentence,
+    works_on,
+)
 from .medical_center_slots import (
     format_slots,
     resolve_slot,
@@ -286,7 +297,14 @@ def _last_assistant(history: list[ChatHistoryMessage]) -> str:
 def _assistant_in_slot_selection(history: list[ChatHistoryMessage]) -> bool:
     """True if the assistant's last turn offered slots or proposed a specific one."""
     low = _last_assistant(history)
-    return "какое время вам удобнее" in low or "правильно понял, хотите" in low
+    return (
+        "какое время вам удобнее" in low
+        or "правильно понял, хотите" in low
+        # Weekday-aware offers and their schedule-bound fallbacks.
+        or "какое время в этом промежутке" in low
+        or "удобнее утро или ближе к обеду" in low
+        or "какой из них вам удобнее" in low
+    )
 
 
 def _booking_confirmation_sent(history: list[ChatHistoryMessage]) -> bool:
@@ -411,6 +429,9 @@ def _is_booking_turn(
     # instead of a dead-end acknowledgement.
     if state.specialty and is_affirmation(message) and _assistant_invited_booking(history):
         return True
+    # "Давайте на вторник" is a booking turn even without a booking verb.
+    if state.specialty and weekday_from_text(message) is not None:
+        return True
     if _assistant_in_slot_selection(history):
         # The user is replying to a slot offer/suggestion with a choice, an
         # affirmation, or their contact.
@@ -420,7 +441,150 @@ def _is_booking_turn(
             return True
         if state.specialty and resolve_slot(state.specialty, message)[0] != "none":
             return True
+        # A bare time answering our own weekday offer ("09:30").
+        pending = _pending_offer_weekday(history)
+        if pending is not None and _requested_time(message, windows_on(state.specialty, pending)):
+            return True
     return False
+
+
+# The user is correcting us ("Сегодня четверг. А мне надо во вторник").
+_CORRECTION_RE = re.compile(
+    r"\bа\s+мне\s+надо\b|\bмне\s+нужен\b|\bмне\s+нужна\b|\bя\s+же\s+(?:сказал|говорил|писал)\b"
+    r"|\bне\s+завтра\b|\bне\s+это\s+врем\w*|\bвы\s+не\s+так\s+поня\w*|\bвы\s+не\s+поня\w*"
+    r"|\bне\s+то\b|\bя\s+просил\b|\bсегодня\s+\w+\b\s*[.,]",
+    re.IGNORECASE,
+)
+# "На вторник есть окна 09:30 и 12:00." — used to recover which weekday we
+# offered, so a bare "09:30" reply next turn resolves against the right day.
+_WEEKDAY_OFFER_RE = re.compile(r"на\s+([а-яё]+)\s+есть\s+окн", re.IGNORECASE)
+_EXPLICIT_TIME_RE = re.compile(r"\b(\d{1,2})[:.](\d{2})\b")
+_BARE_HOUR_RE = re.compile(r"(?<![\d:])(\d{1,2})(?![\d:])")
+
+
+def _requested_time(message: str, allowed: list[str]) -> str | None:
+    """The window from ``allowed`` the user picked, by exact time or bare hour."""
+    low = (message or "").lower()
+    for hours, minutes in _EXPLICIT_TIME_RE.findall(low):
+        candidate = f"{int(hours):02d}:{minutes}"
+        if candidate in allowed:
+            return candidate
+    for raw in _BARE_HOUR_RE.findall(_EXPLICIT_TIME_RE.sub(" ", low)):
+        hour = int(raw)
+        matches = [t for t in allowed if int(t.split(":")[0]) == hour]
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def _pending_offer_weekday(history: list[ChatHistoryMessage]) -> int | None:
+    """The weekday our last message offered windows on, if any."""
+    match = _WEEKDAY_OFFER_RE.search(_last_assistant(history))
+    return weekday_from_text(match.group(1)) if match else None
+
+
+def _resolve_weekday_turn(
+    state: "ConversationState",
+    message: str,
+    history: list[ChatHistoryMessage],
+) -> tuple[str, str] | None:
+    """Honour a named weekday, validated against the doctor's KB schedule.
+
+    Returns (answer, conversation_status), or None to fall through to the normal
+    relative-day demo slots. Never offers a day or an hour the doctor does not
+    actually work, and never invents an exact free window: when the demo has no
+    windows for that day it says the administrator confirms them and quotes the
+    real schedule instead.
+    """
+    weekday = weekday_from_text(message)
+    pending = _pending_offer_weekday(history)
+
+    # A bare time reply to our own weekday offer ("09:30").
+    if weekday is None and pending is not None:
+        picked = _requested_time(message, windows_on(state.specialty, pending))
+        if picked:
+            state.selected_slot = f"{_WEEKDAY_NOMINATIVE[pending]} {picked}"
+            return None  # fall through to stage 2 (ask contact / confirm)
+        return None
+
+    if weekday is None:
+        return None
+
+    dative = specialty_dative(state.specialty)
+    accusative = WEEKDAY_ACCUSATIVE[weekday]
+    correcting = bool(_CORRECTION_RE.search(message))
+    # A correction discards whatever wrong slot we had proposed or recorded.
+    if correcting:
+        state.selected_slot = ""
+    prefix = f"Да, поняла, вам нужен именно {_WEEKDAY_NOMINATIVE[weekday]}.\n\n" if correcting else ""
+
+    if not works_on(state.specialty, weekday):
+        days = working_days_sentence(state.specialty)
+        return (
+            f"{prefix}К {dative} приём в этот день не ведётся. "
+            f"Врач принимает в такие дни: {days}.\n\n"
+            "Какой из них вам удобнее?",
+            "slots_offered",
+        )
+
+    hours = hours_on(state.specialty, weekday)
+    windows = windows_on(state.specialty, weekday)
+
+    # An exact time named together with the weekday ("запишите во вторник в 11").
+    picked = _requested_time(message, windows)
+    if picked:
+        state.selected_slot = f"{_WEEKDAY_NOMINATIVE[weekday]} {picked}"
+        return None  # stage 2 owns the contact request / confirmation
+    if hours and _named_time_outside_schedule(message, state.specialty, weekday):
+        return (
+            f"{prefix}В это время приём не ведётся. По графику врач принимает "
+            f"{schedule_sentence(state.specialty, weekday)}.\n\n"
+            "Какое время в этом промежутке вам удобно?",
+            "slots_offered",
+        )
+
+    # The hour is inside the schedule but not free. Say so, instead of silently
+    # listing other windows as if the user had asked for nothing in particular.
+    if windows and _message_names_a_time(message):
+        return (
+            f"{prefix}На {accusative.split()[-1]} в это время свободного окна нет. "
+            f"Есть {format_slots(windows)}.\n\n"
+            "Какое время вам удобнее?",
+            "slots_offered",
+        )
+
+    if windows:
+        listed = format_slots(windows)
+        return (
+            f"{prefix}На {accusative.split()[-1]} есть окна: {listed}.\n\n"
+            "Какое время вам удобнее?",
+            "slots_offered",
+        )
+
+    return (
+        f"{prefix}На {accusative.split()[-1]} точные свободные окна уточнит администратор. "
+        f"По графику врач принимает {schedule_sentence(state.specialty, weekday)}.\n\n"
+        "Удобнее утро или ближе к обеду?",
+        "slots_offered",
+    )
+
+
+def _message_names_a_time(message: str) -> bool:
+    low = (message or "").lower()
+    if _EXPLICIT_TIME_RE.search(low):
+        return True
+    return any(0 <= int(h) <= 23 for h in _BARE_HOUR_RE.findall(_EXPLICIT_TIME_RE.sub(" ", low)))
+
+
+def _named_time_outside_schedule(message: str, specialty: str, weekday: int) -> bool:
+    """True when the user named an hour the doctor does not work that day."""
+    low = (message or "").lower()
+    times = [f"{int(h):02d}:{m}" for h, m in _EXPLICIT_TIME_RE.findall(low)]
+    times += [f"{int(h):02d}:00" for h in _BARE_HOUR_RE.findall(_EXPLICIT_TIME_RE.sub(" ", low))
+              if 0 <= int(h) <= 23]
+    if not times:
+        return False
+    return not any(time_within_schedule(specialty, weekday, t) for t in times)
 
 
 def _resolve_booking_turn(
@@ -460,6 +624,15 @@ def _resolve_booking_turn(
 
     dative = specialty_dative(state.specialty)
 
+    # ---- WEEKDAY REQUEST / CORRECTION (schedule-aware, before the demo slots) ----
+    # "Давайте на вторник" names a day, so the generic "ближайшие окна" list is
+    # the wrong answer: it ignores what the user asked for and can even name a
+    # day the doctor does not work. Everything offered here comes from the KB
+    # schedule, so a window outside the doctor's hours cannot be produced.
+    weekday_turn = _resolve_weekday_turn(state, message, history)
+    if weekday_turn is not None:
+        return weekday_turn
+
     # Stage 1 — no slot chosen yet.
     if not state.selected_slot:
         kind, slot = resolve_slot(state.specialty, message)
@@ -470,7 +643,7 @@ def _resolve_booking_turn(
             # Already offered — the reply didn't map. Clarify ONCE, don't re-list.
             return (
                 "Не совсем понял выбор времени. Напишите, пожалуйста, день и час "
-                "из предложенных — например «завтра 16:00».",
+                "из предложенных, например «завтра 16:00».",
                 "slots_offered",
             )
         return (

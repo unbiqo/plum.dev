@@ -518,8 +518,14 @@ def build_conversation_state(
 # The assistant always echoes a picked slot as "<день> ЧЧ:ММ к <врачу>"
 # («Отлично, завтра 16:00 к ЛОРу», «Хорошо, выбрали послезавтра 12:00 к ЛОРу»,
 # «Записали вас на … к …»). The multi-slot offer never has "к" after a time.
+# A slot label is either a relative day ("завтра") or a weekday ("вторник"),
+# because a user who asks for a weekday gets weekday-labelled windows back.
+_SLOT_DAY_ALT = (
+    r"послезавтра|завтра|сегодня"
+    r"|понедельник|вторник|сред[уа]|четверг|пятниц[уа]|суббот[уа]|воскресенье"
+)
 _CONFIRMED_SLOT_RE = re.compile(
-    r"(послезавтра|завтра|сегодня)\s+(\d{1,2}:\d{2})\s+к\b",
+    rf"({_SLOT_DAY_ALT})\s+(\d{{1,2}}:\d{{2}})\s+к\b",
     re.IGNORECASE,
 )
 # The system's OWN committed-routing/booking text always names a specialty right
@@ -539,7 +545,7 @@ _SPECIALTY_MENTION_RE = re.compile(
 )
 # The assistant's "Правильно понял, хотите X?" clarification proposes a slot.
 _SUGGEST_SLOT_RE = re.compile(
-    r"хотите\s+(послезавтра|завтра|сегодня)\s+(?:в\s+)?(\d{1,2}:\d{2})",
+    rf"хотите\s+({_SLOT_DAY_ALT})\s+(?:в\s+)?(\d{{1,2}}:\d{{2}})",
     re.IGNORECASE,
 )
 _AFFIRMATION_RE = re.compile(

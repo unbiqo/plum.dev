@@ -38,6 +38,13 @@ from app.medical_center_intake import (
 from app.medical_center_kb import get_full_kb_context
 from app.medical_center_rag import retrieve_medical_kb_context
 from app.medical_center_routing import route_symptom
+from app.medical_center_schedule import (
+    filter_windows_by_schedule,
+    schedule_for,
+    time_within_schedule,
+    weekday_from_text,
+    windows_on,
+)
 from app.medical_center_slots import (
     normalize_specialty,
     normalize_symptom_terms,
@@ -2331,3 +2338,156 @@ def test_rag_feature_flag_reverts_to_full_kb(monkeypatch) -> None:
     ctx = retrieve_medical_kb_context(message="у меня дискомфорт в икрах", history=[], mode="writer")
     assert ctx.full_kb_injected is True
     assert ctx.context == get_full_kb_context()
+
+
+# ---------------------------------------------------------------------------
+# Weekday preference, doctor-schedule validation and user corrections.
+#
+# Live failures: "Давайте на вторник" was ignored and the bot listed
+# "завтра 16:00" (outside the neurologist's Tue/Fri 09:00-14:00 schedule);
+# then "Сегодня четверг. А мне надо во вторник" got "Не совсем понял выбор
+# времени", forcing the user to pick from windows that were wrong to begin with.
+# ---------------------------------------------------------------------------
+
+def _neuro_planner(**kw):
+    slots = {"specialty": "невролог"}
+    slots.update(kw.pop("slots", {}))
+    return _default_planner(current_intent=kw.pop("current_intent", "wants_booking"),
+                            slots=slots, **kw)
+
+
+def _neuro_cta_history():
+    return [_msg("assistant", "Могу подобрать ближайшее окно к неврологу?")]
+
+
+def test_schedules_are_parsed_from_the_kb_not_duplicated_in_code() -> None:
+    schedule = schedule_for("невролог")
+    assert schedule is not None and schedule.name == "Арман Рахимов"
+    assert schedule.works_on(1) and schedule.works_on(4)      # Вт/Пт
+    assert not schedule.works_on(3)                            # not Чт
+    assert schedule.hours_on(1) == ("09:00", "14:00")
+
+
+def test_weekday_is_parsed_from_every_phrasing() -> None:
+    for phrase in ("Давайте на вторник", "во вторник", "мне надо во вторник",
+                   "лучше во вторник", "только во вторник", "во вторник утром",
+                   "во вторник после обеда", "следующий вторник",
+                   "не завтра, а во вторник", "Сегодня четверг. А мне надо во вторник"):
+        assert weekday_from_text(phrase) == 1, phrase
+    assert weekday_from_text("сколько стоит приём") is None
+
+
+def test_offered_windows_are_filtered_by_the_doctor_schedule() -> None:
+    # Friday 16:00 and Saturday 13:00 are outside Вт/Пт 09:00-14:00.
+    candidates = [(4, "16:00"), (5, "13:00"), (1, "11:00"), (4, "09:30")]
+    assert filter_windows_by_schedule("невролог", candidates) == [(1, "11:00"), (4, "09:30")]
+    assert time_within_schedule("невролог", 4, "16:00") is False
+    assert time_within_schedule("невролог", 1, "09:30") is True
+
+
+def test_weekday_windows_never_fall_outside_the_schedule() -> None:
+    for specialty in ("невролог", "травматолог-ортопед", "ЛОР", "терапевт", "кардиолог"):
+        for weekday in range(7):
+            for window in windows_on(specialty, weekday):
+                assert time_within_schedule(specialty, weekday, window), (specialty, weekday, window)
+
+
+def test_weekday_request_offers_that_day_only_never_tomorrow() -> None:
+    gem = FakeGemini(planner=_neuro_planner())
+    resp = _run(handle_medical_center_chat(
+        gem, _request("Окей. Давайте на вторник", history=_neuro_cta_history())
+    ))
+    low = resp.answer.casefold()
+    assert "вторник" in low
+    assert "завтра" not in low and "послезавтра" not in low
+    assert "09:30" in low and "12:00" in low   # inside Вт 09:00-14:00
+    assert "16:00" not in low
+    assert resp.metadata["conversation_status"] == "slots_offered"
+    assert gem.writer_calls == 0
+
+
+def test_correction_clears_wrong_windows_and_honours_the_weekday() -> None:
+    history = [_msg("assistant", "К неврологу есть ближайшие окна: завтра 16:00 или послезавтра 13:00.\n\nКакое время вам удобнее?")]
+    gem = FakeGemini(planner=_neuro_planner())
+    resp = _run(handle_medical_center_chat(
+        gem, _request("Сегодня четверг. А мне надо во вторник", history=history)
+    ))
+    low = resp.answer.casefold()
+    assert "не совсем понял" not in low          # never the dead end
+    assert "из предложенных" not in low          # never forces the wrong windows
+    assert "вам нужен именно вторник" in low     # acknowledges the correction
+    assert "09:30" in low and "12:00" in low
+    assert "завтра" not in low
+    assert gem.writer_calls == 0
+
+
+def test_non_working_weekday_is_refused_with_the_real_working_days() -> None:
+    gem = FakeGemini(planner=_neuro_planner())
+    resp = _run(handle_medical_center_chat(
+        gem, _request("давайте в четверг", history=_neuro_cta_history())
+    ))
+    low = resp.answer.casefold()
+    assert "вторник и пятница" in low       # the doctor's real days, from the KB
+    assert "09:30" not in low               # no windows offered for a day off
+    assert resp.metadata["conversation_status"] == "slots_offered"
+
+
+def test_time_outside_the_schedule_is_refused_with_the_real_hours() -> None:
+    gem = FakeGemini(planner=_neuro_planner())
+    resp = _run(handle_medical_center_chat(
+        gem, _request("во вторник в 18", history=_neuro_cta_history())
+    ))
+    low = resp.answer.casefold()
+    assert "приём не ведётся" in low
+    assert "с 09:00 до 14:00" in low
+    assert "18:00" not in low
+
+
+def test_exact_weekday_time_that_is_free_advances_to_the_contact_request() -> None:
+    gem = FakeGemini(planner=_neuro_planner())
+    resp = _run(handle_medical_center_chat(
+        gem, _request("запишите во вторник в 9:30", history=_neuro_cta_history())
+    ))
+    low = resp.answer.casefold()
+    assert resp.metadata["state"]["selected_slot"] == "вторник 09:30"
+    assert "фио" in low                     # went straight to the booking fields
+    assert "завтра" not in low
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
+
+
+def test_weekday_time_inside_schedule_but_not_free_says_so() -> None:
+    gem = FakeGemini(planner=_neuro_planner())
+    resp = _run(handle_medical_center_chat(
+        gem, _request("запишите во вторник в 11", history=_neuro_cta_history())
+    ))
+    low = resp.answer.casefold()
+    assert "свободного окна нет" in low
+    assert "09:30" in low and "12:00" in low
+    assert "завтра" not in low
+
+
+def test_bare_time_reply_to_a_weekday_offer_is_understood() -> None:
+    history = [_msg("assistant", "На вторник есть окна: 09:30 или 12:00.\n\nКакое время вам удобнее?")]
+    gem = FakeGemini(planner=_neuro_planner(current_intent="contact"))
+    resp = _run(handle_medical_center_chat(gem, _request("12:00", history=history)))
+    assert resp.metadata["state"]["selected_slot"] == "вторник 12:00"
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
+
+
+def test_low_back_pain_gets_a_safety_screen_before_any_contact_request() -> None:
+    resp, low = _screen("ноет поясница в последнее время")
+    assert "поясниц" in resp.metadata["state"]["symptoms_or_goal"]
+    assert "сколько вам лет?" in low
+    assert "онемение или слабость в ноге" in low and "мочеиспусканием" in low
+    assert "телефон" not in low and "whatsapp" not in low   # no contact request yet
+    assert "грыж" not in low and "радикулит" not in low     # no diagnosis
+    assert "—" not in resp.answer
+
+
+def test_low_back_pain_with_leg_numbness_still_routes_to_the_neurologist() -> None:
+    # A radicular picture keeps its existing deterministic route; the generic
+    # back screen must not swallow it.
+    assert extract_medical_intake("поясница болит и немеет стопа").complaint_type == "numbness_or_weakness"
+    resp, low = _screen("боль идёт от поясницы в ногу, немеет стопа")
+    assert "невролог" in low
+    assert "грыж" not in low

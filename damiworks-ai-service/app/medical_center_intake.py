@@ -32,6 +32,7 @@ COMPLAINT_TYPES = (
     "cut_or_wound",
     "impact_or_head_injury",
     "gait_limping",
+    "back_pain",
     "swelling",
     "numbness_or_weakness",
     "respiratory_or_chest",
@@ -47,6 +48,7 @@ COMPLAINT_TYPES = (
 # must keep going straight to the right specialist.
 _SCREEN_COMPLAINT_TYPES = frozenset({
     "strain_or_sprain", "cut_or_wound", "impact_or_head_injury", "gait_limping",
+    "back_pain",
 })
 
 
@@ -114,6 +116,9 @@ _GAIT_RE = re.compile(
 )
 # "не проходит" / "не проходит уже неделю" — a persistence marker, not a duration.
 _PERSISTS_RE = re.compile(r"не\s+прох[оа]д\w*|не\s+проходит|всё\s+ещ[ёе]|до\s+сих\s+пор", re.I)
+# Low-back complaints get their own compact safety screen (radiating pain,
+# leg weakness, fever, trauma, bladder problems) before any booking.
+_BACK_RE = re.compile(r"поясниц\w*|\bспин[аыуе]\w*|\bпоясн\w*", re.I)
 _SWELLING_RE = re.compile(r"от[ёе]к\w*|опух\w*|припух\w*", re.I)
 _NUMBNESS_RE = re.compile(r"онемен\w*|неме\w+|покалыван\w*|слабост\w+\s+в\s+\w+", re.I)
 _RESP_CHEST_RE = re.compile(
@@ -184,6 +189,7 @@ SCREEN_MARKERS: tuple[str, ...] = (
     "получается нормально двигать",
     "покраснение, онемение",
     "была травма или резкая боль",
+    "проблемы с мочеиспусканием",
     "какая температура сейчас",
     "нарушение речи или зрения",
     "боль/скованность в шее",
@@ -286,7 +292,13 @@ def _classify_complaint(text: str) -> str:
     if _RESP_CHEST_RE.search(text):
         return "respiratory_or_chest"
     if _NUMBNESS_RE.search(text):
+        # Checked BEFORE back_pain on purpose: "боль от поясницы в ногу, немеет
+        # стопа" is a radicular picture the routing table already sends to the
+        # neurologist correctly, and must not be slowed by a generic screen.
         return "numbness_or_weakness"
+    # A plain aching back with no neuro signs: screen it before booking.
+    if _PAIN_RE.search(text) and _BACK_RE.search(text):
+        return "back_pain"
     if _FEVER_RE.search(text):
         return "infection_or_fever"
     if _SWELLING_RE.search(text):
@@ -378,6 +390,9 @@ def _complaint_label(text: str, complaint_type: str, part: BodyPart | None, chil
         label = f"{base} {duration}".strip() if duration else base
         if _PERSISTS_RE.search(text):
             label = f"{label}, не проходит"
+    elif complaint_type == "back_pain":
+        kind = "ноющая боль" if re.search(r"ноет|ноющ\w*", text, re.I) else "боль"
+        label = f"{kind} {where_prep}".strip() if where_prep else f"{kind} в спине"
     elif complaint_type == "swelling":
         label = f"отёк {where_gen}".strip() if where_gen else "отёк"
     elif complaint_type == "numbness_or_weakness":
@@ -407,6 +422,9 @@ def _missing_safety_questions(complaint_type: str, region: str, denied: tuple[st
         wanted = ["обстоятельства травмы", "подвижность", "отёк", "онемение"]
     elif complaint_type == "gait_limping":
         wanted = ["травма", "отёк", "покраснение", "онемение", "опора на ногу"]
+    elif complaint_type == "back_pain":
+        wanted = ["онемение или слабость в ноге", "иррадиация в ногу", "температура",
+                  "травма", "мочеиспускание"]
     elif complaint_type == "pain_discomfort":
         wanted = ["возраст", "отёк", "покраснение", "онемение"]
         if region == "leg":
@@ -741,6 +759,15 @@ def build_safety_question(intake: MedicalIntake, age_known: bool = False) -> str
         # then route, not to interview the patient.
         parts.append("Была травма или резкая боль?")
         parts.append("Есть отёк, покраснение, онемение или трудно наступать на ногу?")
+    elif ct == "back_pain":
+        # One compact question covering the low-back red flags (radiculopathy,
+        # cauda equina, infection, trauma). Not a diagnosis, just triage.
+        if not age_known and not intake.child_case:
+            parts.append(_age_question(intake))
+        parts.append(
+            "Есть онемение или слабость в ноге, боль отдаёт в ногу, температура, "
+            "травма или проблемы с мочеиспусканием?"
+        )
     elif ct == "infection_or_fever":
         if not age_known and not intake.child_case:
             parts.append(_age_question(intake))
@@ -776,6 +803,8 @@ def specialty_for_intake(intake: MedicalIntake) -> str:
     ct, region = intake.complaint_type, intake.region
     if ct == "cut_or_wound":
         candidate = "стоматолог" if region == "mouth" else "травматолог-ортопед"
+    elif ct == "back_pain":
+        candidate = "невролог"
     elif ct in ("strain_or_sprain", "gait_limping"):
         candidate = "травматолог-ортопед" if region in ("arm", "leg") else FIRST_CONTACT_SPECIALTY
     elif ct == "impact_or_head_injury":
@@ -809,6 +838,12 @@ def build_routing_answer(intake: MedicalIntake, dative: str) -> str:
             "Если сознание не терялось и нет рвоты, сильной головной боли или сонливости, "
             f"можно показаться {dative} в плановом порядке. Если появится хотя бы один из "
             "этих признаков, лучше обратиться очно как можно скорее."
+        )
+    elif ct == "back_pain":
+        caveat = (
+            f"Если сильной слабости в ноге и температуры нет, можно показаться {dative}. "
+            "Если боль резко усиливается, отдаёт в ногу с онемением, поднялась температура "
+            "или появились проблемы с мочеиспусканием, нужна срочная очная помощь."
         )
     elif ct == "gait_limping":
         # Conversational, not clinical: never "чтобы исключить повреждения или
