@@ -96,6 +96,79 @@ def extract_contact(text: str) -> str:
     return ""
 
 
+# Words that look like a name but are not one, in a booking reply.
+_NOT_A_NAME = frozenset({
+    "здравствуйте", "привет", "добрый", "день", "вечер", "утро", "спасибо",
+    "фио", "имя", "меня", "зовут", "телефон", "номер", "возраст", "лет", "год",
+    "года", "мне", "это", "мой", "моя", "да", "нет", "ок", "хорошо", "давайте",
+    "записаться", "запись", "whatsapp", "ватсап", "телеграм",
+})
+_NAME_TOKEN_RE = re.compile(r"\b[А-ЯЁа-яё][А-ЯЁа-яё\-]{1,}\b")
+# A standalone 1-3 digit run is an age, not a phone (the phone is stripped first).
+_AGE_TOKEN_RE = re.compile(r"\b(\d{1,3})\b")
+_AGE_MIN, _AGE_MAX = 1, 120
+
+
+def extract_booking_fields(text: str) -> dict[str, str]:
+    """Deterministically pull name / age / contact out of one booking reply.
+
+    "Дамир 7472438377 23", "Дамир, 23, +77772438377" and "Дамир +7777 23 года"
+    all resolve the same way. The planner usually does this, but when it fails
+    (or times out) the booking flow used to re-ask for a name the user had
+    already given — so this is the deterministic floor under it, never a
+    replacement for it (see apply_booking_field_seed).
+
+    The contact is extracted FIRST and removed from the text, so the phone's own
+    digits can never be mistaken for an age.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return {}
+
+    fields: dict[str, str] = {}
+    contact = extract_contact(raw)
+    if contact:
+        fields["contact"] = contact
+        raw = raw.replace(contact, " ")
+    # Strip any remaining phone-shaped run (e.g. a spaced "+7 701 222 33 44"
+    # whose canonical token differs from the text) before hunting for the age.
+    raw = _PHONE_RE.sub(" ", raw)
+
+    for match in _AGE_TOKEN_RE.finditer(raw):
+        value = int(match.group(1))
+        if _AGE_MIN <= value <= _AGE_MAX:
+            fields["age"] = str(value)
+            break
+
+    for match in _NAME_TOKEN_RE.finditer(raw):
+        token = match.group(0)
+        if token.casefold() in _NOT_A_NAME or len(token) < 2:
+            continue
+        fields["name"] = token.capitalize()
+        break
+
+    return fields
+
+
+def apply_booking_field_seed(state: ConversationState, message: str) -> ConversationState:
+    """Fill name/age/contact from a booking reply, without overwriting the planner.
+
+    Only ever fills slots that are still empty, so an explicit planner value or
+    an earlier correction always wins.
+    """
+    fields = extract_booking_fields(message)
+    if not fields:
+        return state
+    if fields.get("contact") and not state.contact:
+        state.contact = fields["contact"]
+    if fields.get("age") and not state.is_known("age"):
+        state.age = fields["age"]
+    name = fields.get("name")
+    if name and not (state.patient_name or state.contact_name):
+        state.patient_name = name
+    return state
+
+
 def looks_like_invalid_phone(text: str) -> bool:
     """True when the message is clearly a failed contact attempt.
 
@@ -162,6 +235,11 @@ _RED_FLAG_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     )),
     ("high_fever", re.compile(
         r"температур\w*\s+(?:выше\s+)?(?:39[.,]5|40|41)[^%]|ригидность\s+затылка",
+        re.IGNORECASE,
+    )),
+    ("fever_neck_rash", re.compile(
+        r"температур\w*[^.!?]{0,100}(?:сыпь|ше[яюи]\s+не\s+(?:сгиба|гн[её]т)|скованн\w+\s+(?:в\s+)?ше[еи])"
+        r"|(?:сыпь|ше[яюи]\s+не\s+(?:сгиба|гн[её]т)|скованн\w+\s+(?:в\s+)?ше[еи])[^.!?]{0,100}температур\w*",
         re.IGNORECASE,
     )),
     # Acute joint/limb trauma that needs urgent care (fracture/infection signs).
@@ -260,7 +338,7 @@ QUESTION_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("contact", (
         "имя и номер", "оставьте контакт", "ваш номер", "ваш контакт",
         "whatsapp или telegram", "имя и whatsapp", "имя и telegram", "оставьте имя",
-        "ваш whatsapp", "whatsapp/телефон", "телефон для связи",
+        "ваш whatsapp", "whatsapp/телефон", "телефон для связи", "пришлите, пожалуйста: фио",
     )),
 )
 
@@ -281,7 +359,7 @@ _RECENT_FACT_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("contact_asked", (
         "имя и номер", "оставьте контакт", "ваш номер", "ваш контакт",
         "whatsapp или telegram", "имя и whatsapp", "имя и telegram", "оставьте имя",
-        "ваш whatsapp", "whatsapp/телефон", "телефон для связи",
+        "ваш whatsapp", "whatsapp/телефон", "телефон для связи", "пришлите, пожалуйста: фио",
     )),
     ("admin_handoff_offered", (
         "администратор свяжется", "уточнит администратор", "передам заявку",

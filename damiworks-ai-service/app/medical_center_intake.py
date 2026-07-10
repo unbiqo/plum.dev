@@ -31,6 +31,7 @@ COMPLAINT_TYPES = (
     "strain_or_sprain",
     "cut_or_wound",
     "impact_or_head_injury",
+    "gait_limping",
     "swelling",
     "numbness_or_weakness",
     "respiratory_or_chest",
@@ -45,7 +46,7 @@ COMPLAINT_TYPES = (
 # ``needs_safety_screen``) — a knee or stomach complaint has a routing rule and
 # must keep going straight to the right specialist.
 _SCREEN_COMPLAINT_TYPES = frozenset({
-    "strain_or_sprain", "cut_or_wound", "impact_or_head_injury",
+    "strain_or_sprain", "cut_or_wound", "impact_or_head_injury", "gait_limping",
 })
 
 
@@ -101,14 +102,47 @@ _LOAD_CONTEXT_RE = re.compile(
     re.I,
 )
 _SHARP_MOVE_RE = re.compile(r"резк\w+\s+движени\w*", re.I)
+# Gait / weight-bearing complaints. Always about the leg even when no body part
+# is named, which is why they get an implicit one (see extract_medical_intake):
+# an unmapped body part would otherwise send an obvious complaint to the planner.
+_GAIT_RE = re.compile(
+    r"хрома\w*|прихрам\w*|хромот\w*"
+    r"|не\s+могу\s+нормально\s+ходить|тяжело\s+ходить|трудно\s+ходить"
+    r"|больно\s+(?:наступать|ходить|ступать)|бол[ьи]\w*\s+при\s+ходьбе"
+    r"|тянет\s+ногу\s+при\s+ходьбе",
+    re.I,
+)
+# "не проходит" / "не проходит уже неделю" — a persistence marker, not a duration.
+_PERSISTS_RE = re.compile(r"не\s+прох[оа]д\w*|не\s+проходит|всё\s+ещ[ёе]|до\s+сих\s+пор", re.I)
 _SWELLING_RE = re.compile(r"от[ёе]к\w*|опух\w*|припух\w*", re.I)
 _NUMBNESS_RE = re.compile(r"онемен\w*|неме\w+|покалыван\w*|слабост\w+\s+в\s+\w+", re.I)
 _RESP_CHEST_RE = re.compile(
     r"одышк\w*|(?:тяжело|трудно)\s+дыш\w*|дыш\w*\s+(?:тяжело|трудно)|бол\w*\s+в\s+груди",
     re.I,
 )
-_FEVER_RE = re.compile(r"температур\w*|\bорви\b|простуд\w*|кашель|кашля\w*|насморк\w*|озноб\w*", re.I)
-_PAIN_RE = re.compile(r"бол[иья]\w*|болит|болят|бол[ьи]\b|дискомфорт\w*|ноет|ноющ\w*|тянет|беспокоит|жж[ёе]т|саднит", re.I)
+_FEVER_RE = re.compile(
+    r"температур\w*|\bорви\b|простуд\w*|лихорад\w*|\bжар\b|кашель|кашля\w*|насморк\w*|озноб\w*|ломит|ломота",
+    re.I,
+)
+_PAIN_RE = re.compile(
+    r"бол[иья]\w*|болит|болят|бол[ьи]\b|дискомфорт\w*|ноет|ноющ\w*|тянет|беспокоит|жж[ёе]т|саднит|раскалыва\w*",
+    re.I,
+)
+_DURATION_RE = re.compile(
+    r"\b(?:третий|четвертый|четв[её]ртый|пятый|второй|первый)\s+день\b"
+    r"|\b(?:уже\s+)?\d+\s*(?:день|дня|дней)\b"
+    r"|\bнесколько\s+дн(?:ей|я)\b"
+    r"|\b(?:уже\s+)?(?:как\s+|около\s+)?недел[юия]\b"
+    r"|\b(?:уже\s+)?\d+\s*недел\w*\b"
+    r"|\b(?:уже\s+)?(?:как\s+|около\s+)?месяц\w*\b",
+    re.I,
+)
+# Colloquial spellings normalise to one phrase for the summary panel: "уже как
+# неделю", "неделю", "около недели" all mean the same thing to the reader.
+_DURATION_NORMALIZED: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"недел", re.I), "около недели"),
+    (re.compile(r"месяц", re.I), "около месяца"),
+)
 
 # Price/admin questions are never a complaint ("сколько стоит лечение боли в
 # спине" must not open a safety screen). Mirrors medical_center_routing's guard.
@@ -149,6 +183,10 @@ SCREEN_MARKERS: tuple[str, ...] = (
     "синяк, онемение или сильная боль",
     "получается нормально двигать",
     "покраснение, онемение",
+    "была травма или резкая боль",
+    "какая температура сейчас",
+    "нарушение речи или зрения",
+    "боль/скованность в шее",
 )
 
 # A reply that carries no new information ("и", "а?", "ну", "дальше"). The screen
@@ -181,6 +219,7 @@ class MedicalIntake:
     red_flags_mentioned: tuple[str, ...] = ()
     red_flags_denied: tuple[str, ...] = ()
     missing_safety_questions: tuple[str, ...] = ()
+    duration: str = ""
     suggested_next_step: str = "none"
     # Hybrid routing: this module is the cheap FIRST PASS. When it is not
     # confident, the turn is handed to the medical planner (an LLM call that
@@ -201,6 +240,7 @@ class MedicalIntake:
         data["extracted_fields"] = {
             "symptoms_or_goal": self.symptoms_or_goal,
             "complaint_type": self.complaint_type,
+            "duration": self.duration,
             "body_part": self.body_part,
             "self_patient": self.self_patient,
             "child_case": self.child_case,
@@ -239,6 +279,10 @@ def _classify_complaint(text: str) -> str:
     # into a strain picture, which is what the safety questions must address.
     if _PAIN_RE.search(text) and (_LOAD_CONTEXT_RE.search(text) or _SHARP_MOVE_RE.search(text)):
         return "strain_or_sprain"
+    # Limping / painful weight-bearing beats a bare pain reading: the safety
+    # questions it needs (trauma, swelling, ability to step) are its own.
+    if _GAIT_RE.search(text):
+        return "gait_limping"
     if _RESP_CHEST_RE.search(text):
         return "respiratory_or_chest"
     if _NUMBNESS_RE.search(text):
@@ -278,6 +322,20 @@ def _body_side(text: str) -> str:
     return "unknown"
 
 
+def _duration(text: str) -> str:
+    match = _DURATION_RE.search(text or "")
+    if not match:
+        return ""
+    raw = match.group(0).strip()
+    # A plain "\d+ недель" keeps its number; a bare "неделю" reads better as
+    # "около недели" in the summary.
+    if not re.search(r"\d", raw):
+        for pattern, normalized in _DURATION_NORMALIZED:
+            if pattern.search(raw):
+                return normalized
+    return raw
+
+
 def _denied_flags(text: str) -> tuple[str, ...]:
     return tuple(name for name, pattern in _DENIAL_TOKENS if pattern.search(text))
 
@@ -314,12 +372,19 @@ def _complaint_label(text: str, complaint_type: str, part: BodyPart | None, chil
             label = f"защемление {where_gen}".strip() if where_gen else "защемление"
         else:
             label = f"ушиб {where_gen}".strip() if where_gen else "ушиб"
+    elif complaint_type == "gait_limping":
+        base = "хромота" if re.search(r"хром\w*|прихрам\w*", text, re.I) else "боль при ходьбе"
+        duration = _duration(text)
+        label = f"{base} {duration}".strip() if duration else base
+        if _PERSISTS_RE.search(text):
+            label = f"{label}, не проходит"
     elif complaint_type == "swelling":
         label = f"отёк {where_gen}".strip() if where_gen else "отёк"
     elif complaint_type == "numbness_or_weakness":
         label = f"онемение {where_gen}".strip() if where_gen else "онемение"
     elif complaint_type == "infection_or_fever":
-        label = "температура или простудные симптомы"
+        clean = re.sub(r"\s+", " ", text).strip(" .,;:!?")
+        label = clean[:160] if clean else "температура или простудные симптомы"
     elif complaint_type == "respiratory_or_chest":
         label = "жалобы на дыхание или грудную клетку"
     else:  # pain_discomfort / unknown
@@ -340,10 +405,24 @@ def _missing_safety_questions(complaint_type: str, region: str, denied: tuple[st
         wanted = ["сильная боль", "отёк", "онемение", "подвижность", "рана"]
     elif complaint_type == "strain_or_sprain":
         wanted = ["обстоятельства травмы", "подвижность", "отёк", "онемение"]
+    elif complaint_type == "gait_limping":
+        wanted = ["травма", "отёк", "покраснение", "онемение", "опора на ногу"]
     elif complaint_type == "pain_discomfort":
         wanted = ["возраст", "отёк", "покраснение", "онемение"]
         if region == "leg":
             wanted += ["одышка", "боль в груди"]
+    elif complaint_type == "infection_or_fever":
+        wanted = [
+            "возраст",
+            "температура сейчас",
+            "сыпь",
+            "рвота",
+            "сильная слабость",
+            "спутанность",
+            "речь/зрение",
+            "онемение",
+            "шея",
+        ]
     else:
         wanted = []
     denied_set = {d for d in denied}
@@ -417,7 +496,7 @@ def _assess_confidence(
 
     if complaint_type == "unknown":
         reasons.append("complaint_type_unknown")
-    if not body_part:
+    if not body_part and complaint_type != "infection_or_fever":
         # A symptom is clearly described but we cannot say WHERE. The screen's
         # questions are body-region-dependent, so guessing here is unsafe.
         reasons.append("body_part_unknown")
@@ -460,6 +539,12 @@ def extract_medical_intake(message: str) -> MedicalIntake:
     asserted = _strip_denials(text)
     complaint_type = _classify_complaint(asserted)
     part = _match_body_part(asserted)
+    duration = _duration(asserted)
+    if complaint_type == "gait_limping" and part is None:
+        # "Я хромаю" names no body part, but it is unambiguously the leg. Without
+        # this the draft would look unmapped and be handed to the planner for a
+        # complaint the deterministic layer understands perfectly well.
+        part = BodyPart("нога", "ноги", "в ноге", "leg")
 
     if complaint_type == "unknown":
         # No complaint marker matched. If the message still *looks* like a
@@ -505,6 +590,7 @@ def extract_medical_intake(message: str) -> MedicalIntake:
         is_medical_complaint=True,
         symptoms_or_goal=_complaint_label(asserted, complaint_type, part, child),
         complaint_type=complaint_type,
+        duration=duration,
         body_part=part.nom if part else "",
         region=region,
         body_side=_body_side(text),
@@ -549,10 +635,12 @@ def extract_conversation_intake(
 
     denied = tuple(sorted(set(base.red_flags_denied) | set(_denied_flags(text))))
     side = _body_side(text)
+    duration = _duration(text) or base.duration
     merged = replace(
         base,
         body_side=side if side != "unknown" else base.body_side,
         red_flags_denied=denied,
+        duration=duration,
     )
     return replace(
         merged,
@@ -576,7 +664,11 @@ def needs_safety_screen(intake: MedicalIntake, has_routing_rule: bool) -> bool:
     they key off, so an unmapped body part or a tangle of symptoms goes to the
     planner instead of getting confidently wrong questions.
     """
-    if not intake.is_medical_complaint or intake.needs_llm_review:
+    if not intake.is_medical_complaint:
+        return False
+    if intake.complaint_type == "infection_or_fever":
+        return intake.self_patient
+    if intake.needs_llm_review:
         return False
     if intake.complaint_type in _SCREEN_COMPLAINT_TYPES:
         return True
@@ -643,6 +735,19 @@ def build_safety_question(intake: MedicalIntake, age_known: bool = False) -> str
             parts.append("Боль появилась после нагрузки или резкого движения?")
         parts.append(_move_question(intake))
         parts.append("Есть отёк, синяк, онемение или сильная боль?")
+    elif ct == "gait_limping":
+        # Deliberately two short questions, not a questionnaire: the complaint is
+        # already a week old, so the point is to catch a trauma or a red flag and
+        # then route, not to interview the patient.
+        parts.append("Была травма или резкая боль?")
+        parts.append("Есть отёк, покраснение, онемение или трудно наступать на ногу?")
+    elif ct == "infection_or_fever":
+        if not age_known and not intake.child_case:
+            parts.append(_age_question(intake))
+        parts.append(
+            "Какая температура сейчас? Есть ли сыпь, рвота, сильная слабость, "
+            "спутанность, нарушение речи или зрения, онемение, боль/скованность в шее?"
+        )
     else:  # pain_discomfort
         if not age_known and not intake.child_case:
             parts.append(_age_question(intake))
@@ -671,7 +776,7 @@ def specialty_for_intake(intake: MedicalIntake) -> str:
     ct, region = intake.complaint_type, intake.region
     if ct == "cut_or_wound":
         candidate = "стоматолог" if region == "mouth" else "травматолог-ортопед"
-    elif ct == "strain_or_sprain":
+    elif ct in ("strain_or_sprain", "gait_limping"):
         candidate = "травматолог-ортопед" if region in ("arm", "leg") else FIRST_CONTACT_SPECIALTY
     elif ct == "impact_or_head_injury":
         candidate = FIRST_CONTACT_SPECIALTY if region == "head" else "травматолог-ортопед"
@@ -704,6 +809,17 @@ def build_routing_answer(intake: MedicalIntake, dative: str) -> str:
             "Если сознание не терялось и нет рвоты, сильной головной боли или сонливости, "
             f"можно показаться {dative} в плановом порядке. Если появится хотя бы один из "
             "этих признаков, лучше обратиться очно как можно скорее."
+        )
+    elif ct == "gait_limping":
+        # Conversational, not clinical: never "чтобы исключить повреждения или
+        # воспалительные процессы". A complaint that has lasted a while is the
+        # reason to go now, so the duration belongs in the sentence when we have it.
+        what = "хромота" if "хром" in intake.symptoms_or_goal else "боль"
+        how_long = f", особенно если {what} держится {intake.duration}" if intake.duration else ""
+        caveat = (
+            f"С такой жалобой обычно показываются {dative}{how_long}. "
+            "Если есть сильная боль, отёк или трудно наступать на ногу, лучше обратиться "
+            "очно как можно скорее."
         )
     elif ct in ("impact_or_head_injury", "strain_or_sprain"):
         caveat = (

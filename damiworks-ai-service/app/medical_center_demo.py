@@ -55,12 +55,14 @@ from .medical_center_slots import (
 )
 from .medical_center_state import (
     ConversationState,
+    apply_booking_field_seed,
     apply_intake_seed,
     apply_planner_updates,
     build_conversation_state,
     detect_red_flags,
     detect_symptom_specialty,
     is_affirmation,
+    looks_like_contact,
     looks_like_invalid_phone,
     reconstruct_selected_slot,
     reconstruct_specialty_from_history,
@@ -214,6 +216,24 @@ _DATE_QUESTION_RE = re.compile(
     r"|когда\s+(?:есть\s+)?(?:окн|свободн|врем)|окн\w*\s+есть",
     re.IGNORECASE,
 )
+_ANY_SLOT_MENTION_RE = re.compile(
+    r"(?:послезавтра|завтра|сегодня)\s+(?:в\s+)?\d{1,2}:\d{2}|\b\d{1,2}:\d{2}\b",
+    re.IGNORECASE,
+)
+_SUGGESTED_SLOT_MENTION_RE = re.compile(
+    r"хотите\s+(?:послезавтра|завтра|сегодня)\s+(?:в\s+)?\d{1,2}:\d{2}",
+    re.IGNORECASE,
+)
+_SLOT_REJECTION_RE = re.compile(
+    r"я\s+(?:послезавтра|завтра|сегодня)\s+занят"
+    r"|не\s+могу\s+(?:послезавтра|завтра|сегодня)"
+    r"|это\s+время\s+не\s+подходит"
+    r"|нет,\s*не\s+это\s+время"
+    r"|что\s+отлично"
+    r"|я\s+не\s+выбирал"
+    r"|я\s+не\s+просил",
+    re.IGNORECASE,
+)
 
 
 def _intake_metadata(intake, planner_reviewed: bool) -> dict[str, object] | None:
@@ -305,12 +325,41 @@ def _assistant_invited_booking(history: list[ChatHistoryMessage]) -> bool:
     return any(marker in low for marker in _BOOKING_INVITE_MARKERS)
 
 
+def _assistant_has_active_slot(history: list[ChatHistoryMessage]) -> bool:
+    """True when the last assistant turn offered, suggested or echoed a slot."""
+    low = _last_assistant(history)
+    if not low:
+        return False
+    return bool(_ANY_SLOT_MENTION_RE.search(low) or _SUGGESTED_SLOT_MENTION_RE.search(low))
+
+
+def _is_slot_rejection(message: str, history: list[ChatHistoryMessage]) -> bool:
+    """User rejects/corrects a previously offered or mistakenly echoed slot."""
+    if not _SLOT_REJECTION_RE.search(message or ""):
+        return False
+    return _assistant_has_active_slot(history) or bool(_ANY_SLOT_MENTION_RE.search(message or ""))
+
+
+def _slot_rejection_answer(intake) -> str:
+    if intake.is_medical_complaint:
+        return (
+            "Извините, неправильно понял. Послезавтра не ставлю. "
+            "Сначала уточню по симптомам: сколько вам лет и какая температура сейчас?"
+        )
+    return "Поняла, это время не подходит. Какой день или время вам удобнее?"
+
+
 def _assistant_asked_for_contact(history: list[ChatHistoryMessage]) -> bool:
-    """True if the assistant's last turn already asked for a phone/Telegram."""
+    """True if the assistant's last turn already asked for a phone/Telegram.
+
+    Accepts both the current wording ("пришлите ... WhatsApp/телефон") and the
+    older "оставьте ..." one, which still appears in replayed transcripts.
+    """
     low = _last_assistant(history)
     if "не вижу контакт" in low:
         return True
-    return "оставьте" in low and ("телефон" in low or "whatsapp" in low or "контакт" in low)
+    asked = "оставьте" in low or "пришлите" in low
+    return asked and ("телефон" in low or "whatsapp" in low or "контакт" in low)
 
 
 def _is_booking_turn(
@@ -320,6 +369,14 @@ def _is_booking_turn(
     history: list[ChatHistoryMessage],
 ) -> bool:
     """Whether this turn is booking mechanics the deterministic handler owns."""
+    current_intake = extract_medical_intake(message)
+    if current_intake.is_medical_complaint:
+        explicit_booking_with_time = bool(_BOOKING_INTENT_RE.search(message)) and bool(
+            _ANY_SLOT_MENTION_RE.search(message)
+            or (state.specialty and resolve_slot(state.specialty, message)[0] != "none")
+        )
+        if not explicit_booking_with_time:
+            return False
     if planner.get("current_intent") == "wants_booking":
         return True
     if _BOOKING_INTENT_RE.search(message) or _DATE_QUESTION_RE.search(message):
@@ -405,7 +462,7 @@ def _resolve_booking_turn(
     if state.contact and name:
         return (
             f"Готово, {name}! Записали вас на {state.selected_slot} к {dative}. "
-            "С вами свяжутся для подтверждения деталей.",
+            "Администратор свяжется с вами для подтверждения деталей.",
             "booking_created",
         )
 
@@ -417,19 +474,24 @@ def _resolve_booking_turn(
         # a slot change must never be mistaken for a failed contact. The harsh
         # "Не вижу контакт" is only for a reply that was meant as the contact.
         if slot_picked_now or not already_asked:
+            # Clinic-style intake wording. Age is accepted in place of a date of
+            # birth (the schema stores age), so we ask for either rather than
+            # rejecting what the patient naturally types.
             ask_fields: list[str] = []
             if not name:
-                ask_fields.append("имя")
+                ask_fields.append("ФИО")
             if not state.is_known("age"):
-                ask_fields.append("возраст")
-            ask_fields.append("телефон или WhatsApp")
-            if already_asked:
-                lead, tail = "Хорошо, выбрали", "Для завершения записи оставьте"
+                ask_fields.append("дату рождения или возраст")
+            ask_fields.append("WhatsApp/телефон")
+            if len(ask_fields) > 1:
+                listed = ", ".join(ask_fields[:-1]) + " и " + ask_fields[-1]
             else:
-                lead, tail = "Отлично,", "Для записи оставьте"
+                listed = ask_fields[0]
+            lead = "Хорошо, выбрали" if already_asked else "Отлично,"
+            tail = "Для завершения записи пришлите" if already_asked else "Для записи пришлите"
             return (
                 f"{lead} {state.selected_slot} к {dative}.\n\n"
-                f"{tail}, пожалуйста, {', '.join(ask_fields)}.",
+                f"{tail}, пожалуйста: {listed}.",
                 "awaiting_contact",
             )
         return (INVALID_CONTACT_ANSWER, "awaiting_contact")
@@ -646,6 +708,40 @@ async def handle_medical_center_chat(
                 },
             )
 
+        # ---- SLOT REJECTION / CORRECTION SHORT-CIRCUIT ----------------------
+        # If the user rejects a previously offered or mistakenly echoed slot, do
+        # not let stale reconstructed state confirm it again. The demo is
+        # stateless, so the "clear" happens in this response metadata and by
+        # avoiding the deterministic booking path for this turn.
+        if _is_slot_rejection(message, history):
+            state.specialty = reconstruct_specialty_from_history(history)
+            state.selected_slot = ""
+            state.preferred_time = ""
+            lead_status = _derive_lead_status(state, history)
+            return ChatResponse(
+                route=Route.general,
+                routes=[Route.general],
+                answer=_slot_rejection_answer(intake),
+                checkout=False,
+                lead_status=lead_status,
+                metadata={
+                    "medical_center_demo": True,
+                    "planner_llm_used": False,
+                    "writer_llm_used": False,
+                    "slot_rejection_short_circuit": True,
+                    "medical_intake": _intake_metadata(intake, planner_reviewed=False),
+                    "planner_used_for_intake": False,
+                    "current_intent": "correction",
+                    "medical_lead_status": _derive_medical_lead_status(
+                        lead_status, history, message
+                    ),
+                    "state": state.to_metadata(),
+                    "conversation_status": "objection",
+                    "conversation_status_label": _CONV_STATUS_LABELS["objection"],
+                    "conversation_status_reason": "slot_rejected_by_user",
+                },
+            )
+
         # ---- ADDRESS SHORT-CIRCUIT (deterministic, before the planner) ----
         # A clinic address / location question is answered from the KB address
         # instantly — even after booking, so it never re-runs the confirmation.
@@ -702,17 +798,20 @@ async def handle_medical_center_chat(
         # gastroenterologist and must not be slowed down by a generic screen.
         screen_asked = assistant_asked_safety_screen(_last_assistant(history))
         current_intake = extract_medical_intake(message)
+        fresh_screen_needed = needs_safety_screen(
+            current_intake,
+            has_routing_rule=detect_symptom_specialty(message) is not None,
+        )
         if (
-            (
-                screen_asked
-                or needs_safety_screen(
-                    current_intake,
-                    has_routing_rule=detect_symptom_specialty(message) is not None,
+            (screen_asked or fresh_screen_needed)
+            and not _booking_confirmation_sent(history)
+            and (
+                fresh_screen_needed
+                or (
+                    not _assistant_in_slot_selection(history)
+                    and not _assistant_asked_for_contact(history)
                 )
             )
-            and not _booking_confirmation_sent(history)
-            and not _assistant_in_slot_selection(history)
-            and not _assistant_asked_for_contact(history)
         ):
             if not screen_asked or is_filler_reply(message):
                 answer_text = build_safety_question(intake, age_known=state.is_known("age"))
@@ -836,6 +935,13 @@ async def handle_medical_center_chat(
         planner = reclassify_discount_question(message, planner)
 
         state = apply_planner_updates(state, planner)
+
+        # Deterministic floor under the planner for the booking reply. A message
+        # like "Дамир 7472438377 23" carries name + phone + age at once; when the
+        # planner misses one (it did, live), we must not re-ask for something the
+        # user already told us. Never overwrites what the planner did fill.
+        if _assistant_asked_for_contact(history) or looks_like_contact(message):
+            state = apply_booking_field_seed(state, message)
 
         # Stateless server: recover specialty (if the planner didn't fill it) and
         # the already-picked demo slot from the replayed history.

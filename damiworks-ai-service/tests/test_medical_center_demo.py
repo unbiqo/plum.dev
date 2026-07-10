@@ -52,12 +52,14 @@ from app.medical_center_state import (
     apply_planner_updates,
     build_conversation_state,
     classify_contact,
+    extract_booking_fields,
     detect_red_flags,
     detect_symptom_specialty,
     extract_contact,
     looks_like_contact,
     looks_like_invalid_phone,
     reconstruct_specialty_from_history,
+    reconstruct_selected_slot,
 )
 from app.medical_center_writer import build_turn_plan
 from app.schemas import ChatHistoryMessage, ChatRequest
@@ -908,7 +910,7 @@ def test_no_booking_confirm_before_contact() -> None:
     resp = _run(handle_medical_center_chat(gem, _request("Завтра 15:30", history=history)))
     low = resp.answer.casefold()
     assert "записали вас" not in low          # must NOT confirm yet
-    assert "оставьте" in low and "имя" in low  # asks for missing fields
+    assert "пришлите" in low and "фио" in low  # asks for missing fields
     assert resp.metadata["conversation_status"] == "awaiting_contact"
 
 
@@ -984,7 +986,7 @@ def test_natural_slot_selection_advances_to_contact() -> None:
     low = resp.answer.casefold()
     assert "ближайшие окна" not in low          # no repeated slot list
     assert "завтра 16:00" in low
-    assert "оставьте" in low                # asks for name/contact
+    assert "пришлите" in low                # asks for name/contact
     assert resp.metadata["conversation_status"] == "awaiting_contact"
     assert resp.metadata["state"]["selected_slot"] == "завтра 16:00"
 
@@ -1067,7 +1069,7 @@ def test_reschedule_after_contact_ask_acknowledges_change() -> None:
     assert "не вижу контакт" not in low
     assert "выбрали послезавтра 12:00 к лору" in low  # acknowledges the change
     assert "ближайшие окна" not in low                     # does not re-list slots
-    assert "оставьте" in low                          # asks for the missing contact
+    assert "пришлите" in low                          # asks for the missing contact
     assert resp.metadata["state"]["selected_slot"] == "послезавтра 12:00"
     assert resp.metadata["conversation_status"] == "awaiting_contact"
     assert gem.writer_calls == 0                       # deterministic, no dead-end LLM
@@ -1939,6 +1941,110 @@ def test_hybrid_multiple_complaints_without_a_red_flag_ask_for_review() -> None:
     assert "multiple_complaints" in draft.review_reason
 
 
+# ---------------------------------------------------------------------------
+# Limping / gait complaint + booking UX (reported live transcript).
+#
+# Live failures: "я хромаю уже как неделю" never reached the summary panel
+# ("Жалоба: —"); the bot routed straight to an orthopedist with clinical
+# phrasing and no safety question; and "Дамир 7472438377 23" made it ask for
+# the name it had just been given.
+# ---------------------------------------------------------------------------
+
+def test_limping_complaint_is_understood_and_captured() -> None:
+    intake = extract_medical_intake("я хромаю уже как неделю, не проходит")
+    assert intake.is_medical_complaint is True
+    assert "хром" in intake.symptoms_or_goal
+    assert "недел" in intake.duration
+    assert intake.self_patient is True
+    assert intake.complaint_type == "gait_limping"
+    assert intake.body_part == "нога"          # implicit, so it is never "unmapped"
+    assert intake.needs_llm_review is False    # obvious enough for the cheap path
+
+
+def test_limping_variants_all_land_on_the_same_complaint_type() -> None:
+    for message in ("прихрамываю", "не могу нормально ходить", "больно наступать",
+                    "боль при ходьбе несколько дней", "хромота уже неделю"):
+        assert extract_medical_intake(message).complaint_type == "gait_limping", message
+
+
+def test_limping_answer_asks_safety_questions_in_natural_wording() -> None:
+    resp, low = _screen("здравствуйте, я хромаю уже как неделю, не проходит")
+    assert "была травма или резкая боль?" in low
+    assert "отёк" in low and "покраснение" in low and "онемение" in low
+    assert "трудно наступать на ногу" in low
+    # Not the clinical phrasing from the live transcript.
+    assert "исключить повреждения" not in low and "воспалительные процессы" not in low
+    assert "—" not in resp.answer
+    assert resp.metadata["state"]["symptoms_or_goal"] == "хромота около недели, не проходит"
+
+
+def test_limping_after_screen_routes_naturally_to_orthopedist() -> None:
+    question = build_safety_question(extract_medical_intake("я хромаю уже как неделю, не проходит"))
+    history = [
+        _msg("user", "я хромаю уже как неделю, не проходит"),
+        _msg("assistant", question),
+    ]
+    resp, low = _screen("травмы не было, отёка нет, наступать могу", history=history)
+    assert "травматолог" in low
+    assert "исключить повреждения" not in low
+    assert "—" not in resp.answer
+    assert resp.metadata["state"]["specialty"] == "травматолог-ортопед"
+    assert resp.metadata["state"]["symptoms_or_goal"] == "хромота около недели, не проходит"
+
+
+def test_booking_reply_with_name_phone_and_age_is_parsed_in_one_message() -> None:
+    assert extract_booking_fields("Дамир 7472438377 23") == {
+        "contact": "7472438377", "age": "23", "name": "Дамир",
+    }
+    for variant in ("Дамир, 23, +77772438377", "Дамир +77772438377 23 года",
+                    "ФИО Дамир, 23 года, номер 7472438377"):
+        fields = extract_booking_fields(variant)
+        assert fields["name"] == "Дамир", variant
+        assert fields["age"] == "23", variant
+        assert fields["contact"].endswith("2438377"), variant
+
+
+def test_booking_never_reasks_the_name_the_planner_missed() -> None:
+    # The live bug: the planner returned no slots, so the flow asked "как вас
+    # зовут" for a name that was right there in the message.
+    history = _lor_offer_history() + [
+        _msg("user", "В 16"),
+        _msg("assistant", "Отлично, завтра 16:00 к ЛОРу.\n\nДля записи пришлите, пожалуйста: ФИО, дату рождения или возраст и WhatsApp/телефон."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="contact", slots={}))  # planner finds nothing
+    resp = _run(handle_medical_center_chat(gem, _request("Дамир 7472438377 23", history=history)))
+    low = resp.answer.casefold()
+    assert "как вас зовут" not in low
+    assert "готово, дамир!" in low
+    assert resp.metadata["conversation_status"] == "booking_created"
+    assert resp.metadata["state"]["patient_name"] == "Дамир"
+    assert resp.metadata["state"]["age"] == "23"
+    assert resp.metadata["state"]["contact"] == "7472438377"
+
+
+def test_booking_asks_for_fio_dob_and_messenger_not_name_age_phone() -> None:
+    gem = FakeGemini(planner=_lor_planner(current_intent="wants_booking"))
+    resp = _run(handle_medical_center_chat(gem, _request("в 16", history=_lor_offer_history())))
+    low = resp.answer.casefold()
+    assert "фио" in low
+    assert "дату рождения" in low
+    assert "whatsapp/телефон" in low
+    assert "—" not in resp.answer
+    assert resp.metadata["conversation_status"] == "awaiting_contact"
+
+
+def test_booking_confirmation_mentions_administrator_follow_up() -> None:
+    history = _lor_offer_history() + [
+        _msg("user", "В 16"),
+        _msg("assistant", "Отлично, завтра 16:00 к ЛОРу.\n\nДля записи пришлите, пожалуйста: ФИО, дату рождения или возраст и WhatsApp/телефон."),
+    ]
+    gem = FakeGemini(planner=_lor_planner(current_intent="contact", slots={}))
+    resp = _run(handle_medical_center_chat(gem, _request("Дамир 7472438377 23", history=history)))
+    low = resp.answer.casefold()
+    assert "администратор свяжется" in low
+    assert "—" not in resp.answer
+
+
 def test_deterministic_routing_answers_contain_no_em_dash() -> None:
     # Style rule: never the em dash in a patient-facing message. The routing
     # table's own explanations are patient-facing too.
@@ -2003,6 +2109,121 @@ def test_asking_when_windows_are_free_offers_slots_instead_of_deferring() -> Non
     assert resp.metadata["conversation_status"] == "slots_offered"
     assert "администратор свяжется" not in resp.answer.casefold()
     assert gem.writer_calls == 0
+
+
+def test_regression_fever_headache_first_turn_runs_safety_intake_not_booking() -> None:
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
+    resp = _run(handle_medical_center_chat(
+        gem,
+        _request("здравствуйте, температура третий день, раскалывается голова"),
+    ))
+    low = resp.answer.casefold()
+    state = resp.metadata["state"]
+    intake = resp.metadata["medical_intake"]
+
+    assert resp.metadata["intake_screen_short_circuit"] is True
+    assert intake["is_medical_complaint"] is True
+    assert intake["complaint_type"] == "infection_or_fever"
+    assert "температура" in intake["symptoms_or_goal"].casefold()
+    assert "третий день" in intake["symptoms_or_goal"].casefold()
+    assert "голова" in intake["symptoms_or_goal"].casefold()
+    assert state["preferred_time"] == ""
+    assert state["selected_slot"] == ""
+    assert resp.metadata["conversation_status"] != "booking_created"
+    assert "отлично" not in low
+    assert "послезавтра" not in low
+    assert "сколько вам лет" in low
+    assert "какая температура сейчас" in low
+    assert "нарушение речи или зрения" in low
+    assert gem.planner_calls == 0 and gem.writer_calls == 0
+
+
+def test_regression_symptom_duration_is_not_appointment_day() -> None:
+    intake = extract_medical_intake("температура 3 дня")
+    assert intake.is_medical_complaint is True
+    assert intake.duration == "3 дня"
+
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
+    resp = _run(handle_medical_center_chat(gem, _request("температура 3 дня")))
+    state = resp.metadata["state"]
+    assert resp.metadata["intake_screen_short_circuit"] is True
+    assert state["preferred_time"] == ""
+    assert state["selected_slot"] == ""
+    assert "запис" not in resp.answer.casefold()
+
+
+def test_regression_severe_headache_with_fever_asks_red_flags_no_slot() -> None:
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "невролог"}))
+    resp = _run(handle_medical_center_chat(gem, _request("температура и очень сильно болит голова")))
+    low = resp.answer.casefold()
+    assert resp.metadata["intake_screen_short_circuit"] is True
+    assert "какая температура сейчас" in low
+    assert "спутанность" in low
+    assert "боль/скованность в шее" in low
+    assert "диагноз" not in low
+    assert "примите" not in low
+    assert resp.metadata["state"]["selected_slot"] == ""
+
+
+def test_regression_slot_rejection_clears_mistaken_slot_and_returns_to_symptoms() -> None:
+    history = [
+        _msg("user", "температура третий день, раскалывается голова"),
+        _msg("assistant", "Отлично, послезавтра 11:00 к терапевту.\n\nДля записи оставьте, пожалуйста, имя, возраст, телефон или WhatsApp."),
+    ]
+    assert reconstruct_selected_slot(history, "", "терапевт") == "послезавтра 11:00"
+
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
+    resp = _run(handle_medical_center_chat(gem, _request("я послезавтра занят", history=history)))
+    low = resp.answer.casefold()
+    assert resp.metadata["slot_rejection_short_circuit"] is True
+    assert resp.metadata["state"]["selected_slot"] == ""
+    assert resp.metadata["state"]["preferred_time"] == ""
+    assert "выбрали послезавтра" not in low
+    assert "записали вас" not in low
+    assert "послезавтра не ставлю" in low
+    assert "сколько вам лет" in low
+
+
+def test_regression_slot_objection_does_not_reconfirm_mistaken_slot() -> None:
+    history = [
+        _msg("user", "температура третий день, раскалывается голова"),
+        _msg("assistant", "Отлично, послезавтра 11:00 к терапевту.\n\nДля записи оставьте, пожалуйста, имя, возраст, телефон или WhatsApp."),
+    ]
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
+    resp = _run(handle_medical_center_chat(
+        gem,
+        _request("Что отлично? Я послезавтра занят", history=history),
+    ))
+    low = resp.answer.casefold()
+    assert resp.metadata["slot_rejection_short_circuit"] is True
+    assert resp.metadata["state"]["selected_slot"] == ""
+    assert "выбрали послезавтра" not in low
+    assert "записали вас" not in low
+    assert "извините" in low
+
+
+def test_regression_valid_slot_acceptance_after_offer_still_works() -> None:
+    history = [
+        _msg("user", "хочу записаться к терапевту"),
+        _msg("assistant", "К терапевту есть ближайшие окна: завтра 10:00 или завтра 15:30.\n\nКакое время вам удобнее?"),
+    ]
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
+    resp = _run(handle_medical_center_chat(gem, _request("давайте 15:30", history=history)))
+    low = resp.answer.casefold()
+    assert resp.metadata["booking_stage"] == "awaiting_contact"
+    assert resp.metadata["state"]["selected_slot"] == "завтра 15:30"
+    assert "пришлите" in low
+    assert "телефон" in low or "whatsapp" in low
+
+
+def test_regression_fever_rash_stiff_neck_preempts_booking() -> None:
+    gem = FakeGemini(planner=_default_planner(current_intent="wants_booking", slots={"specialty": "терапевт"}))
+    resp = _run(handle_medical_center_chat(gem, _request("температура, сыпь и шея не сгибается")))
+    assert resp.answer == EMERGENCY_ANSWER
+    assert resp.metadata["emergency_short_circuit"] is True
+    assert resp.metadata["conversation_status"] == "emergency"
+    assert "запис" not in resp.answer.casefold()
+    assert gem.planner_calls == 0 and gem.writer_calls == 0
 
 
 def test_turn_plan_tells_the_writer_how_to_phrase_the_age_question() -> None:
