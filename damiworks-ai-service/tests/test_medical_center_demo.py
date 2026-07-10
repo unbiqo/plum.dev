@@ -29,6 +29,7 @@ from app.medical_center_guardrails import (
     validate_answer,
 )
 from app.medical_center_intake import (
+    assistant_asked_safety_screen,
     build_routing_answer,
     build_safety_question,
     extract_conversation_intake,
@@ -2491,3 +2492,37 @@ def test_low_back_pain_with_leg_numbness_still_routes_to_the_neurologist() -> No
     resp, low = _screen("боль идёт от поясницы в ногу, немеет стопа")
     assert "невролог" in low
     assert "грыж" not in low
+
+
+def test_no_routing_answer_is_ever_mistaken_for_a_screen_question() -> None:
+    # Live loop bug: the back-pain routing answer contained "проблемы с
+    # мочеиспусканием", which was also a SCREEN_MARKER, so every later turn
+    # thought the screen was still running and replayed the same answer forever.
+    # The invariant: a marker may appear in the QUESTION, never in the ANSWER.
+    for message in ("ноет поясница", "я хромаю уже неделю", "порезал язык",
+                    "надорвал бицепс", "ударился головой", "прищемил палец",
+                    "у меня дискомфорт в икрах", "сын порезал палец"):
+        intake = extract_medical_intake(message)
+        question = build_safety_question(intake)
+        routing = build_routing_answer(intake, specialty_dative(specialty_for_intake(intake)))
+        assert assistant_asked_safety_screen(question), message
+        assert not assistant_asked_safety_screen(routing), message
+
+
+def test_screen_exits_after_routing_and_the_next_question_reaches_the_llm() -> None:
+    question = build_safety_question(extract_medical_intake("ноет поясница"))
+    routing = build_routing_answer(
+        extract_medical_intake("ноет поясница"), specialty_dative("невролог")
+    )
+    history = [
+        _msg("user", "ноет поясница"),
+        _msg("assistant", question),
+        _msg("user", "23, ничего такого нет"),
+        _msg("assistant", routing),
+    ]
+    gem = FakeGemini(planner=_neuro_planner(current_intent="ask_doctor"),
+                     writer_texts=["Стаж Армана Бауыржановича 14 лет."])
+    resp = _run(handle_medical_center_chat(gem, _request("Сколько опыта у него", history=history)))
+    assert gem.writer_calls == 1                 # the screen let go
+    assert resp.answer != routing                # not the same answer again
+    assert "мочеиспускан" not in resp.answer.casefold()

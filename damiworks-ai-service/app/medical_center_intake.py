@@ -189,7 +189,9 @@ SCREEN_MARKERS: tuple[str, ...] = (
     "получается нормально двигать",
     "покраснение, онемение",
     "была травма или резкая боль",
-    "проблемы с мочеиспусканием",
+    # Must appear ONLY in the question, never in the routing answer that follows,
+    # or the screen would think it is still running and loop forever.
+    "онемение или слабость в ноге",
     "какая температура сейчас",
     "нарушение речи или зрения",
     "боль/скованность в шее",
