@@ -236,6 +236,28 @@ _SLOT_REJECTION_RE = re.compile(
 )
 
 
+_EM_DASH_RE = re.compile(r"\s*[—–]\s*")
+
+
+def strip_em_dash(text: str) -> str:
+    """Remove the em/en dash from an LLM-written answer (writer style rule 22).
+
+    The prompt rule alone does not hold: the writer still produced "Руслан
+    Ермекович — травматолог-ортопед" live. A dash between clauses becomes a
+    comma; a leading dash (a list bullet) becomes nothing. Hyphens inside words
+    ("травматолог-ортопед") are untouched, since they are not dashes.
+    """
+    if not text:
+        return text
+    lines = []
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if stripped[:1] in ("—", "–"):
+            line = line[: len(line) - len(stripped)] + stripped[1:].lstrip()
+        lines.append(_EM_DASH_RE.sub(", ", line))
+    return "\n".join(lines)
+
+
 def _intake_metadata(intake, planner_reviewed: bool) -> dict[str, object] | None:
     """The intake record as the caller sees it, tagged with who produced it.
 
@@ -1016,6 +1038,9 @@ async def handle_medical_center_chat(
             logger.warning("medical_center_chat: writer timed out")
             answer = build_safe_fallback(planner, state, message)
 
+        # Style rule 22 is enforced in code, not only in the prompt: the writer
+        # still emits the em dash despite being told not to.
+        answer = strip_em_dash(answer)
         validation = validate_answer(answer, state, planner)
 
         # ---- one repair pass if guardrail failed ----
@@ -1030,6 +1055,7 @@ async def handle_medical_center_chat(
                     ),
                     timeout=_REPAIR_TIMEOUT,
                 )
+                answer = strip_em_dash(answer)
                 validation = validate_answer(answer, state, planner)
                 if validation.failed:
                     answer = build_safe_fallback(planner, state, message)

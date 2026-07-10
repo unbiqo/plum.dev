@@ -19,6 +19,7 @@ from app.medical_center_demo import (
     INVALID_CONTACT_ANSWER,
     MEDICAL_CENTER_INSTANCE_ID,
     handle_medical_center_chat,
+    strip_em_dash,
 )
 from app.medical_center_guardrails import (
     EMERGENCY_ANSWER,
@@ -2043,6 +2044,25 @@ def test_booking_confirmation_mentions_administrator_follow_up() -> None:
     low = resp.answer.casefold()
     assert "администратор свяжется" in low
     assert "—" not in resp.answer
+
+
+def test_em_dash_is_stripped_from_writer_output() -> None:
+    # The prompt rule alone did not hold live, so the dash is removed in code.
+    assert strip_em_dash("Руслан Ермекович — травматолог-ортопед со стажем.") == (
+        "Руслан Ермекович, травматолог-ортопед со стажем."
+    )
+    # A hyphen inside a word is not a dash and must survive untouched.
+    assert strip_em_dash("травматолог-ортопед") == "травматолог-ортопед"
+    # A leading dash is a bullet, not a clause separator.
+    assert strip_em_dash("— Первый пункт") == "Первый пункт"
+    assert strip_em_dash("") == ""
+
+
+def test_writer_answer_never_reaches_the_user_with_an_em_dash() -> None:
+    gem = FakeGemini(writer_texts=["Первичный приём терапевта — 12 000 ₸."])
+    resp = _run(handle_medical_center_chat(gem, _request("сколько стоит терапевт?")))
+    assert "—" not in resp.answer
+    assert "12 000" in resp.answer  # the fact itself survives
 
 
 def test_deterministic_routing_answers_contain_no_em_dash() -> None:
