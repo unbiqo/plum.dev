@@ -43,17 +43,28 @@ FALLBACK_CHEAP_MODEL = "gemini-2.5-flash-lite"
 ESCALATION_MODEL = "gemini-3-flash-preview"
 PREMIUM_MODEL = "gemini-3.5-flash"
 
+# NOTE on ESCALATION_MODEL's position: gemini-3-flash-preview was made the
+# PRIMARY choice for the live writers and the medical planner. In production it
+# has been answering 503 UNAVAILABLE on essentially every call, and one 503 took
+# ~100 seconds to come back, which blew the frontend's 55s abort budget and
+# surfaced as "Что-то пошло не так" to real users. A preview model is not a
+# dependable primary for live chat.
+#
+# It is therefore demoted to SECOND in every live profile: the cheap-but-good
+# default answers first, and the stronger model is still tried when the default
+# fails. Put it back in front (per profile) via the *_MODEL_POOL env vars once
+# Google's availability recovers — no code change needed.
 MODEL_PROFILES: dict[str, tuple[str, ...]] = {
     "router": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
     "classifier": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
-    "sales_writer": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
-    "rag_writer": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "sales_writer": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
+    "rag_writer": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
     "custom_demo_writer": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
-    "attachment_extraction": (ESCALATION_MODEL, PREMIUM_MODEL, DEFAULT_FAST_MODEL),
+    "attachment_extraction": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, PREMIUM_MODEL),
     "memory_summary": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
-    "medical_planner": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "medical_planner": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
     "medical_writer": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
-    "medical_repair": (ESCALATION_MODEL, DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "medical_repair": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
     "quality_eval": (PREMIUM_MODEL, ESCALATION_MODEL),
     "default": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
 }
