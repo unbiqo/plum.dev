@@ -171,7 +171,7 @@ export function WhatWeNeedSection({ dict }: { dict: DictWhatWeNeed }) {
 
 export function TrustSection({ dict }: { dict: DictTrust }) {
   return (
-    <section className="py-20 bg-surface border-t border-border-col">
+    <section id="trust" className="scroll-mt-20 py-20 bg-surface border-t border-border-col">
       <div className="max-w-6xl mx-auto px-6">
         <div className="max-w-2xl mx-auto text-center mb-12">
           <h2 className="text-3xl lg:text-4xl font-bold text-primary mb-4">{dict.headline}</h2>

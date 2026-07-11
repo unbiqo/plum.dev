@@ -12,9 +12,10 @@ type LeadField = (typeof LEAD_FIELDS)[number]
 
 export default function HeroChatPreview({ dict }: { dict: DictHeroChat }) {
   const [scenarioIdx, setScenarioIdx] = useState(0)
-  const [visibleMessages, setVisibleMessages] = useState<DictHeroSimMessage[]>([])
+  const firstMessage = dict.scenarios[0]?.messages[0]
+  const [visibleMessages, setVisibleMessages] = useState<DictHeroSimMessage[]>(() => firstMessage ? [firstMessage] : [])
   const [showTyping, setShowTyping] = useState(false)
-  const [leadIdx, setLeadIdx] = useState(0)
+  const [leadIdx, setLeadIdx] = useState(firstMessage?.leadStateIndex ?? 0)
   const [highlighted, setHighlighted] = useState<Set<LeadField>>(new Set())
 
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
@@ -41,7 +42,7 @@ export default function HeroChatPreview({ dict }: { dict: DictHeroChat }) {
     }
   }
 
-  function runScenario(scenIdx: number): void {
+  function runScenario(scenIdx: number, startAt = 0): void {
     const scenario = dict.scenarios[scenIdx]
 
     function step(msgIdx: number): void {
@@ -84,7 +85,7 @@ export default function HeroChatPreview({ dict }: { dict: DictHeroChat }) {
       }
     }
 
-    step(0)
+    step(startAt)
   }
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export default function HeroChatPreview({ dict }: { dict: DictHeroChat }) {
       setLeadIdx(lastScenario.leadStates.length - 1)
       return
     }
-    runScenario(0)
+    runScenario(0, firstMessage ? 1 : 0)
     return () => clearAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

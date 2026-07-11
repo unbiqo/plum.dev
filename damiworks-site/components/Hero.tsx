@@ -1,5 +1,6 @@
 import type { DictHero } from '@/lib/i18n'
 import HeroChatPreview from '@/components/HeroChatPreview'
+import { Check } from 'lucide-react'
 
 export default function Hero({ dict }: { dict: DictHero }) {
   return (
@@ -9,6 +10,11 @@ export default function Hero({ dict }: { dict: DictHero }) {
 
           {/* Left column */}
           <div>
+            {dict.eyebrow && (
+              <p className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+                {dict.eyebrow}
+              </p>
+            )}
             <h1 className="text-4xl lg:text-5xl font-bold text-primary leading-tight mb-5">
               {dict.headlinePart1}
               <span className="text-accent">{dict.headlineAccent}</span>
@@ -30,6 +36,16 @@ export default function Hero({ dict }: { dict: DictHero }) {
                 {dict.ctaSecondary.label}
               </a>
             </div>
+            {dict.trustBadges.length > 0 && (
+              <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2">
+                {dict.trustBadges.map((badge) => (
+                  <li key={badge} className="flex items-center gap-1.5 text-xs font-medium text-secondary">
+                    <Check size={14} className="text-accent" aria-hidden="true" />
+                    {badge}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Right column — animated chat preview */}

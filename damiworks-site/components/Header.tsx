@@ -44,7 +44,9 @@ export default function Header({ locale, nav, site, bookACallLabel, langSwitcher
   return (
     <header className="sticky top-0 z-50 bg-surface border-b border-border-col">
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <span className="font-semibold text-lg text-primary">{site.name}</span>
+        <a href={locale === 'ru' ? '/ru' : '/'} className="font-semibold text-lg text-primary">
+          {site.name}
+        </a>
 
         <nav className="hidden md:flex items-center gap-8">
           {nav.map((link) => (
@@ -71,7 +73,8 @@ export default function Header({ locale, nav, site, bookACallLabel, langSwitcher
         <button
           className="md:hidden text-secondary p-1"
           onClick={() => setOpen(!open)}
-          aria-label="Toggle menu"
+          aria-label={locale === 'ru' ? 'Открыть меню' : 'Toggle menu'}
+          aria-expanded={open}
         >
           {open ? <X size={22} /> : <Menu size={22} />}
         </button>

@@ -239,7 +239,7 @@ type Props = {
 }
 
 export default function DemoSection({ dict, locale, liveChat, customDemoChat, intake }: Props) {
-  const [selectedId, setSelectedId] = useState(DAMIWORKS_TAB_ID)
+  const [selectedId, setSelectedId] = useState(locale === 'ru' ? MEDICAL_TAB_ID : DAMIWORKS_TAB_ID)
   const [liveSnapshot, setLiveSnapshot] = useState<LiveChatSnapshot | null>(null)
   const [schoolMessages, setSchoolMessages] = useState<SchoolMessage[]>([])
   const [schoolState, setSchoolState] = useState<SchoolBackendState | null>(null)
@@ -267,11 +267,20 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
   const scenario = dict.scenarios.find((s) => s.id === selectedId)
 
   const tabs = useMemo(
-    () => [
-      ...dict.scenarios.filter((s) => !s.hidden).map((s) => ({ id: s.id, label: s.label })),
-      ...(dict.customDemoTab.hidden ? [] : [{ id: dict.customDemoTab.id, label: dict.customDemoTab.label }]),
-    ],
-    [dict.customDemoTab, dict.scenarios],
+    () => {
+      const scenarios = dict.scenarios.filter((s) => !s.hidden).map((s) => ({ id: s.id, label: s.label }))
+      if (locale === 'ru') {
+        scenarios.sort((a, b) => {
+          const order = [MEDICAL_TAB_ID, DAMIWORKS_TAB_ID, ENGLISH_SCHOOL_TAB_ID]
+          return order.indexOf(a.id) - order.indexOf(b.id)
+        })
+      }
+      return [
+        ...scenarios,
+        ...(dict.customDemoTab.hidden ? [] : [{ id: dict.customDemoTab.id, label: dict.customDemoTab.label }]),
+      ]
+    },
+    [dict.customDemoTab, dict.scenarios, locale],
   )
   const validTabIds = useMemo(
     () => new Set([DAMIWORKS_TAB_ID, ...tabs.map((tab) => tab.id)]),
@@ -290,6 +299,26 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
     sessionStorage.setItem(SELECTED_DEMO_TAB_SESSION_KEY, id)
   }
 
+  const summaryPanel = isConsultant ? (
+    <PackageSelectionPanel dict={dict} intake={intake} snapshot={liveSnapshot} />
+  ) : isEnglishSchool ? (
+    <EnglishSchoolSummaryPanel
+      messages={schoolMessages}
+      dict={dict.schoolSummary}
+      backendState={schoolState}
+    />
+  ) : isMedical ? (
+    <MedicalCenterSummaryPanel
+      messages={medicalMessages}
+      dict={dict.medicalSummary}
+      backendState={medicalState}
+    />
+  ) : isCustomDemo ? (
+    <CustomDemoSummaryPanel dict={dict} />
+  ) : (
+    <LeadSummaryPanel scenario={scenario!} leadSummary={dict.leadSummary} />
+  )
+
   return (
     <section id="demo" className="scroll-mt-20 py-24 bg-bg border-t border-border-col">
       <div className="max-w-6xl mx-auto px-6">
@@ -300,7 +329,22 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[200px_1fr_260px]">
           {/* Left: scenario selector */}
-          <div className="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0">
+          <label className="block lg:hidden">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-secondary">
+              {dict.scenarioSelectLabel}
+            </span>
+            <select
+              value={selectedId}
+              onChange={(event) => selectTab(event.target.value)}
+              className="w-full rounded-xl border border-border-col bg-surface px-4 py-3 text-sm font-semibold text-primary focus:border-accent focus:outline-none"
+            >
+              {tabs.map((tab) => (
+                <option key={tab.id} value={tab.id}>{tab.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="hidden lg:flex lg:flex-col gap-2">
             {tabs.map((s) => (
               <button
                 key={s.id}
@@ -316,47 +360,56 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
             ))}
           </div>
 
+          <details className="group rounded-2xl border border-accent/25 bg-accent-soft/40 lg:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-primary marker:hidden">
+              {dict.mobileSummaryLabel}
+              <span className="text-lg font-normal text-accent transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+            </summary>
+            <div className="border-t border-accent/15 p-3">{summaryPanel}</div>
+          </details>
+
           {/* Center: live consultant chat, English school live chat, custom demo chat, or static demo */}
-          {isConsultant ? (
-            <LiveChat dict={liveChat} intake={intake} locale={locale} onStateChange={handleLiveStateChange} />
-          ) : isEnglishSchool ? (
-            <EnglishSchoolChat
-              dict={dict.schoolChat}
-              onConversationUpdate={handleSchoolConversationUpdate}
-              onStateUpdate={handleSchoolStateUpdate}
-            />
-          ) : isMedical ? (
-            <MedicalCenterChat
-              dict={dict.medicalChat}
-              onConversationUpdate={handleMedicalConversationUpdate}
-              onStateUpdate={handleMedicalStateUpdate}
-            />
-          ) : isCustomDemo ? (
-            <CustomDemoChat dict={customDemoChat} />
-          ) : (
-            <StaticChatWindow scenario={scenario!} staticChat={dict.staticChat} />
-          )}
+          <div className="min-w-0">
+            {isConsultant ? (
+              <LiveChat dict={liveChat} intake={intake} locale={locale} onStateChange={handleLiveStateChange} />
+            ) : isEnglishSchool ? (
+              <EnglishSchoolChat
+                dict={dict.schoolChat}
+                onConversationUpdate={handleSchoolConversationUpdate}
+                onStateUpdate={handleSchoolStateUpdate}
+              />
+            ) : isMedical ? (
+              <MedicalCenterChat
+                dict={dict.medicalChat}
+                onConversationUpdate={handleMedicalConversationUpdate}
+                onStateUpdate={handleMedicalStateUpdate}
+              />
+            ) : isCustomDemo ? (
+              <CustomDemoChat dict={customDemoChat} />
+            ) : (
+              <StaticChatWindow scenario={scenario!} staticChat={dict.staticChat} />
+            )}
+          </div>
 
           {/* Right: context-aware summary */}
-          {isConsultant ? (
-            <PackageSelectionPanel dict={dict} intake={intake} snapshot={liveSnapshot} />
-          ) : isEnglishSchool ? (
-            <EnglishSchoolSummaryPanel
-              messages={schoolMessages}
-              dict={dict.schoolSummary}
-              backendState={schoolState}
-            />
-          ) : isMedical ? (
-            <MedicalCenterSummaryPanel
-              messages={medicalMessages}
-              dict={dict.medicalSummary}
-              backendState={medicalState}
-            />
-          ) : isCustomDemo ? (
-            <CustomDemoSummaryPanel dict={dict} />
-          ) : (
-            <LeadSummaryPanel scenario={scenario!} leadSummary={dict.leadSummary} />
-          )}
+          <div className="hidden lg:block">{summaryPanel}</div>
+        </div>
+
+        <div className="mt-8 flex flex-col gap-5 rounded-2xl border border-accent/25 bg-accent-soft/45 p-6 sm:flex-row sm:items-center sm:justify-between lg:px-8">
+          <div className="max-w-2xl">
+            <h3 className="text-lg font-bold text-primary">{dict.conversionTitle}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-secondary">{dict.conversionText}</p>
+          </div>
+          <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+            <a href="#contact" className="rounded-xl bg-accent px-5 py-3 text-center text-sm font-semibold text-white hover:opacity-90">
+              {dict.conversionPrimary}
+            </a>
+            {!isConsultant && (
+              <button type="button" onClick={() => selectTab(DAMIWORKS_TAB_ID)} className="text-sm font-medium text-accent">
+                {dict.conversionSecondary}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </section>

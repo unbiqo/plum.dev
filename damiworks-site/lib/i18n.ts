@@ -111,6 +111,31 @@ export interface DictTrust {
   cards: string[]
 }
 
+export interface DictEvidence {
+  eyebrow: string
+  headline: string
+  subheadline: string
+  cards: { title: string; text: string }[]
+  bottomLine: string
+}
+
+export interface DictFounder {
+  eyebrow: string
+  headline: string
+  description: string
+  name: string
+  role: string
+  personalNote: string
+  points: string[]
+  cta: string
+}
+
+export interface DictFaq {
+  headline: string
+  subheadline: string
+  items: { question: string; answer: string }[]
+}
+
 export interface DictDemoScenario {
   id: string
   label: string
@@ -264,6 +289,12 @@ export interface DictDemo {
   schoolSummary: DictSchoolSummaryLabels
   medicalChat: DictMedicalChatLabels
   medicalSummary: DictMedicalSummaryLabels
+  scenarioSelectLabel: string
+  mobileSummaryLabel: string
+  conversionTitle: string
+  conversionText: string
+  conversionPrimary: string
+  conversionSecondary: string
 }
 
 export interface DictTierFeature {
@@ -358,11 +389,15 @@ export interface DictContact {
   successMessage: string
   errorMessage: string
   businessTypes: string[]
+  consentText: string
+  privacyLabel: string
+  privacyHref: string
 }
 
 export interface DictFooter {
   tagline: string
   badges: string[]
+  privacyLabel: string
 }
 
 export interface DictLiveChatSummaryLabels {
@@ -472,6 +507,9 @@ export interface Dict {
   valueProp: DictValueProp
   whatWeNeed: DictWhatWeNeed
   trust: DictTrust
+  evidence: DictEvidence
+  founder: DictFounder
+  faq: DictFaq
   pricing: DictPricing
   contact: DictContact
   footer: DictFooter
@@ -636,6 +674,43 @@ const en: Dict = {
       'No promises beyond the knowledge base',
       'No terms you have not confirmed',
       'Complex cases go to your team',
+    ],
+  },
+  evidence: {
+    eyebrow: 'Verifiable before you buy',
+    headline: 'Do not take our promises on faith — test the workflow yourself',
+    subheadline:
+      'The live demo shows both sides of the process: what a customer sees and what your team receives after the conversation.',
+    cards: [
+      { title: 'Live conversation', text: 'Ask your own question instead of watching a pre-recorded ideal script.' },
+      { title: 'Clear guardrails', text: 'Test a sensitive or complex question and see when the AI hands it to a human.' },
+      { title: 'Visible outcome', text: 'Watch the request summary fill with the need, timing, contact, and next step.' },
+      { title: 'Measured pilot', text: 'Agree on success criteria before launch and review real conversations together.' },
+    ],
+    bottomLine:
+      'We do not replace evidence with invented logos or unsupported numbers. Before any contract, you can test the product, its limits, and the pilot criteria directly.',
+  },
+  founder: {
+    eyebrow: 'Who is responsible',
+    headline: 'Direct contact with the person who designs and launches the system',
+    description:
+      'You are not handed to an anonymous support queue. The founder reviews your workflow, defines the first scenario, and stays involved while the AI is tested on real conversations.',
+    name: 'Damir',
+    role: 'Founder, DamiWorks',
+    personalNote:
+      'I focus on one measurable workflow first, show the limits honestly, and improve the system from reviewed conversations rather than generic promises.',
+    points: ['Direct communication throughout the pilot', 'A staged launch with a human handoff', 'Transparent scope and limitations', 'Post-launch conversation review'],
+    cta: 'Discuss the workflow directly',
+  },
+  faq: {
+    headline: 'Questions before a pilot',
+    subheadline: 'Straight answers to the objections that usually matter before a launch.',
+    items: [
+      { question: 'Does the AI replace a manager?', answer: 'No. It handles repeatable first-line conversations, collects context, and hands complex or high-value cases to a person.' },
+      { question: 'What if it does not know the answer?', answer: 'It is instructed not to invent terms outside the approved knowledge base. The safe path is to acknowledge the limit and hand the conversation to your team.' },
+      { question: 'What do you need from us?', answer: 'Services, prices and rules, common questions, the first communication channel, and a clear destination for qualified requests.' },
+      { question: 'How do we judge the pilot?', answer: 'Before launch we agree on measurable criteria such as response speed, contact collection, handoff quality, and the share of conversations that need correction.' },
+      { question: 'How much does a pilot cost?', answer: 'A basic one-channel pilot starts from ₸150,000. The final scope depends on integrations, conversation complexity, and the number of workflows.' },
     ],
   },
   demo: {
@@ -848,6 +923,12 @@ const en: Dict = {
       pillContact: 'Contact received',
       pillEmergency: 'Call 103/112',
     },
+    scenarioSelectLabel: 'Choose a demo scenario',
+    mobileSummaryLabel: 'What your team receives',
+    conversionTitle: 'Want to test this on your own services and rules?',
+    conversionText: 'We will prepare a focused pilot plan around one real workflow and show what the AI should collect before handing a request to your team.',
+    conversionPrimary: 'Get a pilot plan',
+    conversionSecondary: 'Ask the DamiWorks consultant',
   },
   capabilities: {
     headline: 'Where you can start',
@@ -1062,10 +1143,14 @@ const en: Dict = {
       'Real Estate',
       'Other',
     ],
+    consentText: 'By sending the form, you agree that DamiWorks may use these contact details to respond to your request.',
+    privacyLabel: 'Privacy notice',
+    privacyHref: '/privacy',
   },
   footer: {
     tagline: 'AI employees for sales and support.',
     badges: ['Done-for-you implementation', 'Post-launch support', 'Built around your workflow'],
+    privacyLabel: 'Privacy',
   },
   liveChat: {
     introMessage:
@@ -1207,49 +1292,50 @@ const en: Dict = {
 const ru: Dict = {
   locale: 'ru',
   metadata: {
-    title: 'DamiWorks — AI-сотрудники для продаж и поддержки',
+    title: 'AI-администратор для клиник и стоматологий — DamiWorks',
     description:
-      'AI-сотрудники для WhatsApp, Instagram и сайта: отвечают клиентам, квалифицируют заявки и передают тёплые лиды менеджеру.',
+      'AI-администратор отвечает пациентам 24/7, помогает выбрать специалиста и передаёт клинике готовые заявки на запись.',
   },
   site: {
     name: 'DamiWorks',
     tagline: 'AI-сотрудники для продаж и поддержки.',
   },
   nav: [
-    { label: 'Как это работает', href: '#how-it-works' },
-    { label: 'Демо', href: '#demo' },
-    { label: 'Форматы', href: '#formats' },
+    { label: 'Демо клиники', href: '#demo' },
+    { label: 'Как работает', href: '#how-it-works' },
+    { label: 'Пилот', href: '#pricing' },
+    { label: 'Безопасность', href: '#trust' },
     { label: 'Контакты', href: '#contact' },
   ],
-  bookACallLabel: 'Записаться на звонок',
+  bookACallLabel: 'Получить план пилота',
   langSwitcher: { enLabel: 'EN', ruLabel: 'RU' },
   hero: {
-    eyebrow: '',
-    headlinePart1: 'AI-сотрудник, который не даёт ',
-    headlineAccent: 'терять заявки',
+    eyebrow: 'Для медицинских клиник и стоматологий',
+    headlinePart1: 'AI-администратор отвечает пациентам 24/7 и передаёт ',
+    headlineAccent: 'готовые заявки на запись',
     subheadline:
-      'DamiWorks помогает бизнесу отвечать клиентам 24/7, квалифицировать лидов, делать follow-up и передавать тёплые заявки вашей команде.',
-    ctaPrimary: { label: 'Попробовать демо →', href: '#demo' },
-    ctaSecondary: { label: 'Разобрать мои заявки →', href: '#contact' },
-    trustBadges: [],
+      'Помогает выбрать специалиста, отвечает на вопросы об услугах и ценах, собирает контакт и передаёт сложные случаи человеку. Без диагнозов и назначений.',
+    ctaPrimary: { label: 'Протестировать как пациент →', href: '#demo' },
+    ctaSecondary: { label: 'Получить план пилота', href: '#contact' },
+    trustBadges: ['Сайт и мессенджеры', 'Передача человеку', 'Настройка под ключ'],
     chat: {
-      headerTitle: 'AI-администратор',
+      headerTitle: 'AI-администратор клиники',
       onlineLabel: 'Онлайн',
       leadLabel: 'Новая заявка',
-      leadFieldLabels: { service: 'Клиент', objection: 'Задача', need: 'Передано', time: 'Время', status: 'Статус' },
+      leadFieldLabels: { service: 'Пациент', objection: 'Направление', need: 'Передано', time: 'Время', status: 'Статус' },
       scenarios: [
         {
           id: 'outcome',
           messages: [
-            { from: 'user', text: 'Можно записаться на консультацию?', leadStateIndex: 1 },
-            { from: 'ai', text: 'Конечно. Что хотите автоматизировать и когда вам удобно связаться?', leadStateIndex: 2 },
-            { from: 'user', text: 'Заявки из Instagram. Лучше после 17:00.', leadStateIndex: 3 },
+            { from: 'user', text: 'Хочу записаться к кардиологу на этой неделе.', leadStateIndex: 1 },
+            { from: 'ai', text: 'Помогу с записью. Пациент взрослый? Есть предпочтение по дню и времени?', leadStateIndex: 2 },
+            { from: 'user', text: 'Взрослый, лучше в четверг после 17:00.', leadStateIndex: 3 },
           ],
           leadStates: [
             { service: '—', objection: '—', need: '—', time: '—', status: 'Новая заявка' },
-            { service: 'Алия', objection: 'Консультация', need: '—', time: '—', status: 'Новое сообщение' },
-            { service: 'Алия', objection: 'Заявки из Instagram', need: 'Telegram', time: 'После 17:00', status: 'Тёплый лид' },
-            { service: 'Алия', objection: 'Заявки из Instagram', need: 'Telegram', time: 'После 17:00', status: 'Передано команде' },
+            { service: 'Взрослый', objection: 'Кардиология', need: '—', time: 'На этой неделе', status: 'Уточнение' },
+            { service: 'Взрослый', objection: 'Кардиология', need: 'Администратору', time: 'Четверг после 17:00', status: 'Готов к записи' },
+            { service: 'Взрослый', objection: 'Кардиология', need: 'Администратору', time: 'Четверг после 17:00', status: 'Передано клинике' },
           ],
         },
       ],
@@ -1271,38 +1357,38 @@ const ru: Dict = {
       'Проблема не в том, что команда плохо работает. Проблема в том, что ручная обработка заявок не масштабируется, когда клиенты ждут быстрый ответ.',
   },
   howItWorks: {
-    headline: 'Как обращение становится заявкой',
-    subheadline: 'Путь клиента: от первого сообщения до понятной заявки для команды.',
+    headline: 'Что происходит после сообщения пациента',
+    subheadline: 'AI ведёт только согласованный первый этап и передаёт администратору собранный контекст.',
     steps: [
       {
         number: '01',
         icon: 'MessageCircle',
         title: 'Клиент пишет',
-        description: 'В Instagram, WhatsApp, Telegram, на сайте или через форму.',
+        description: 'На сайте или в подключённом мессенджере — в том канале, где клиника уже получает обращения.',
       },
       {
         number: '02',
         icon: 'Zap',
         title: 'AI отвечает сразу',
-        description: 'Даже вечером, ночью или когда команда занята.',
+        description: 'Даже вечером или когда администратор занят звонком и пациентами на ресепшене.',
       },
       {
         number: '03',
         icon: 'ListChecks',
-        title: 'AI уточняет потребность',
-        description: 'Задаёт нужные вопросы и собирает детали.',
+        title: 'Уточняет запрос',
+        description: 'Помогает выбрать направление, отвечает по утверждённой базе и выясняет удобное время.',
       },
       {
         number: '04',
         icon: 'Phone',
-        title: 'AI собирает контакт',
-        description: 'Имя, телефон, мессенджер или удобное время связи.',
+        title: 'Собирает заявку',
+        description: 'Контакт, направление, цель обращения и предпочтения по записи.',
       },
       {
         number: '05',
         icon: 'ClipboardList',
-        title: 'Команда получает сводку',
-        description: 'Кто написал, что нужно, когда удобно связаться и какой следующий шаг.',
+        title: 'Передаёт администратору',
+        description: 'Сводку и следующий шаг. Сложный или чувствительный вопрос передаётся человеку раньше.',
       },
     ],
   },
@@ -1322,35 +1408,35 @@ const ru: Dict = {
     },
   },
   automate: {
-    headline: 'Что можно автоматизировать',
+    headline: 'С чего клиника может начать',
     actionLabel: 'Что делает AI',
     outcomeLabel: 'Что получает бизнес',
     exampleLabel: 'Пример',
     items: [
-      { title: 'Заявки', description: 'Уточняет потребность, контакт и удобное время.', outcome: 'Менеджер получает тёплую заявку, а не сырой диалог.', example: 'Клиент хочет консультацию, удобно после 17:00, контакт Telegram.' },
-      { title: 'Ответы', description: 'Отвечает на повторяющиеся вопросы про услуги, цену, условия, расписание, доставку или доступы.', outcome: 'Команда меньше тратит время на рутину.', example: 'AI объясняет программу, старт потока, варианты оплаты и что входит.' },
-      { title: 'Follow-up', description: 'Мягко напоминает клиенту, если он пропал после первого ответа.', outcome: 'Тёплые заявки не пропадают после одной переписки.', example: '«Хотите, я отправлю доступные времена для консультации?»' },
-      { title: 'Передача', description: 'Собирает ключевые детали и отправляет короткую сводку команде.', outcome: 'Команда видит контекст и следующий шаг в одном месте.', example: 'Имя, задача, канал, удобное время и статус лида.' },
-      { title: 'Интеграции', description: 'Подключается к CRM, таблицам, Telegram, WhatsApp или внутренним инструментам, если это нужно.', outcome: 'AI встраивается в процесс, а не создаёт ещё одно место, куда команде нужно заходить.', example: 'Готовая заявка автоматически уходит в Telegram и Google Sheets.' },
+      { title: 'Запись', description: 'Уточняет направление, цель обращения, контакт и удобное время.', outcome: 'Администратор получает собранную заявку, а не начинает диалог заново.', example: 'Взрослый пациент, кардиолог, четверг после 17:00, контакт получен.' },
+      { title: 'FAQ', description: 'Отвечает по утверждённой информации об услугах, врачах, ценах, графике и подготовке.', outcome: 'Команда меньше времени тратит на одинаковые вопросы.', example: 'Что входит в первичный приём и как подготовиться к анализам.' },
+      { title: 'Подбор врача', description: 'Уточняет задачу и предлагает подходящее направление в рамках правил клиники.', outcome: 'Пациент понимает следующий шаг, не получая диагноза от AI.', example: 'Объясняет, к какому специалисту клиника рекомендует обратиться с таким запросом.' },
+      { title: 'Передача', description: 'Распознаёт сложный, спорный или срочный случай и передаёт его человеку.', outcome: 'AI не продолжает разговор там, где требуется администратор или врач.', example: 'Экстренный симптом, жалоба, нестандартное условие или просьба связать с человеком.' },
+      { title: 'Интеграции', description: 'Передаёт заявку в Telegram, таблицу или CRM и может учитывать доступные статусы.', outcome: 'Новый инструмент встраивается в текущую работу клиники.', example: 'Сводка по обращению автоматически уходит ответственному администратору.' },
     ],
     bottomLine: 'Формат запуска подбирается после короткого разбора задач.',
   },
   whatWeNeed: {
-    headline: 'Что нужно от вас для запуска',
+    headline: 'Что нужно от клиники для пилота',
     items: [
-      { number: '01', title: 'Список услуг и условий', description: 'Что вы продаёте, какие есть ограничения, цены, расписание или правила.' },
-      { number: '02', title: 'Частые вопросы клиентов', description: 'Что люди обычно спрашивают перед покупкой или записью.' },
-      { number: '03', title: 'Каналы общения', description: 'Где приходят заявки: сайт, Instagram, Telegram, WhatsApp.' },
-      { number: '04', title: 'Куда передавать заявки', description: 'Менеджеру, администратору, в таблицу или CRM.' },
+      { number: '01', title: 'Услуги, врачи и условия', description: 'Актуальные цены, график, правила записи, ограничения и подготовка к приёму.' },
+      { number: '02', title: 'Частые вопросы пациентов', description: 'Что обычно спрашивают до записи и в каких случаях нужен человек.' },
+      { number: '03', title: 'Один первый канал', description: 'Сайт или мессенджер, где проще всего безопасно проверить сценарий.' },
+      { number: '04', title: 'Правило передачи', description: 'Кому и в каком виде отправлять заявку, сложный вопрос или срочный случай.' },
     ],
     bottomLine: 'Вам не нужно разбираться в AI. Мы берём настройку на себя. Если чего-то нет — поможем собрать в процессе разбора.',
   },
   trust: {
-    headline: 'AI работает в рамках правил бизнеса',
+    headline: 'Безопасные границы задаются до запуска',
     description1:
-      'AI-сотрудник не принимает сложные решения за человека. Он отвечает на типовые вопросы, собирает данные и передаёт заявку команде.',
+      'AI-администратор не заменяет врача и не принимает медицинские решения. Он ведёт только согласованные организационные сценарии.',
     description2:
-      'Если вопрос сложный, спорный или требует специалиста, AI передаёт диалог человеку.',
+      'Неуверенный, сложный, спорный или срочный случай переводится на заранее определённый безопасный сценарий и передаётся человеку.',
     cards: [
       'Не даёт медицинских, юридических или финансовых заключений',
       'Не обещает то, чего нет в базе знаний',
@@ -1358,10 +1444,48 @@ const ru: Dict = {
       'Передаёт сложные случаи команде',
     ],
   },
-  demo: {
-    headline: 'Попробуйте AI-сотрудника вживую',
+  evidence: {
+    eyebrow: 'Можно проверить до договора',
+    headline: 'Не просим верить обещаниям — покажем работу на сценариях вашей клиники',
     subheadline:
-      'Задайте вопрос в чат, пройдите короткий подбор или посмотрите пример AI-сотрудника для конкретной ниши.',
+      'Живое демо показывает обе стороны процесса: что видит пациент и какую информацию после диалога получает администратор.',
+    cards: [
+      { title: 'Живой диалог', text: 'Задайте свой вопрос вместо просмотра заранее записанного идеального сценария.' },
+      { title: 'Безопасные границы', text: 'Проверьте сложный или чувствительный вопрос и посмотрите, когда AI передаёт его человеку.' },
+      { title: 'Видимый результат', text: 'Наблюдайте, как заполняется сводка: направление, цель обращения, время и статус.' },
+      { title: 'Измеримый пилот', text: 'До запуска фиксируем критерии и вместе разбираем реальные диалоги без красивых неподтверждённых цифр.' },
+    ],
+    bottomLine:
+      'Мы не подменяем доказательства вымышленными логотипами и общими цифрами. До договора вы можете проверить живое демо, ограничения и измеримые критерии будущего пилота.',
+  },
+  founder: {
+    eyebrow: 'Кто отвечает за проект',
+    headline: 'Прямой контакт с человеком, который проектирует и запускает систему',
+    description:
+      'Проект не передаётся анонимной линии поддержки. Основатель лично разбирает процесс клиники, определяет первый сценарий и участвует в проверке ответов после запуска.',
+    name: 'Дамир',
+    role: 'Основатель DamiWorks',
+    personalNote:
+      'Мой подход — начать с одного проверяемого сценария, честно обозначить ограничения и улучшать систему по разобранным диалогам, а не по общим обещаниям.',
+    points: ['Прямое общение на протяжении пилота', 'Поэтапный запуск с передачей человеку', 'Прозрачный объём работ и ограничения', 'Разбор диалогов после запуска'],
+    cta: 'Обсудить сценарий напрямую',
+  },
+  faq: {
+    headline: 'Вопросы перед пилотом',
+    subheadline: 'Прямые ответы на сомнения, которые обычно возникают до запуска.',
+    items: [
+      { question: 'AI заменит администратора клиники?', answer: 'Нет. Он берёт на себя повторяющийся первый этап общения, собирает контекст и передаёт администратору сложные, чувствительные и ценные обращения.' },
+      { question: 'Что будет, если AI не знает ответа?', answer: 'Он не должен придумывать условия вне утверждённой базы знаний. Безопасный сценарий — обозначить ограничение и передать вопрос сотруднику клиники.' },
+      { question: 'Можно ли использовать AI в медицинской тематике?', answer: 'Пилот проектируется для организационных задач: услуги, цены, график, выбор направления и сбор заявки. Диагнозы, назначения и медицинские заключения остаются за врачом.' },
+      { question: 'Как понять, что пилот успешен?', answer: 'До запуска вместе фиксируем критерии: скорость первого ответа, долю собранных контактов, качество сводки, корректность передачи человеку и количество диалогов, потребовавших исправления.' },
+      { question: 'Сколько стоит пилот?', answer: 'Базовый пилот на одном канале начинается от 150 000 ₸. Итоговый объём зависит от интеграций, сложности базы знаний и количества сценариев.' },
+      { question: 'Что нужно подготовить клинике?', answer: 'Услуги и цены, информацию о врачах и графике, частые вопросы, правила записи и случаи, которые необходимо сразу передавать человеку.' },
+    ],
+  },
+  demo: {
+    headline: 'Проверьте AI-администратора как пациент',
+    subheadline:
+      'Выберите медицинский центр, задайте реальный вопрос и посмотрите, какую сводку получит администратор клиники.',
     scenarios: [
       {
         id: 'damiworks',
@@ -1568,6 +1692,12 @@ const ru: Dict = {
       pillContact: 'Контакт получен',
       pillEmergency: 'Позвоните 103/112',
     },
+    scenarioSelectLabel: 'Выберите сценарий демо',
+    mobileSummaryLabel: 'Что получит администратор',
+    conversionTitle: 'Хотите проверить этот сценарий на услугах вашей клиники?',
+    conversionText: 'Подготовим план пилота для одного реального потока обращений и покажем, что AI должен собрать перед передачей администратору.',
+    conversionPrimary: 'Получить план пилота',
+    conversionSecondary: 'Задать вопрос DamiWorks',
   },
   capabilities: {
     headline: 'С чего можно начать',
@@ -1619,27 +1749,27 @@ const ru: Dict = {
     ],
   },
   valueProp: {
-    headline: 'Как мы внедряем AI-сотрудника',
+    headline: 'Как проходит пилот',
     description:
-      'Платформа даёт доступ к инструменту. DamiWorks берёт на себя внедрение под ключ: разбираем процессы, собираем базу знаний, проектируем сценарии, подключаем каналы, тестируем ответы и дорабатываем систему после запуска. Клиент получает не пустой кабинет, а настроенного AI-сотрудника, готового работать в реальных диалогах.',
+      'Клиника получает не пустой кабинет и не шаблонного бота. DamiWorks разбирает один процесс, собирает утверждённую базу знаний, задаёт границы, подключает передачу человеку и проверяет ответы на реальных диалогах.',
     items: [
       {
         number: '01',
-        title: 'Разбор бизнеса и сценариев',
+        title: 'Фиксируем сценарий и критерии',
         description:
-          'Понимаем, какие вопросы задают клиенты, где теряются заявки и какие данные нужно собирать перед передачей менеджеру.',
+          'Определяем, какие вопросы обрабатывает AI, какие данные собирает, когда зовёт человека и по каким показателям оцениваем пилот.',
       },
       {
         number: '02',
-        title: 'Настройка и запуск под ключ',
+        title: 'Настраиваем и безопасно запускаем',
         description:
-          'Собираем базу знаний, настраиваем тон общения, сценарии ответов, сбор контактов, квалификацию и передачу заявок в нужный канал.',
+          'Собираем базу знаний, тестируем типовые и сложные вопросы, подключаем канал и передачу заявки ответственному сотруднику.',
       },
       {
         number: '03',
-        title: 'Сопровождение после запуска',
+        title: 'Разбираем реальные диалоги',
         description:
-          'Смотрим реальные диалоги, исправляем слабые ответы, обновляем базу знаний и помогаем довести AI-сотрудника до стабильной работы.',
+          'Находим слабые ответы, уточняем правила и показываем, где система справляется, а где процесс нужно оставить человеку.',
       },
     ],
   },
@@ -1649,12 +1779,12 @@ const ru: Dict = {
       'Прозрачные пакеты под разные задачи: от первого запуска до квалификации лидов, интеграций и сложных сценариев.',
     note: 'Итоговая стоимость зависит от объёма и сложности проекта.',
     pilotOffer: {
-      eyebrow: 'Пример пилота',
-      title: 'Пример пилота: медицинские клиники и стоматологии',
+      eyebrow: 'Пилот без большого внедрения',
+      title: 'Начните с одного сценария, который можно измерить на реальных обращениях',
       subtitle:
-        'Для медицинских центров, стоматологий, диагностических лабораторий и частных специалистов.',
+        'Для медицинских центров, стоматологий, лабораторий и частных специалистов.',
       body:
-        'AI-администратор отвечает на вопросы о врачах, услугах, ценах, расписании и подготовке к приёму, помогает выбрать подходящего специалиста, собирает контакт и передаёт заявку на запись администратору. Он не ставит диагноз и не назначает лечение — это остаётся за врачом.',
+        'Не нужно автоматизировать всю клинику сразу. Выбираем один поток обращений — например, вопросы до приёма и сбор заявки на запись — настраиваем безопасные границы, передачу администратору и критерии проверки.',
       includesTitle: 'Где помогает AI',
       bullets: [
         'AI отвечает на первые вопросы пациентов 24/7',
@@ -1664,16 +1794,16 @@ const ru: Dict = {
         'Передаёт тёплую заявку администратору для подтверждения времени',
       ],
       cards: [
-        { label: 'Заявки', title: 'Вопросы до приёма', text: 'AI объясняет услуги, врачей, цены, режим работы и как подготовиться к консультации или процедуре.' },
-        { label: 'Безопасность', title: 'Без диагнозов и назначений', text: 'AI направляет к нужному специалисту и при тревожных симптомах советует вызвать скорую — но не ставит диагноз и не назначает лечение.' },
-        { label: 'Передача', title: 'Понятный следующий шаг', text: 'AI собирает цель визита, направление и контакт и передаёт администратору готовую заявку на запись.' },
+        { label: 'Объём', title: 'Один канал и сценарий', text: 'Фокусируем пилот на одном понятном процессе, чтобы быстро увидеть реальные слабые и сильные стороны.' },
+        { label: 'Результат', title: 'Рабочий AI и передача заявки', text: 'Настроенная база знаний, правила ответа, сбор контакта и сводка для администратора.' },
+        { label: 'Контроль', title: 'Месяц первых улучшений', text: 'Разбираем реальные диалоги, исправляем слабые ответы и уточняем правила после запуска.' },
       ],
       pricingLine:
-        'Формат пилота подбираем после короткого разбора вашего проекта.',
+        'Базовый пилот — от 150 000 ₸. Точный объём фиксируем до старта после короткого разбора процесса.',
       adaptNote:
         'По такому же принципу AI-сотрудника можно адаптировать под школы, салоны, курсы, локальные услуги, онлайн-магазины и B2B-сервисы.',
-      ctaPrimary: 'Обсудить пилот',
-      ctaSecondary: 'Посмотреть демо клиники',
+      ctaPrimary: 'Получить план пилота',
+      ctaSecondary: 'Протестировать демо',
     },
     plans: [
       {
@@ -1753,44 +1883,51 @@ const ru: Dict = {
     ],
   },
   contact: {
-    headline: 'Обсудим, где AI-сотрудник\nбыстрее всего даст эффект',
+    headline: 'Получите план первого\nпилота для клиники',
     description:
-      'За 20 минут разберём ваши входящие заявки, каналы общения и покажем, какие задачи можно автоматизировать первыми.',
+      'За 20 минут разберём один поток обращений и определим, что AI сможет делать, где передавать диалог человеку и как проверить результат.',
     note: '',
     highlights: [
-      'разберём текущие заявки и каналы общения',
-      'найдём первый сценарий автоматизации',
-      'оценим, где AI даст самый быстрый эффект',
+      'выберем один безопасный сценарий для старта',
+      'зафиксируем данные и правила передачи человеку',
+      'дадим понятный объём и стоимость пилота',
     ],
-    formTitle: 'Оставьте заявку',
+    formTitle: 'Получить план пилота',
     formSubtitle: 'Мы напишем вам в WhatsApp или Telegram.',
     calendlyButton: 'Забронировать 20-минутный разбор',
     calendlySubtext: 'Или заполните форму, и мы напишем вам сами.',
     placeholderName: 'Ваше имя',
     placeholderContact: 'WhatsApp / Telegram',
-    placeholderBusinessType: 'Выберите тип бизнеса',
-    placeholderMessage: 'Например: заявки из Instagram, ответы в WhatsApp, запись клиентов, повторяющиеся вопросы. (необязательно)',
+    placeholderBusinessType: 'Тип клиники или бизнеса',
+    placeholderMessage: 'Например: стоматология, обращения с сайта и WhatsApp, вопросы о ценах и запись к врачу. (необязательно)',
     messageHelp: 'Можно коротко — мы уточним детали сами.',
     submitButton: 'Отправить заявку',
     successMessage: 'Спасибо! Скоро свяжемся с вами.',
     errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
     businessTypes: [
+      'Стоматология',
+      'Медицинская клиника',
+      'Диагностическая лаборатория',
+      'Частный специалист',
       'Красота / Оздоровление',
       'Образование / Репетиторство',
-      'Стоматология / Медицина',
       'Розница / Интернет-магазин',
       'Логистика / Доставка',
       'Недвижимость',
       'Другое',
     ],
+    consentText: 'Отправляя форму, вы соглашаетесь на использование контактных данных только для ответа на эту заявку.',
+    privacyLabel: 'Уведомление о конфиденциальности',
+    privacyHref: '/ru/privacy',
   },
   footer: {
-    tagline: 'AI-сотрудники для продаж и поддержки.',
+    tagline: 'AI-администраторы для клиник и сервисного бизнеса.',
     badges: [
       'Внедрение под ключ',
       'Сопровождение после запуска',
       'Под задачи бизнеса',
     ],
+    privacyLabel: 'Конфиденциальность',
   },
   liveChat: {
     introMessage:

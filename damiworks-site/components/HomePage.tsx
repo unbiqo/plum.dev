@@ -9,6 +9,7 @@ import PricingSection from '@/components/PricingSection'
 import ContactSection from '@/components/ContactSection'
 import Footer from '@/components/Footer'
 import ScrollReveal from '@/components/ScrollReveal'
+import { EvidenceSection, FaqSection, FounderSection } from '@/components/TrustFirstSections'
 import {
   AutomateSection,
   PainSection,
@@ -26,8 +27,41 @@ type Props = { locale: Locale; dict: Dict }
 export default function HomePage({ locale, dict }: Props) {
   const pricing = SHOW_PUBLIC_PRICING ? dict.pricing : { ...dict.pricing, plans: [] }
 
+  if (locale === 'ru') {
+    return (
+      <main lang="ru">
+        <Header
+          locale={locale}
+          nav={dict.nav}
+          site={dict.site}
+          bookACallLabel={dict.bookACallLabel}
+          langSwitcher={dict.langSwitcher}
+        />
+        <Hero dict={dict.hero} />
+        <DemoSection
+          dict={dict.demo}
+          locale={locale}
+          liveChat={dict.liveChat}
+          customDemoChat={dict.customDemoChat}
+          intake={dict.intake}
+        />
+        <EvidenceSection dict={dict.evidence} />
+        <HowItWorks dict={dict.howItWorks} />
+        <AutomateSection dict={dict.automate} />
+        <PricingSection dict={pricing} />
+        <ValuePropSection dict={dict.valueProp} />
+        <WhatWeNeedSection dict={dict.whatWeNeed} />
+        <TrustSection dict={dict.trust} />
+        <FounderSection dict={dict.founder} />
+        <FaqSection dict={dict.faq} />
+        <ContactSection dict={dict.contact} />
+        <Footer dict={dict.footer} site={dict.site} />
+      </main>
+    )
+  }
+
   return (
-    <main>
+    <main lang="en">
       <Header
         locale={locale}
         nav={dict.nav}

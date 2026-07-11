@@ -7,6 +7,9 @@ export default function Footer({ dict, site }: { dict: DictFooter; site: DictSit
         <div>
           <div className="font-semibold text-primary">{site.name}</div>
           <p className="text-sm text-secondary mt-1">{dict.tagline}</p>
+          <a href={dict.privacyLabel === 'Privacy' ? '/privacy' : '/ru/privacy'} className="mt-3 inline-block text-xs text-secondary underline decoration-border-col underline-offset-2 hover:text-primary">
+            {dict.privacyLabel}
+          </a>
         </div>
         <div className="flex flex-wrap gap-2 justify-center md:justify-end">
           {dict.badges.map((badge) => (

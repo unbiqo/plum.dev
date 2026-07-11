@@ -3,9 +3,9 @@ import { getDict } from '@/lib/i18n'
 import HomePage from '@/components/HomePage'
 
 export const metadata: Metadata = {
-  title: 'DamiWorks — AI-сотрудники для продаж и поддержки',
+  title: 'AI-администратор для клиник и стоматологий — DamiWorks',
   description:
-    'AI-сотрудники для WhatsApp, Instagram и сайта: отвечают клиентам, квалифицируют заявки и передают тёплые лиды менеджеру.',
+    'AI-администратор отвечает пациентам 24/7, помогает выбрать специалиста и передаёт клинике готовые заявки на запись.',
 }
 
 export default function RuPage() {

@@ -22,7 +22,7 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
     setLoading(true)
     setError(null)
     try {
-      await fetch('/api/contact', {
+      const response = await fetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -32,6 +32,7 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
           message: form.message || undefined,
         }),
       })
+      if (!response.ok) throw new Error('contact_delivery_failed')
       setSubmitted(true)
     } catch {
       setError(dict.errorMessage ?? 'Something went wrong. Please try again.')
@@ -98,24 +99,36 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <input
-                    required
-                    placeholder={dict.placeholderName}
-                    value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className={inputClass}
-                  />
-                  <input
-                    required
-                    placeholder={dict.placeholderContact}
-                    value={form.contact}
-                    onChange={(e) => setForm({ ...form, contact: e.target.value })}
-                    className={inputClass}
-                  />
+                  <label>
+                    <span className="sr-only">{dict.placeholderName}</span>
+                    <input
+                      required
+                      name="name"
+                      autoComplete="name"
+                      placeholder={dict.placeholderName}
+                      value={form.name}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      className={inputClass}
+                    />
+                  </label>
+                  <label>
+                    <span className="sr-only">{dict.placeholderContact}</span>
+                    <input
+                      required
+                      name="contact"
+                      autoComplete="tel"
+                      placeholder={dict.placeholderContact}
+                      value={form.contact}
+                      onChange={(e) => setForm({ ...form, contact: e.target.value })}
+                      className={inputClass}
+                    />
+                  </label>
                 </div>
                 <div className="relative">
+                  <label htmlFor="business-type" className="sr-only">{dict.placeholderBusinessType}</label>
                   <select
-                    required
+                    id="business-type"
+                    name="businessType"
                     value={form.businessType}
                     onChange={(e) => setForm({ ...form, businessType: e.target.value })}
                     className={`${inputClass} appearance-none cursor-pointer pr-10`}
@@ -133,6 +146,7 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
                   />
                 </div>
                 <textarea
+                  name="message"
                   rows={5}
                   placeholder={dict.placeholderMessage}
                   value={form.message}
@@ -150,6 +164,12 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
                 >
                   {loading ? '...' : dict.submitButton}
                 </button>
+                <p className="text-xs leading-relaxed text-secondary">
+                  {dict.consentText}{' '}
+                  <a href={dict.privacyHref} className="underline decoration-border-col underline-offset-2 hover:text-primary">
+                    {dict.privacyLabel}
+                  </a>
+                </p>
               </form>
             </div>
           )}

@@ -22,8 +22,13 @@ export async function POST(req: NextRequest) {
   }
 
   const fastApiUrl = process.env.FASTAPI_URL ?? (process.env.NODE_ENV === 'production' ? null : 'http://localhost:8010')
+  if (!fastApiUrl) {
+    console.error('[contact] FASTAPI_URL is not configured')
+    return NextResponse.json({ error: 'contact_service_not_configured' }, { status: 503 })
+  }
+
   try {
-    await fetch(`${fastApiUrl}/api/v1/contact`, {
+    const upstream = await fetch(`${fastApiUrl}/api/v1/contact`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -33,8 +38,13 @@ export async function POST(req: NextRequest) {
         message: message ?? null,
       }),
     })
+    if (!upstream.ok) {
+      console.error('[contact] backend rejected request status=%s', upstream.status)
+      return NextResponse.json({ error: 'contact_delivery_failed' }, { status: 502 })
+    }
   } catch {
-    console.error('[contact] forward to backend failed for name:', name)
+    console.error('[contact] backend is unreachable')
+    return NextResponse.json({ error: 'contact_service_unreachable' }, { status: 503 })
   }
 
   return NextResponse.json({ ok: true })
