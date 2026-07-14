@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Privacy notice — DamiWorks',
+  title: 'Privacy notice | DamiWorks',
   description: 'How DamiWorks uses contact details submitted through the website.',
 }
 

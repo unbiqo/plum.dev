@@ -1,7 +1,16 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import Image from 'next/image'
 import { ArrowRight, CheckCircle2, Eye, ShieldCheck, UserRound, Workflow } from 'lucide-react'
 import type { DictEvidence, DictFaq, DictFounder } from '@/lib/i18n'
 
 const EVIDENCE_ICONS = [Eye, ShieldCheck, Workflow, CheckCircle2]
+
+// A real photo builds more trust than a letter avatar. Drop founder.jpg/png/webp
+// into public/ and it replaces the fallback (dev server restart required).
+const FOUNDER_PHOTO = ['founder.jpg', 'founder.png', 'founder.webp'].find((name) =>
+  fs.existsSync(path.join(process.cwd(), 'public', name)),
+)
 
 export function EvidenceSection({ dict }: { dict: DictEvidence }) {
   return (
@@ -46,9 +55,19 @@ export function FounderSection({ dict }: { dict: DictFounder }) {
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 lg:grid-cols-[0.75fr_1.25fr] lg:items-center">
         <div className="rounded-2xl border border-border-col bg-surface p-7">
           <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-accent-soft text-xl font-bold text-accent">
-              Д
-            </div>
+            {FOUNDER_PHOTO ? (
+              <Image
+                src={`/${FOUNDER_PHOTO}`}
+                alt={dict.name}
+                width={56}
+                height={56}
+                className="h-14 w-14 shrink-0 rounded-2xl object-cover"
+              />
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-accent-soft text-xl font-bold text-accent">
+                Д
+              </div>
+            )}
             <div>
               <p className="font-bold text-primary">{dict.name}</p>
               <p className="mt-1 text-sm text-secondary">{dict.role}</p>

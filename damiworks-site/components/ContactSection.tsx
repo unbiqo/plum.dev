@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { Calendar, CheckCircle2, ChevronDown } from 'lucide-react'
+import { Calendar, CheckCircle2, ChevronDown, MessageCircle } from 'lucide-react'
 import type { DictContact } from '@/lib/i18n'
 import { CALENDLY_URL } from '@/lib/calendly'
+import { WHATSAPP_URL } from '@/lib/whatsapp'
 
 export default function ContactSection({ dict }: { dict: DictContact }) {
   const [form, setForm] = useState({
@@ -68,19 +69,34 @@ export default function ContactSection({ dict }: { dict: DictContact }) {
             </ul>
 
             <p className="text-sm text-secondary mt-5">{dict.note}</p>
-            {/* Calendly is the primary conversion path — hidden when the URL is unset. */}
-            {CALENDLY_URL && (
+            {/* Calendly is the primary conversion path, WhatsApp the lowest-friction one — each hidden when its URL is unset. */}
+            {(CALENDLY_URL || WHATSAPP_URL) && (
               <div className="mt-8">
-                <a
-                  href={CALENDLY_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-12 items-center justify-center gap-2 bg-accent text-white rounded-xl px-6 py-3 font-semibold text-sm hover:opacity-90 transition-opacity"
-                >
-                  <Calendar className="h-4 w-4" aria-hidden="true" />
-                  {dict.calendlyButton}
-                </a>
-                <p className="text-sm text-secondary mt-4">{dict.calendlySubtext}</p>
+                <div className="flex flex-wrap gap-3">
+                  {CALENDLY_URL && (
+                    <a
+                      href={CALENDLY_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-12 items-center justify-center gap-2 bg-accent text-white rounded-xl px-6 py-3 font-semibold text-sm hover:opacity-90 transition-opacity"
+                    >
+                      <Calendar className="h-4 w-4" aria-hidden="true" />
+                      {dict.calendlyButton}
+                    </a>
+                  )}
+                  {WHATSAPP_URL && (
+                    <a
+                      href={WHATSAPP_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-12 items-center justify-center gap-2 bg-surface text-primary rounded-xl px-6 py-3 font-semibold text-sm border border-border-col hover:bg-bg transition-colors"
+                    >
+                      <MessageCircle className="h-4 w-4 text-accent" aria-hidden="true" />
+                      {dict.whatsappButton}
+                    </a>
+                  )}
+                </div>
+                {CALENDLY_URL && <p className="text-sm text-secondary mt-4">{dict.calendlySubtext}</p>}
               </div>
             )}
           </div>

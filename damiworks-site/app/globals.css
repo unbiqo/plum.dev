@@ -5,3 +5,109 @@
 html {
   scroll-behavior: smooth;
 }
+
+.hero-flow-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.86;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 16%, black 86%, transparent 100%);
+}
+
+.hero-flow-background svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hero-flow-lines path {
+  fill: none;
+  stroke: url(#flowLine);
+  stroke-width: 1;
+  stroke-dasharray: 4 11;
+}
+
+.hero-flow-packets circle {
+  fill: #d77855;
+  opacity: 0.46;
+}
+
+.hero-flow-nodes circle {
+  fill: #faf7f5;
+  stroke: #d77855;
+  stroke-width: 1;
+  opacity: 0.2;
+}
+
+.hero-flow-glow {
+  position: absolute;
+  width: 26rem;
+  height: 26rem;
+  border-radius: 9999px;
+  background: rgba(215, 120, 85, 0.07);
+  filter: blur(70px);
+  animation: hero-flow-drift 18s ease-in-out infinite alternate;
+}
+
+.hero-flow-glow-one {
+  top: -10rem;
+  right: 12%;
+}
+
+.hero-flow-glow-two {
+  bottom: -16rem;
+  left: 28%;
+  animation-delay: -9s;
+}
+
+@keyframes hero-flow-drift {
+  from {
+    transform: translate3d(-2%, -2%, 0) scale(0.96);
+  }
+  to {
+    transform: translate3d(4%, 5%, 0) scale(1.05);
+  }
+}
+
+@media (max-width: 767px) {
+  .hero-flow-background {
+    opacity: 0.58;
+  }
+
+  .hero-flow-background svg {
+    width: 190%;
+    transform: translateX(-32%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-flow-packets,
+  .hero-flow-glow {
+    display: none;
+  }
+}
+
+/* StaggerReveal: children with data-stagger-item cascade in one after another
+   once the wrapper enters the viewport (index via inline --stagger-i). */
+.stagger [data-stagger-item] {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+  transition-delay: calc(var(--stagger-i, 0) * 140ms);
+}
+
+.stagger-visible [data-stagger-item] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger [data-stagger-item] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}

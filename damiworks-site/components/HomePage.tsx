@@ -9,7 +9,12 @@ import PricingSection from '@/components/PricingSection'
 import ContactSection from '@/components/ContactSection'
 import Footer from '@/components/Footer'
 import ScrollReveal from '@/components/ScrollReveal'
-import { EvidenceSection, FaqSection, FounderSection } from '@/components/TrustFirstSections'
+import MessageToLeadSection from '@/components/MessageToLeadSection'
+import AdminHandoffSection from '@/components/AdminHandoffSection'
+import LaunchKitSection from '@/components/LaunchKitSection'
+import SafetyFlowSection from '@/components/SafetyFlowSection'
+import LaunchSection from '@/components/LaunchSection'
+import { FaqSection, FounderSection } from '@/components/TrustFirstSections'
 import {
   AutomateSection,
   PainSection,
@@ -27,34 +32,55 @@ type Props = { locale: Locale; dict: Dict }
 export default function HomePage({ locale, dict }: Props) {
   const pricing = SHOW_PUBLIC_PRICING ? dict.pricing : { ...dict.pricing, plans: [] }
 
+  // RU narrative (the sales funnel, kept tight): pain hero -> message-to-lead
+  // contrast -> live demo proof -> what the administrator receives (dark) ->
+  // what a launch includes (systems diagram) -> safety decision-flow ->
+  // turnkey launch with price -> trust block (founder, FAQ) -> final CTA.
   if (locale === 'ru') {
     return (
       <main lang="ru">
         <Header
           locale={locale}
-          nav={dict.nav}
+          nav={[]}
+          demoLink={{ label: dict.headerDemoLabel, href: '#demo' }}
           site={dict.site}
           bookACallLabel={dict.bookACallLabel}
           langSwitcher={dict.langSwitcher}
         />
         <Hero dict={dict.hero} />
-        <DemoSection
-          dict={dict.demo}
-          locale={locale}
-          liveChat={dict.liveChat}
-          customDemoChat={dict.customDemoChat}
-          intake={dict.intake}
-        />
-        <EvidenceSection dict={dict.evidence} />
-        <HowItWorks dict={dict.howItWorks} />
-        <AutomateSection dict={dict.automate} />
-        <PricingSection dict={pricing} />
-        <ValuePropSection dict={dict.valueProp} />
-        <WhatWeNeedSection dict={dict.whatWeNeed} />
-        <TrustSection dict={dict.trust} />
-        <FounderSection dict={dict.founder} />
-        <FaqSection dict={dict.faq} />
-        <ContactSection dict={dict.contact} />
+        <ScrollReveal>
+          <MessageToLeadSection dict={dict.messageToLead} />
+        </ScrollReveal>
+        <ScrollReveal>
+          <DemoSection
+            dict={dict.demo}
+            locale={locale}
+            liveChat={dict.liveChat}
+            customDemoChat={dict.customDemoChat}
+            intake={dict.intake}
+          />
+        </ScrollReveal>
+        <ScrollReveal>
+          <AdminHandoffSection dict={dict.adminHandoff} />
+        </ScrollReveal>
+        <ScrollReveal>
+          <LaunchKitSection dict={dict.launchKit} />
+        </ScrollReveal>
+        <ScrollReveal>
+          <SafetyFlowSection dict={dict.safetyFlow} />
+        </ScrollReveal>
+        <ScrollReveal>
+          <LaunchSection dict={dict.launch} />
+        </ScrollReveal>
+        <ScrollReveal>
+          <FounderSection dict={dict.founder} />
+        </ScrollReveal>
+        <ScrollReveal>
+          <FaqSection dict={dict.faq} />
+        </ScrollReveal>
+        <ScrollReveal>
+          <ContactSection dict={dict.contact} />
+        </ScrollReveal>
         <Footer dict={dict.footer} site={dict.site} />
       </main>
     )

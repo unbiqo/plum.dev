@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Уведомление о конфиденциальности — DamiWorks',
-  description: 'Как DamiWorks использует контактные данные, отправленные через сайт.',
+  title: 'Уведомление о конфиденциальности | DamiWorks',
+  description: 'Как я использую контактные данные, отправленные через сайт.',
 }
 
 export default function PrivacyPage() {
@@ -15,12 +15,12 @@ export default function PrivacyPage() {
 
         <div className="mt-10 space-y-8 text-sm leading-relaxed text-secondary">
           <section>
-            <h2 className="text-lg font-semibold text-primary">Какие данные мы получаем</h2>
-            <p className="mt-2">Через форму на сайте DamiWorks получает имя, контакт в WhatsApp или Telegram, выбранный тип бизнеса и комментарий, если вы его оставили.</p>
+            <h2 className="text-lg font-semibold text-primary">Какие данные я получаю</h2>
+            <p className="mt-2">Форма передаёт мне ваше имя, контакт в WhatsApp или Telegram, тип бизнеса и необязательный комментарий.</p>
           </section>
           <section>
             <h2 className="text-lg font-semibold text-primary">Зачем используются данные</h2>
-            <p className="mt-2">Только чтобы ответить на вашу заявку, обсудить возможный пилот и сохранить контекст договорённостей. Мы не продаём контактные данные третьим лицам.</p>
+            <p className="mt-2">Использую данные только для ответа на заявку и обсуждения пилота. Не продаю контакты третьим лицам.</p>
           </section>
           <section>
             <h2 className="text-lg font-semibold text-primary">Данные в демочате</h2>
@@ -28,11 +28,11 @@ export default function PrivacyPage() {
           </section>
           <section>
             <h2 className="text-lg font-semibold text-primary">Передача и хранение</h2>
-            <p className="mt-2">Контактная заявка передаётся в рабочую систему DamiWorks, необходимую для ответа. Конкретные правила обработки данных для будущего пилота согласуются с клиникой отдельно до подключения реальных обращений.</p>
+            <p className="mt-2">Заявка попадает в мою рабочую систему. Правила обработки данных для пилота согласуем отдельно до подключения реальных обращений.</p>
           </section>
           <section>
             <h2 className="text-lg font-semibold text-primary">Ваши запросы</h2>
-            <p className="mt-2">Вы можете попросить уточнить, исправить или удалить отправленные контактные данные, написав DamiWorks через тот же канал связи, который использовался после заявки.</p>
+            <p className="mt-2">Вы можете попросить уточнить, исправить или удалить контактные данные. Напишите мне через тот же канал, который использовался после заявки.</p>
           </section>
         </div>
       </article>

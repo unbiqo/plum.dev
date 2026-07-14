@@ -1,11 +1,14 @@
 import type { DictHero } from '@/lib/i18n'
 import HeroChatPreview from '@/components/HeroChatPreview'
-import { Check } from 'lucide-react'
+import HeroFlowBackground from '@/components/HeroFlowBackground'
+import { Check, MessageCircle } from 'lucide-react'
+import { WHATSAPP_URL } from '@/lib/whatsapp'
 
 export default function Hero({ dict }: { dict: DictHero }) {
   return (
-    <section className="bg-bg py-20 lg:py-28">
-      <div className="max-w-6xl mx-auto px-6">
+    <section className="relative isolate overflow-hidden bg-bg py-20 lg:py-28">
+      <HeroFlowBackground />
+      <div className="relative z-10 max-w-6xl mx-auto px-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
 
           {/* Left column */}
@@ -35,6 +38,18 @@ export default function Hero({ dict }: { dict: DictHero }) {
               >
                 {dict.ctaSecondary.label}
               </a>
+              {/* WhatsApp is the lowest-friction channel for the KZ market — hidden when the URL is unset. */}
+              {WHATSAPP_URL && (
+                <a
+                  href={WHATSAPP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-surface text-primary font-medium px-6 py-3 rounded-xl border border-border-col hover:bg-bg transition-colors"
+                >
+                  <MessageCircle size={16} className="text-accent" aria-hidden="true" />
+                  {dict.whatsappCta}
+                </a>
+              )}
             </div>
             {dict.trustBadges.length > 0 && (
               <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2">

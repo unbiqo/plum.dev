@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Send } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CheckCircle2, Send } from 'lucide-react'
 import type { DictDemo, DictDemoScenario, DictLiveChat, DictCustomDemoChat, DictIntake, Locale } from '@/lib/i18n'
 import LiveChat, { type LiveChatSnapshot } from '@/components/LiveChat'
 import CustomDemoChat from '@/components/CustomDemoChat'
@@ -257,8 +257,23 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
   const handleMedicalConversationUpdate = useCallback((messages: MedicalMessage[]) => {
     setMedicalMessages(messages)
   }, [])
+  const [mobileSummaryOpen, setMobileSummaryOpen] = useState(false)
+  const summaryAutoOpenedRef = useRef(false)
   const handleMedicalStateUpdate = useCallback((state: MedicalBackendState) => {
     setMedicalState(state)
+    // Auto-open the mobile summary once the заявка starts filling — the
+    // visitor should see the result, not just the chat. Only once, so a
+    // manual close is respected afterwards.
+    if (
+      !summaryAutoOpenedRef.current &&
+      (state.specialty ||
+        state.symptomsOrGoal ||
+        state.preferredTime ||
+        (state.leadStatus && state.leadStatus !== 'open'))
+    ) {
+      summaryAutoOpenedRef.current = true
+      setMobileSummaryOpen(true)
+    }
   }, [])
   const isConsultant = selectedId === DAMIWORKS_TAB_ID
   const isEnglishSchool = selectedId === ENGLISH_SCHOOL_TAB_ID
@@ -325,6 +340,16 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
         <div className="text-center mb-12">
           <h2 className="text-3xl lg:text-4xl font-bold text-primary mb-3">{dict.headline}</h2>
           <p className="text-secondary text-lg">{dict.subheadline}</p>
+          {dict.proofPoints && dict.proofPoints.length > 0 && (
+            <ul className="mt-5 flex flex-wrap justify-center gap-x-6 gap-y-2">
+              {dict.proofPoints.map((point) => (
+                <li key={point} className="flex items-center gap-1.5 text-sm font-medium text-secondary">
+                  <CheckCircle2 size={15} className="shrink-0 text-accent" aria-hidden="true" />
+                  {point}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[200px_1fr_260px]">
@@ -360,7 +385,11 @@ export default function DemoSection({ dict, locale, liveChat, customDemoChat, in
             ))}
           </div>
 
-          <details className="group rounded-2xl border border-accent/25 bg-accent-soft/40 lg:hidden">
+          <details
+            className="group rounded-2xl border border-accent/25 bg-accent-soft/40 lg:hidden"
+            open={mobileSummaryOpen}
+            onToggle={(event) => setMobileSummaryOpen((event.target as HTMLDetailsElement).open)}
+          >
             <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-primary marker:hidden">
               {dict.mobileSummaryLabel}
               <span className="text-lg font-normal text-accent transition-transform group-open:rotate-45" aria-hidden="true">+</span>

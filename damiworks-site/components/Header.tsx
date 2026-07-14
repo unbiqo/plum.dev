@@ -36,10 +36,14 @@ type Props = {
   site: DictSite
   bookACallLabel: string
   langSwitcher: DictLangSwitcher
+  // Minimal (demo-first) header: pass nav={[]} plus a demoLink — no menu and
+  // no hamburger on any breakpoint, just brand + demo link + lang + CTA.
+  demoLink?: DictNavLink
 }
 
-export default function Header({ locale, nav, site, bookACallLabel, langSwitcher }: Props) {
+export default function Header({ locale, nav, site, bookACallLabel, langSwitcher, demoLink }: Props) {
   const [open, setOpen] = useState(false)
+  const hasNav = nav.length > 0
 
   return (
     <header className="sticky top-0 z-50 bg-surface border-b border-border-col">
@@ -48,19 +52,29 @@ export default function Header({ locale, nav, site, bookACallLabel, langSwitcher
           {site.name}
         </a>
 
-        <nav className="hidden md:flex items-center gap-8">
-          {nav.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className="text-sm text-secondary hover:text-primary transition-colors"
-            >
-              {link.label}
-            </a>
-          ))}
-        </nav>
+        {hasNav && (
+          <nav className="hidden md:flex items-center gap-8">
+            {nav.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="text-sm text-secondary hover:text-primary transition-colors"
+              >
+                {link.label}
+              </a>
+            ))}
+          </nav>
+        )}
 
-        <div className="hidden md:flex items-center gap-4">
+        <div className={`${hasNav ? 'hidden md:flex' : 'flex'} items-center gap-3 md:gap-4`}>
+          {demoLink && (
+            <a
+              href={demoLink.href}
+              className="hidden sm:inline text-sm font-medium text-secondary hover:text-primary transition-colors"
+            >
+              {demoLink.label}
+            </a>
+          )}
           <LangSwitcher locale={locale} labels={langSwitcher} />
           <a
             href="#contact"
@@ -70,17 +84,19 @@ export default function Header({ locale, nav, site, bookACallLabel, langSwitcher
           </a>
         </div>
 
-        <button
-          className="md:hidden text-secondary p-1"
-          onClick={() => setOpen(!open)}
-          aria-label={locale === 'ru' ? 'Открыть меню' : 'Toggle menu'}
-          aria-expanded={open}
-        >
-          {open ? <X size={22} /> : <Menu size={22} />}
-        </button>
+        {hasNav && (
+          <button
+            className="md:hidden text-secondary p-1"
+            onClick={() => setOpen(!open)}
+            aria-label={locale === 'ru' ? 'Открыть меню' : 'Toggle menu'}
+            aria-expanded={open}
+          >
+            {open ? <X size={22} /> : <Menu size={22} />}
+          </button>
+        )}
       </div>
 
-      {open && (
+      {hasNav && open && (
         <div className="md:hidden bg-surface border-t border-border-col px-6 py-4 flex flex-col gap-4">
           {nav.map((link) => (
             <a
