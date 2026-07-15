@@ -47,29 +47,45 @@ export default function HeroTest({ dict, medicalChat, medicalSummary }: Props) {
     }
   }, [])
 
+  const hasMobileHeadline = Boolean(dict.mobileHeadlinePart1)
+
   return (
-    <section id="demo" className="scroll-mt-20 relative isolate overflow-hidden bg-bg pt-14 pb-16 lg:pt-20 lg:pb-24">
+    <section id="demo" className="scroll-mt-20 relative isolate overflow-hidden bg-bg pt-8 pb-10 sm:pt-14 sm:pb-16 lg:pt-20 lg:pb-24">
       <HeroFlowBackground />
       <div className="hero-test-glow" aria-hidden="true" />
 
       <div className="relative z-10 mx-auto max-w-6xl px-6">
-        {/* Headline — mobile gets its own shorter copy, single h1/p for a11y */}
+        {/* Headline — mobile gets its own shorter, tighter-set copy, single h1/p for a11y */}
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="text-3xl font-bold leading-tight text-primary sm:text-4xl lg:text-5xl">
-            {dict.mobileHeadline && <span className="sm:hidden">{dict.mobileHeadline}</span>}
-            <span className={dict.mobileHeadline ? 'hidden sm:inline' : undefined}>
+            {hasMobileHeadline && (
+              <span
+                className="sm:hidden block mx-auto"
+                style={{
+                  fontSize: 'clamp(34px, 8.5vw, 42px)',
+                  lineHeight: 1.04,
+                  letterSpacing: '-0.045em',
+                  maxWidth: '370px',
+                  textWrap: 'balance',
+                }}
+              >
+                {dict.mobileHeadlinePart1}
+                <span className="text-accent">{dict.mobileHeadlineAccent}</span>
+              </span>
+            )}
+            <span className={hasMobileHeadline ? 'hidden sm:inline' : undefined}>
               {dict.headlinePart1}
               <span className="text-accent">{dict.headlineAccent}</span>
             </span>
           </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-secondary lg:text-lg">
+          <p className="mx-auto mt-3 max-w-2xl text-base leading-relaxed text-secondary sm:mt-4 lg:text-lg">
             {dict.mobileSubheadline && <span className="sm:hidden">{dict.mobileSubheadline}</span>}
             <span className={dict.mobileSubheadline ? 'hidden sm:inline' : undefined}>{dict.subheadline}</span>
           </p>
         </div>
 
         {/* Test surface */}
-        <div className="relative mt-10">
+        <div className="relative mt-6 sm:mt-10">
           {/* Floating context chips — decorative, desktop only */}
           <ul className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
             {dict.chips.map((chip, i) => (
@@ -82,8 +98,8 @@ export default function HeroTest({ dict, medicalChat, medicalSummary }: Props) {
             ))}
           </ul>
 
-          <div className="mx-auto max-w-5xl rounded-3xl border border-border-col bg-surface/70 p-3 shadow-lg shadow-accent/5 backdrop-blur-sm sm:p-4 lg:p-5">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+          <div className="mx-auto max-w-5xl rounded-3xl p-0 sm:border sm:border-border-col sm:bg-surface/70 sm:p-4 sm:shadow-lg sm:shadow-accent/5 sm:backdrop-blur-sm lg:p-5">
+            <div className="mb-3 hidden flex-wrap items-center justify-between gap-2 px-1 sm:flex">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent">
                 <Zap size={12} aria-hidden="true" />
                 {dict.liveHint}

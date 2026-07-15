@@ -88,8 +88,10 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
         // ignore corrupt storage
       }
     }
-    setMessages([{ id: createMessageId('medical'), from: 'ai', text: dict.introMessage }])
-  }, [dict.introMessage])
+    const isMobile = window.matchMedia('(max-width: 639px)').matches
+    const intro = isMobile && dict.mobileIntroMessage ? dict.mobileIntroMessage : dict.introMessage
+    setMessages([{ id: createMessageId('medical'), from: 'ai', text: intro }])
+  }, [dict.introMessage, dict.mobileIntroMessage])
 
   // ------------ sessionStorage persistence ------------
 
@@ -191,7 +193,9 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
     const session = resetChatSession(MEDICAL_INSTANCE_ID)
     sessionStorage.removeItem(MESSAGES_SESSION_KEY)
     setChatId(session.chat_id)
-    setMessages([{ id: createMessageId('medical'), from: 'ai', text: dict.introMessage }])
+    const isMobile = window.matchMedia('(max-width: 639px)').matches
+    const intro = isMobile && dict.mobileIntroMessage ? dict.mobileIntroMessage : dict.introMessage
+    setMessages([{ id: createMessageId('medical'), from: 'ai', text: intro }])
     setInput('')
     setError(null)
   }
@@ -209,7 +213,7 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
   // ------------ render ------------
 
   return (
-    <div className="bg-surface border border-border-col rounded-2xl flex flex-col min-h-[480px] sm:min-h-[400px] overflow-hidden">
+    <div className="bg-surface border border-border-col rounded-2xl flex flex-col min-h-[360px] sm:min-h-[400px] overflow-hidden">
       {/* Header */}
       <div className="px-4 py-3 border-b border-border-col flex items-center gap-3">
         <div className="w-7 h-7 rounded-full bg-accent-soft flex items-center justify-center text-accent text-[10px] font-bold flex-shrink-0">
@@ -224,7 +228,7 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
         </div>
         <button
           onClick={reset}
-          className="flex items-center gap-1 text-xs text-secondary hover:text-primary transition-colors flex-shrink-0"
+          className="flex items-center gap-1 text-xs text-secondary/60 hover:text-primary transition-colors flex-shrink-0 sm:text-secondary"
           title={dict.resetTitle}
         >
           <RotateCcw size={12} />
@@ -235,7 +239,7 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
       {/* Messages */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[460px] sm:max-h-[380px]"
+        className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[320px] sm:max-h-[380px]"
       >
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}>

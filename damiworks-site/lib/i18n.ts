@@ -64,8 +64,10 @@ export interface DictHeroTest {
   headlineAccent: string
   subheadline: string
   // Mobile-only headline/subheadline override — falls back to the desktop
-  // headlinePart1/headlineAccent/subheadline when omitted.
-  mobileHeadline?: string
+  // headlinePart1/headlineAccent/subheadline when omitted. Headline is split
+  // the same way as the desktop one so the tail can be accented.
+  mobileHeadlinePart1?: string
+  mobileHeadlineAccent?: string
   mobileSubheadline?: string
   scenarioNote: string
   summaryLabel: string
@@ -341,6 +343,8 @@ export interface DictMedicalChatLabels {
   resetLabel: string
   errorMessage: string
   introMessage: string
+  // Shorter first AI message shown on mobile — falls back to introMessage.
+  mobileIntroMessage?: string
   quickReplies: string[]
   // Staged loading lines shown while the backend thinks — sells the process.
   // Falls back to plain typing dots when omitted.
@@ -1598,9 +1602,10 @@ const ru: Dict = {
     headlineAccent: 'Посмотрите, как AI ведёт диалог.',
     subheadline:
       'DamiWorks отвечает пациентам в WhatsApp, Instagram и на сайте, уточняет запрос и собирает готовую заявку для вашей команды.',
-    mobileHeadline: 'Не теряйте пациента после первого сообщения',
+    mobileHeadlinePart1: 'Не теряйте пациента ',
+    mobileHeadlineAccent: 'после первого сообщения',
     mobileSubheadline:
-      'Проверьте, как ассистент ведёт диалог с клиентом, помогает принять решение и собирает готовую заявку.',
+      'Проверьте, как AI ведёт первый диалог с пациентом и собирает заявку для администратора.',
     scenarioNote: 'Пример: многопрофильная клиника MedNova',
     summaryLabel: 'Что получит администратор',
     ctaSecondary: { label: 'Обсудить запуск', href: '#contact' },
@@ -2053,6 +2058,7 @@ const ru: Dict = {
       errorMessage: 'Что-то пошло не так. Попробуйте ещё раз.',
       introMessage:
         'Здравствуйте! 💚 Меня зовут Айгуль, я администратор MedNova Clinic. Помогу подобрать врача, сориентировать по стоимости и записать на приём. Подскажите, пожалуйста, пациент взрослый или ребёнок, и что вас беспокоит?',
+      mobileIntroMessage: 'Здравствуйте! Помогу с записью, ценами и выбором специалиста. Что вас интересует?',
       quickReplies: [
         'Сколько стоит консультация?',
         'К какому врачу записаться?',
