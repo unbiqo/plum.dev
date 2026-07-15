@@ -63,6 +63,10 @@ export interface DictHeroTest {
   headlinePart1: string
   headlineAccent: string
   subheadline: string
+  // Mobile-only headline/subheadline override — falls back to the desktop
+  // headlinePart1/headlineAccent/subheadline when omitted.
+  mobileHeadline?: string
+  mobileSubheadline?: string
   scenarioNote: string
   summaryLabel: string
   ctaSecondary: { label: string; href: string }
@@ -1590,10 +1594,13 @@ const ru: Dict = {
     },
   },
   heroTest: {
-    headlinePart1: 'Напишите как пациент. ',
-    headlineAccent: 'Посмотрите, что получит администратор.',
+    headlinePart1: 'Побудьте пациентом. ',
+    headlineAccent: 'Посмотрите, как AI ведёт диалог.',
     subheadline:
       'DamiWorks отвечает пациентам в WhatsApp, Instagram и на сайте, уточняет запрос и собирает готовую заявку для вашей команды.',
+    mobileHeadline: 'Не теряйте пациента после первого сообщения',
+    mobileSubheadline:
+      'Проверьте, как ассистент ведёт диалог с клиентом, помогает принять решение и собирает готовую заявку.',
     scenarioNote: 'Пример: многопрофильная клиника MedNova',
     summaryLabel: 'Что получит администратор',
     ctaSecondary: { label: 'Обсудить запуск', href: '#contact' },

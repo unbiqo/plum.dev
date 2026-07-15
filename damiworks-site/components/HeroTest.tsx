@@ -53,14 +53,18 @@ export default function HeroTest({ dict, medicalChat, medicalSummary }: Props) {
       <div className="hero-test-glow" aria-hidden="true" />
 
       <div className="relative z-10 mx-auto max-w-6xl px-6">
-        {/* Headline */}
+        {/* Headline — mobile gets its own shorter copy, single h1/p for a11y */}
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="text-3xl font-bold leading-tight text-primary sm:text-4xl lg:text-5xl">
-            {dict.headlinePart1}
-            <span className="text-accent">{dict.headlineAccent}</span>
+            {dict.mobileHeadline && <span className="sm:hidden">{dict.mobileHeadline}</span>}
+            <span className={dict.mobileHeadline ? 'hidden sm:inline' : undefined}>
+              {dict.headlinePart1}
+              <span className="text-accent">{dict.headlineAccent}</span>
+            </span>
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-secondary lg:text-lg">
-            {dict.subheadline}
+            {dict.mobileSubheadline && <span className="sm:hidden">{dict.mobileSubheadline}</span>}
+            <span className={dict.mobileSubheadline ? 'hidden sm:inline' : undefined}>{dict.subheadline}</span>
           </p>
         </div>
 
