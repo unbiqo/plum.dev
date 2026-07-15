@@ -42,6 +42,20 @@ type Props = {
   onStateUpdate?: (state: MedicalBackendState) => void
 }
 
+// Rotates through dict.loadingStages while the backend thinks — the wait
+// itself narrates the product ("AI reads the question… builds the summary…").
+function LoadingStages({ stages }: { stages: string[] }) {
+  const [stageIdx, setStageIdx] = useState(0)
+
+  useEffect(() => {
+    if (stageIdx >= stages.length - 1) return
+    const id = setTimeout(() => setStageIdx((i) => i + 1), 1600)
+    return () => clearTimeout(id)
+  }, [stageIdx, stages.length])
+
+  return <span className="text-xs text-secondary">{stages[stageIdx]}</span>
+}
+
 export default function MedicalCenterChat({ dict, onConversationUpdate, onStateUpdate }: Props) {
   const [messages, setMessages] = useState<MedicalMessage[]>([])
   const [input, setInput] = useState('')
@@ -250,10 +264,15 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
 
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-bg border border-border-col rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-bounce [animation-delay:0ms]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-bounce [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-bounce [animation-delay:300ms]" />
+            <div className="bg-bg border border-border-col rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-2">
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-bounce [animation-delay:300ms]" />
+              </span>
+              {dict.loadingStages && dict.loadingStages.length > 0 && (
+                <LoadingStages stages={dict.loadingStages} />
+              )}
             </div>
           </div>
         )}

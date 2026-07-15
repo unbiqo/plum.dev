@@ -9,7 +9,8 @@ import PricingSection from '@/components/PricingSection'
 import ContactSection from '@/components/ContactSection'
 import Footer from '@/components/Footer'
 import ScrollReveal from '@/components/ScrollReveal'
-import MessageToLeadSection from '@/components/MessageToLeadSection'
+import HeroTest from '@/components/HeroTest'
+import BackstageStrip from '@/components/BackstageStrip'
 import AdminHandoffSection from '@/components/AdminHandoffSection'
 import LaunchKitSection from '@/components/LaunchKitSection'
 import SafetyFlowSection from '@/components/SafetyFlowSection'
@@ -32,10 +33,11 @@ type Props = { locale: Locale; dict: Dict }
 export default function HomePage({ locale, dict }: Props) {
   const pricing = SHOW_PUBLIC_PRICING ? dict.pricing : { ...dict.pricing, plans: [] }
 
-  // RU narrative (the sales funnel, kept tight): pain hero -> message-to-lead
-  // contrast -> live demo proof -> what the administrator receives (dark) ->
-  // what a launch includes (systems diagram) -> safety decision-flow ->
-  // turnkey launch with price -> trust block (founder, FAQ) -> final CTA.
+  // RU narrative (test-first): the live demo IS the hero — the visitor writes
+  // as a patient and watches the заявка assemble. Then: what just happened ->
+  // what the administrator receives (dark) -> what a launch includes ->
+  // safety decision-flow -> turnkey launch with price -> trust block
+  // (founder, FAQ) -> final CTA.
   if (locale === 'ru') {
     return (
       <main lang="ru">
@@ -47,19 +49,12 @@ export default function HomePage({ locale, dict }: Props) {
           bookACallLabel={dict.bookACallLabel}
           langSwitcher={dict.langSwitcher}
         />
-        <Hero dict={dict.hero} />
-        <ScrollReveal>
-          <MessageToLeadSection dict={dict.messageToLead} />
-        </ScrollReveal>
-        <ScrollReveal>
-          <DemoSection
-            dict={dict.demo}
-            locale={locale}
-            liveChat={dict.liveChat}
-            customDemoChat={dict.customDemoChat}
-            intake={dict.intake}
-          />
-        </ScrollReveal>
+        <HeroTest
+          dict={dict.heroTest}
+          medicalChat={dict.demo.medicalChat}
+          medicalSummary={dict.demo.medicalSummary}
+        />
+        <BackstageStrip dict={dict.backstage} />
         <ScrollReveal>
           <AdminHandoffSection dict={dict.adminHandoff} />
         </ScrollReveal>

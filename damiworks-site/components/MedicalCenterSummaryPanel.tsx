@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import type { DictMedicalSummaryLabels } from '@/lib/i18n'
 import type { MedicalMessage, MedicalBackendState } from '@/components/MedicalCenterChat'
 import { detectSpecialty, normalizeComplaint } from '@/lib/medicalSummary'
@@ -89,6 +90,12 @@ export default function MedicalCenterSummaryPanel({ messages, dict, backendState
   const complaint = detectComplaint(messages, backendState?.symptomsOrGoal)
   const time = detectTime(messages, backendState?.selectedSlot || backendState?.preferredTime)
 
+  // Flash fields as the backend fills them in — the заявка visibly assembles
+  // itself while the visitor chats. CSS animation lives in globals.css and is
+  // disabled under prefers-reduced-motion.
+  const [flashed, setFlashed] = useState<Set<string>>(new Set())
+  const prevFieldsRef = useRef<Record<string, string> | null>(null)
+
   const status = resolveStatus(
     messages,
     backendState?.leadStatus,
@@ -117,6 +124,20 @@ export default function MedicalCenterSummaryPanel({ messages, dict, backendState
 
   const dotColor = _DOT_COLOR[status] ?? 'bg-secondary'
 
+  useEffect(() => {
+    const fields: Record<string, string> = { specialty, complaint, time, status: statusLabel }
+    const prev = prevFieldsRef.current
+    prevFieldsRef.current = fields
+    if (!prev) return
+    const changed = new Set(Object.keys(fields).filter((k) => prev[k] !== fields[k]))
+    if (changed.size === 0) return
+    setFlashed(changed)
+    const id = setTimeout(() => setFlashed(new Set()), 900)
+    return () => clearTimeout(id)
+  }, [specialty, complaint, time, statusLabel])
+
+  const flashClass = (key: string) => (flashed.has(key) ? ' field-flash' : '')
+
   return (
     <div className="bg-surface border border-border-col rounded-2xl p-6 flex flex-col">
       <div className="flex items-center gap-2 mb-5">
@@ -127,19 +148,19 @@ export default function MedicalCenterSummaryPanel({ messages, dict, backendState
       <dl className="space-y-4 flex-1">
         <div>
           <dt className="text-xs text-secondary uppercase tracking-wider mb-0.5">{dict.specialty}</dt>
-          <dd className="text-sm text-primary font-medium">{specialty}</dd>
+          <dd className={`text-sm text-primary font-medium rounded-md${flashClass('specialty')}`}>{specialty}</dd>
         </div>
         <div>
           <dt className="text-xs text-secondary uppercase tracking-wider mb-0.5">{dict.complaint}</dt>
-          <dd className="text-sm text-primary font-medium">{complaint}</dd>
+          <dd className={`text-sm text-primary font-medium rounded-md${flashClass('complaint')}`}>{complaint}</dd>
         </div>
         <div>
           <dt className="text-xs text-secondary uppercase tracking-wider mb-0.5">{dict.time}</dt>
-          <dd className="text-sm text-primary font-medium">{time}</dd>
+          <dd className={`text-sm text-primary font-medium rounded-md${flashClass('time')}`}>{time}</dd>
         </div>
         <div>
           <dt className="text-xs text-secondary uppercase tracking-wider mb-0.5">{dict.status}</dt>
-          <dd className="flex items-center gap-1.5">
+          <dd className={`flex items-center gap-1.5 rounded-md${flashClass('status')}`}>
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
             <span className="text-sm text-primary font-medium">{statusLabel}</span>
           </dd>

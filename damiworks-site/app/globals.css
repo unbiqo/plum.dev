@@ -90,6 +90,58 @@ html {
   }
 }
 
+/* Hero test: extra warm glow behind the interactive surface. */
+.hero-test-glow {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 52rem;
+  height: 32rem;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  background: radial-gradient(closest-side, rgba(215, 120, 85, 0.1), transparent);
+  filter: blur(48px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Floating context chips around the hero test surface (desktop only). */
+.hero-test-chip {
+  animation: hero-chip-float 7s ease-in-out infinite alternate;
+}
+
+.hero-test-chip-1 { top: -1.25rem; left: 4%; animation-delay: 0s; }
+.hero-test-chip-2 { top: 22%; left: -3.5rem; animation-delay: -1.4s; }
+.hero-test-chip-3 { bottom: 18%; left: -2.75rem; animation-delay: -2.6s; }
+.hero-test-chip-4 { top: -1.5rem; right: 6%; animation-delay: -3.4s; }
+.hero-test-chip-5 { top: 30%; right: -3rem; animation-delay: -4.8s; }
+.hero-test-chip-6 { bottom: 12%; right: -3.5rem; animation-delay: -5.6s; }
+
+@keyframes hero-chip-float {
+  from { transform: translateY(-4px); }
+  to { transform: translateY(6px); }
+}
+
+/* Admin summary: flash a field when the backend fills or updates it. */
+.field-flash {
+  animation: field-flash 0.9s ease-out;
+}
+
+@keyframes field-flash {
+  0% { background-color: rgba(215, 120, 85, 0.22); }
+  100% { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-test-chip {
+    animation: none;
+  }
+
+  .field-flash {
+    animation: none;
+  }
+}
+
 /* StaggerReveal: children with data-stagger-item cascade in one after another
    once the wrapper enters the viewport (index via inline --stagger-i). */
 .stagger [data-stagger-item] {

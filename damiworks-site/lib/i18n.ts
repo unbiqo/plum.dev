@@ -57,6 +57,26 @@ export interface DictHero {
   chat: DictHeroChat
 }
 
+// Test-first hero: the live medical demo IS the hero surface. The visitor
+// writes as a patient and immediately sees the admin-ready заявка forming.
+export interface DictHeroTest {
+  headlinePart1: string
+  headlineAccent: string
+  subheadline: string
+  scenarioNote: string
+  summaryLabel: string
+  ctaSecondary: { label: string; href: string }
+  liveHint: string
+  // Floating context chips around the test surface (desktop only, decorative).
+  chips: string[]
+}
+
+// Compact one-row strip right under the hero test: what just happened.
+export interface DictBackstage {
+  title: string
+  steps: string[]
+}
+
 export interface DictHowItWorksStep {
   number: string
   icon: 'Link2' | 'BookOpen' | 'Users' | 'MessageCircle' | 'Zap' | 'ListChecks' | 'Phone' | 'ClipboardList'
@@ -318,6 +338,9 @@ export interface DictMedicalChatLabels {
   errorMessage: string
   introMessage: string
   quickReplies: string[]
+  // Staged loading lines shown while the backend thinks — sells the process.
+  // Falls back to plain typing dots when omitted.
+  loadingStages?: string[]
 }
 
 export interface DictMedicalSummaryLabels {
@@ -576,6 +599,8 @@ export interface Dict {
   headerDemoLabel: string
   langSwitcher: DictLangSwitcher
   hero: DictHero
+  heroTest: DictHeroTest
+  backstage: DictBackstage
   pain: DictPain
   howItWorks: DictHowItWorks
   demo: DictDemo
@@ -657,6 +682,22 @@ const en: Dict = {
         },
       ],
     },
+  },
+  // Rendered on the RU page only for now — EN values keep the Dict type complete.
+  heroTest: {
+    headlinePart1: 'Write as a patient. ',
+    headlineAccent: 'See what the administrator gets.',
+    subheadline:
+      'DamiWorks answers patients on WhatsApp, Instagram and your website, clarifies the request and builds a ready-made заявка for your team. Only a doctor diagnoses.',
+    scenarioNote: 'Example: MedNova multi-specialty clinic',
+    summaryLabel: 'What the administrator gets',
+    ctaSecondary: { label: 'Discuss a launch', href: '#contact' },
+    liveHint: 'A live AI, not a recording — ask anything',
+    chips: ['WhatsApp', 'Instagram', 'Website', 'Telegram', 'CRM', 'Request ready'],
+  },
+  backstage: {
+    title: 'What just happened behind the scenes',
+    steps: ['Patient writes', 'AI clarifies the details', 'Request assembled', 'Complex cases go to a human'],
   },
   pain: {
     headline: 'Where businesses lose leads',
@@ -1548,6 +1589,21 @@ const ru: Dict = {
       ],
     },
   },
+  heroTest: {
+    headlinePart1: 'Напишите как пациент. ',
+    headlineAccent: 'Посмотрите, что получит администратор.',
+    subheadline:
+      'DamiWorks отвечает пациентам в WhatsApp, Instagram и на сайте, уточняет запрос и собирает готовую заявку для вашей команды. Диагнозы ставит только врач.',
+    scenarioNote: 'Пример: многопрофильная клиника MedNova',
+    summaryLabel: 'Что получит администратор',
+    ctaSecondary: { label: 'Обсудить запуск', href: '#contact' },
+    liveHint: 'Живой AI, не запись — задайте любой вопрос',
+    chips: ['WhatsApp', 'Instagram', 'Сайт', 'Telegram', 'CRM', 'Заявка готова'],
+  },
+  backstage: {
+    title: 'Что произошло за кулисами',
+    steps: ['Пациент пишет', 'AI уточняет детали', 'Заявка собрана', 'Сложное — человеку'],
+  },
   pain: {
     headline: 'Где клиника теряет пациентов',
     emphasisTitle: 'Цена одного пропущенного сообщения',
@@ -1991,11 +2047,16 @@ const ru: Dict = {
       introMessage:
         'Здравствуйте! 💚 Меня зовут Айгуль, я администратор MedNova Clinic. Помогу подобрать врача, сориентировать по стоимости и записать на приём. Подскажите, пожалуйста, пациент взрослый или ребёнок, и что вас беспокоит?',
       quickReplies: [
-        'Записаться к врачу',
-        'Цены',
-        'Как выбрать специалиста?',
-        'Подготовка к анализам',
+        'Сколько стоит консультация?',
+        'К какому врачу записаться?',
+        'Как подготовиться к анализам?',
+        'Можно записать ребёнка?',
         'График врачей',
+      ],
+      loadingStages: [
+        'AI читает вопрос…',
+        'Уточняет детали…',
+        'Собирает сводку для администратора…',
       ],
     },
     medicalSummary: {
