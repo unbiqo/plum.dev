@@ -1607,7 +1607,7 @@ const ru: Dict = {
     mobileSubheadline:
       'Проверьте, как AI ведёт первый диалог с пациентом и собирает заявку для администратора.',
     scenarioNote: 'Пример: многопрофильная клиника MedNova',
-    summaryLabel: 'Что получит администратор',
+    summaryLabel: 'Live-сводка по диалогу',
     ctaSecondary: { label: 'Обсудить запуск', href: '#contact' },
     liveHint: 'Не отличить от человека — попробуйте сами',
     chips: ['WhatsApp', 'Instagram', 'Сайт', 'Telegram', 'CRM', 'Заявка готова'],
