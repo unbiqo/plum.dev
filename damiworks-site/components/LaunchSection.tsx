@@ -5,7 +5,7 @@ import type { DictLaunch } from '@/lib/i18n'
 // scoping → turnkey setup → improvements on real dialogs → what we track →
 // price → CTA. Replaces the former Pricing (pilot offer), ValueProp and
 // WhatWeNeed sections on the RU page.
-export default function LaunchSection({ dict }: { dict: DictLaunch }) {
+export default function LaunchSection({ dict, demoHref = '#demo' }: { dict: DictLaunch; demoHref?: string }) {
   return (
     <section id="pricing" className="scroll-mt-20 border-t border-border-col bg-bg py-20 lg:py-24">
       <div className="mx-auto max-w-6xl px-6">
@@ -62,7 +62,7 @@ export default function LaunchSection({ dict }: { dict: DictLaunch }) {
                 {dict.ctaPrimary}
               </a>
               <a
-                href="#demo"
+                href={demoHref}
                 className="inline-flex min-h-12 items-center justify-center rounded-xl border border-border-col bg-surface px-6 py-3 text-sm font-medium text-primary transition-colors hover:bg-bg"
               >
                 {dict.ctaSecondary}

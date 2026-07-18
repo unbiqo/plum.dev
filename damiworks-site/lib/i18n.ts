@@ -83,6 +83,74 @@ export interface DictBackstage {
   steps: string[]
 }
 
+// Light, CTA-first hero: one claim, one button into the demo workspace
+// (/ru/demo — intake mock -> patient test chat -> launch-plan assistant).
+export interface DictHeroDemo {
+  headlineLine1: string
+  headlineLine2: string
+  subheadline: string
+  ctaLabel: string
+}
+
+export interface DictAssistantQuestion {
+  // Short progress label, e.g. «Каналы».
+  step: string
+  question: string
+  why: string
+  options: string[]
+  multi: boolean
+}
+
+// The /ru/demo workspace: intake mock -> patient test chat -> launch
+// assistant questionnaire -> plan draft.
+export interface DictDemoWorkspace {
+  headerCta: string
+  intake: {
+    eyebrow: string
+    title: string
+    demoNote: string
+    siteLabel: string
+    fallbackClinic: string
+    foundTitle: string
+    foundItems: string[]
+    clarifyTitle: string
+    clarifyItems: string[]
+  }
+  test: {
+    eyebrow: string
+    title: string
+    subtitle: string
+    summaryLabel: string
+  }
+  assistant: {
+    eyebrow: string
+    title: string
+    subtitle: string
+    whyLabel: string
+    questions: DictAssistantQuestion[]
+    planStepLabel: string
+    backLabel: string
+    nextLabel: string
+    finishLabel: string
+  }
+  plan: {
+    title: string
+    subtitle: string
+    blockChannels: string
+    blockKnowledge: string
+    blockScenarios: string
+    blockHandoff: string
+    blockLead: string
+    leadFieldsNote: string
+    emptyValue: string
+    priceLine: string
+    priceNote: string
+    ctaPrimary: string
+    ctaWhatsapp: string
+    restartLabel: string
+  }
+}
+
 export interface DictHowItWorksStep {
   number: string
   icon: 'Link2' | 'BookOpen' | 'Users' | 'MessageCircle' | 'Zap' | 'ListChecks' | 'Phone' | 'ClipboardList'
@@ -608,7 +676,9 @@ export interface Dict {
   langSwitcher: DictLangSwitcher
   hero: DictHero
   heroTest: DictHeroTest
+  heroDemo: DictHeroDemo
   backstage: DictBackstage
+  demoWorkspace: DictDemoWorkspace
   pain: DictPain
   howItWorks: DictHowItWorks
   demo: DictDemo
@@ -706,6 +776,96 @@ const en: Dict = {
   backstage: {
     title: 'What just happened behind the scenes',
     steps: ['Patient writes', 'AI clarifies the details', 'Request assembled', 'Complex cases go to a human'],
+  },
+  heroDemo: {
+    headlineLine1: 'See how AI runs the conversation.',
+    headlineLine2: 'Try the live demo yourself.',
+    subheadline:
+      'See how AI takes over the first conversation: answers the patient, clarifies details and helps turn the inquiry into a clear request.',
+    ctaLabel: 'Try the demo',
+  },
+  demoWorkspace: {
+    headerCta: 'Discuss a launch',
+    intake: {
+      eyebrow: '01',
+      title: 'What we understood about the clinic',
+      demoNote: 'Demo mode: the structure is shown on a typical medical scenario. A draft for your site is assembled on a short call.',
+      siteLabel: 'Website',
+      fallbackClinic: 'MedNova sample clinic',
+      foundTitle: 'What goes into the knowledge base',
+      foundItems: ['Services and specialties', 'Contacts and address', 'Working hours', 'Doctors and specializations'],
+      clarifyTitle: 'What we will clarify with you',
+      clarifyItems: ['Service prices', 'Human-handoff rules', 'Request format for the administrator'],
+    },
+    test: {
+      eyebrow: '02',
+      title: 'Try it as a patient',
+      subtitle: 'A live AI on a typical clinic base: ask a question and watch the request assemble.',
+      summaryLabel: 'Live request summary',
+    },
+    assistant: {
+      eyebrow: '03',
+      title: 'Build a launch plan',
+      subtitle: 'Five short questions — and we will show a draft launch plan for your clinic.',
+      whyLabel: 'Why this matters',
+      questions: [
+        {
+          step: 'Channels',
+          question: 'Where do patients write to you most often?',
+          why: 'The AI plugs into the channels where inquiries already flow — patients keep their habits.',
+          options: ['WhatsApp', 'Instagram', 'Telegram', 'Website', 'Phone calls'],
+          multi: true,
+        },
+        {
+          step: 'Base',
+          question: 'Which questions repeat most often?',
+          why: 'This becomes the knowledge base: the AI answers these itself, with no waiting.',
+          options: ['Prices and services', 'Doctors’ schedule', 'Preparation for tests', 'Choosing a doctor', 'Address and directions'],
+          multi: true,
+        },
+        {
+          step: 'Scenarios',
+          question: 'What can the AI answer on its own?',
+          why: 'This defines the first-answer scenarios and where the assistant saves the most time.',
+          options: ['Prices and services', 'Booking', 'Schedule and open slots', 'Procedure preparation'],
+          multi: true,
+        },
+        {
+          step: 'Boundaries',
+          question: 'When must the AI hand the dialog to a human?',
+          why: 'Safety rules: the AI does not play doctor. Clear boundaries are what separate an assistant from a “bot”.',
+          options: ['Medical questions', 'Complaints and disputes', 'Urgent cases', 'Non-standard requests'],
+          multi: true,
+        },
+        {
+          step: 'Request',
+          question: 'Where should the ready request go?',
+          why: 'The request must land where your team already works — otherwise it gets lost.',
+          options: ['Administrator’s WhatsApp or Telegram', 'Spreadsheet (Google Sheets)', 'Clinic CRM', 'Email'],
+          multi: false,
+        },
+      ],
+      planStepLabel: 'Plan',
+      backLabel: 'Back',
+      nextLabel: 'Next',
+      finishLabel: 'Show the plan',
+    },
+    plan: {
+      title: 'Draft launch of your AI receptionist',
+      subtitle: 'Assembled from your answers. A starting point — details are refined on a short call.',
+      blockChannels: 'Channels',
+      blockKnowledge: 'Knowledge base',
+      blockScenarios: 'AI answers itself',
+      blockHandoff: 'Hands off to a human',
+      blockLead: 'Request',
+      leadFieldsNote: 'In the request: contact, specialty, goal of the inquiry, preferred time.',
+      emptyValue: 'To clarify on the call',
+      priceLine: 'A turnkey AI receptionist — from 150,000 ₸.',
+      priceNote: 'The base launch includes clinic-specific setup, a knowledge base, answer scenarios and human-handoff rules.',
+      ctaPrimary: 'Discuss a launch',
+      ctaWhatsapp: 'Send the plan to WhatsApp',
+      restartLabel: 'Start over',
+    },
   },
   pain: {
     headline: 'Where businesses lose leads',
@@ -1615,6 +1775,96 @@ const ru: Dict = {
   backstage: {
     title: 'Что произошло за кулисами',
     steps: ['Пациент пишет', 'AI уточняет детали и помогает клиенту принять решение', 'Заявка собрана', 'Передаёт или сам оформляет'],
+  },
+  heroDemo: {
+    headlineLine1: 'Посмотрите, как AI ведёт диалог.',
+    headlineLine2: 'Попробуйте демо прямо сейчас.',
+    subheadline:
+      'Проверьте, как AI берёт первый диалог на себя: отвечает пациенту, уточняет детали и помогает довести обращение до понятной заявки.',
+    ctaLabel: 'Пройти демо',
+  },
+  demoWorkspace: {
+    headerCta: 'Обсудить запуск',
+    intake: {
+      eyebrow: '01',
+      title: 'Что мы поняли о клинике',
+      demoNote: 'Демо-режим: структура показана на типовом медицинском сценарии. Черновик по вашему сайту соберём на коротком разборе.',
+      siteLabel: 'Сайт',
+      fallbackClinic: 'Типовая клиника MedNova',
+      foundTitle: 'Что войдёт в базу знаний',
+      foundItems: ['Услуги и направления', 'Контакты и адрес', 'График работы', 'Врачи и специализации'],
+      clarifyTitle: 'Что уточним у вас',
+      clarifyItems: ['Цены на услуги', 'Правила передачи человеку', 'Формат заявки для администратора'],
+    },
+    test: {
+      eyebrow: '02',
+      title: 'Проверьте как пациент',
+      subtitle: 'Живой AI на типовой базе клиники: задайте вопрос — и посмотрите, как собирается заявка.',
+      summaryLabel: 'Живая сводка заявки',
+    },
+    assistant: {
+      eyebrow: '03',
+      title: 'Соберите план запуска',
+      subtitle: 'Пять коротких вопросов — и покажем черновик запуска AI-администратора для вашей клиники.',
+      whyLabel: 'Почему это важно',
+      questions: [
+        {
+          step: 'Каналы',
+          question: 'Куда пациенты чаще всего пишут вам?',
+          why: 'AI подключается туда, где обращения уже идут, — пациентам не нужно менять привычки.',
+          options: ['WhatsApp', 'Instagram', 'Telegram', 'Сайт', 'Звонки'],
+          multi: true,
+        },
+        {
+          step: 'База',
+          question: 'Какие вопросы повторяются чаще всего?',
+          why: 'Из этого собирается база знаний: на эти вопросы AI будет отвечать сам, без ожидания администратора.',
+          options: ['Цены и услуги', 'График врачей', 'Подготовка к анализам', 'Как выбрать врача', 'Адрес и как добраться'],
+          multi: true,
+        },
+        {
+          step: 'Сценарии',
+          question: 'Что AI может отвечать сам, без человека?',
+          why: 'Так мы определяем сценарии первых ответов — и где помощник экономит больше всего времени.',
+          options: ['Цены и услуги', 'Запись на приём', 'График и свободные окна', 'Подготовка к процедурам'],
+          multi: true,
+        },
+        {
+          step: 'Границы',
+          question: 'Когда AI должен сразу передать диалог человеку?',
+          why: 'Правила безопасности: AI не изображает врача. Чёткие границы — то, что отличает помощника от «бота».',
+          options: ['Медицинские вопросы', 'Жалобы и спорные ситуации', 'Срочные случаи', 'Нестандартные запросы'],
+          multi: true,
+        },
+        {
+          step: 'Заявка',
+          question: 'Куда отправлять готовую заявку?',
+          why: 'Заявка должна попадать туда, где ваша команда уже работает, — иначе она потеряется.',
+          options: ['WhatsApp или Telegram администратора', 'Таблица (Google Sheets)', 'CRM клиники', 'На почту'],
+          multi: false,
+        },
+      ],
+      planStepLabel: 'План',
+      backLabel: 'Назад',
+      nextLabel: 'Дальше',
+      finishLabel: 'Показать план',
+    },
+    plan: {
+      title: 'Черновик запуска AI-администратора',
+      subtitle: 'Собрано из ваших ответов. Это отправная точка — детали уточним на коротком разборе.',
+      blockChannels: 'Каналы',
+      blockKnowledge: 'База знаний',
+      blockScenarios: 'AI отвечает сам',
+      blockHandoff: 'Передаёт человеку',
+      blockLead: 'Заявка',
+      leadFieldsNote: 'В заявке: контакт, направление, цель обращения, удобное время.',
+      emptyValue: 'Уточним на разборе',
+      priceLine: 'AI-администратор под ключ — от 150 000 ₸.',
+      priceNote: 'В базовый запуск входит настройка под клинику, база знаний, сценарии ответов и правила передачи человеку.',
+      ctaPrimary: 'Обсудить запуск',
+      ctaWhatsapp: 'Отправить план в WhatsApp',
+      restartLabel: 'Пройти заново',
+    },
   },
   pain: {
     headline: 'Где клиника теряет пациентов',

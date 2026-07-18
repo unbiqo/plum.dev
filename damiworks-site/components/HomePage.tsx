@@ -9,8 +9,7 @@ import PricingSection from '@/components/PricingSection'
 import ContactSection from '@/components/ContactSection'
 import Footer from '@/components/Footer'
 import ScrollReveal from '@/components/ScrollReveal'
-import HeroTest from '@/components/HeroTest'
-import BackstageStrip from '@/components/BackstageStrip'
+import HeroDemo from '@/components/HeroDemo'
 import AdminHandoffSection from '@/components/AdminHandoffSection'
 import LaunchKitSection from '@/components/LaunchKitSection'
 import SafetyFlowSection from '@/components/SafetyFlowSection'
@@ -33,28 +32,23 @@ type Props = { locale: Locale; dict: Dict }
 export default function HomePage({ locale, dict }: Props) {
   const pricing = SHOW_PUBLIC_PRICING ? dict.pricing : { ...dict.pricing, plans: [] }
 
-  // RU narrative (test-first): the live demo IS the hero — the visitor writes
-  // as a patient and watches the заявка assemble. Then: what just happened ->
-  // what the administrator receives (dark) -> what a launch includes ->
-  // safety decision-flow -> turnkey launch with price -> trust block
-  // (founder, FAQ) -> final CTA.
+  // RU narrative: a light CTA-first hero invites the visitor into the
+  // /ru/demo workspace (intake -> patient test -> launch-plan assistant).
+  // Below the fold: what the administrator receives (dark) -> what a launch
+  // includes -> safety decision-flow -> turnkey launch with price -> trust
+  // block (founder, FAQ) -> final CTA.
   if (locale === 'ru') {
     return (
       <main lang="ru">
         <Header
           locale={locale}
           nav={[]}
-          demoLink={{ label: dict.headerDemoLabel, href: '#demo' }}
+          demoLink={{ label: dict.headerDemoLabel, href: '/ru/demo' }}
           site={dict.site}
           bookACallLabel={dict.bookACallLabel}
           langSwitcher={dict.langSwitcher}
         />
-        <HeroTest
-          dict={dict.heroTest}
-          medicalChat={dict.demo.medicalChat}
-          medicalSummary={dict.demo.medicalSummary}
-        />
-        <BackstageStrip dict={dict.backstage} />
+        <HeroDemo dict={dict.heroDemo} />
         <ScrollReveal>
           <AdminHandoffSection dict={dict.adminHandoff} />
         </ScrollReveal>
@@ -65,7 +59,7 @@ export default function HomePage({ locale, dict }: Props) {
           <SafetyFlowSection dict={dict.safetyFlow} />
         </ScrollReveal>
         <ScrollReveal>
-          <LaunchSection dict={dict.launch} />
+          <LaunchSection dict={dict.launch} demoHref="/ru/demo" />
         </ScrollReveal>
         <ScrollReveal>
           <FounderSection dict={dict.founder} />
