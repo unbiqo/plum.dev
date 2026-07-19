@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import Image from 'next/image'
 import { ArrowRight, CheckCircle2, Eye, ShieldCheck, UserRound, Workflow } from 'lucide-react'
-import type { DictEvidence, DictFaq, DictFounder } from '@/lib/i18n'
+import type { DictEvidence, DictFounder } from '@/lib/i18n'
 
 const EVIDENCE_ICONS = [Eye, ShieldCheck, Workflow, CheckCircle2]
 
@@ -100,32 +100,5 @@ export function FounderSection({ dict }: { dict: DictFounder }) {
   )
 }
 
-export function FaqSection({ dict }: { dict: DictFaq }) {
-  return (
-    <section id="faq" className="scroll-mt-20 border-t border-border-col bg-surface py-20">
-      <div className="mx-auto max-w-3xl px-6">
-        <div className="mb-10 text-center">
-          <h2 className="text-3xl font-bold text-primary lg:text-4xl">{dict.headline}</h2>
-          <p className="mt-3 text-secondary">{dict.subheadline}</p>
-        </div>
-        <div className="space-y-3">
-          {dict.items.map((item, index) => (
-            <details
-              key={item.question}
-              className="group rounded-2xl border border-border-col bg-bg px-5 py-4 open:border-accent/30"
-              open={index === 0}
-            >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold text-primary marker:hidden">
-                {item.question}
-                <span className="text-xl font-normal text-accent transition-transform group-open:rotate-45" aria-hidden="true">
-                  +
-                </span>
-              </summary>
-              <p className="pr-8 pt-3 text-sm leading-relaxed text-secondary">{item.answer}</p>
-            </details>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
-}
+// FaqSection moved to components/FaqSection.tsx (client accordion) — this file
+// stays a server component because of the founder-photo fs lookup above.

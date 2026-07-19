@@ -252,7 +252,11 @@ export interface DictLaunch {
   needTitle: string
   needItems: string[]
   pricingLine: string
-  priceNote: string
+  // The former priceNote paragraph, split for the price accordion:
+  // «что входит в базовый запуск» → bullet list + the extras note.
+  priceDetailsLabel: string
+  priceIncludes: string[]
+  priceExtraNote: string
   ctaPrimary: string
   ctaSecondary: string
 }
@@ -1059,8 +1063,15 @@ const en: Dict = {
     needTitle: 'All we need from you',
     needItems: ['Services and prices', 'Common customer questions', 'Booking rules', 'Where to send requests'],
     pricingLine: 'A turnkey AI receptionist — from 150,000 ₸.',
-    priceNote:
-      'The base launch includes clinic-specific setup, a knowledge base, answer scenarios, human-handoff rules, and the request format for your team. Extra integrations and complex channels are scoped separately.',
+    priceDetailsLabel: 'What the base launch includes',
+    priceIncludes: [
+      'Clinic-specific setup',
+      'A knowledge base',
+      'Answer scenarios',
+      'Human-handoff rules',
+      'The request format for your team',
+    ],
+    priceExtraNote: 'Extra integrations and complex channels are scoped separately.',
     ctaPrimary: 'Discuss a launch',
     ctaSecondary: 'Try the demo first',
   },
@@ -2064,8 +2075,15 @@ const ru: Dict = {
     needTitle: 'От клиники нужно только это',
     needItems: ['Услуги и цены', 'Частые вопросы пациентов', 'Правила записи', 'Кому передавать заявки'],
     pricingLine: 'AI-администратор под ключ — от 150 000 ₸.',
-    priceNote:
-      'В базовый запуск входит настройка под клинику, база знаний, сценарии ответов, правила передачи человеку и формат заявки для администратора. Дополнительные интеграции и сложные каналы — отдельно, после разбора.',
+    priceDetailsLabel: 'Что входит в базовый запуск',
+    priceIncludes: [
+      'Настройка под клинику',
+      'База знаний',
+      'Сценарии ответов',
+      'Правила передачи человеку',
+      'Формат заявки для администратора',
+    ],
+    priceExtraNote: 'Дополнительные интеграции и сложные каналы — отдельно, после разбора.',
     ctaPrimary: 'Обсудить запуск',
     ctaSecondary: 'Сначала попробовать демо',
   },

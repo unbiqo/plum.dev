@@ -1,8 +1,67 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, ListChecks, MessagesSquare, Phone, Send, UserRound } from 'lucide-react'
 import type { DictLaunch } from '@/lib/i18n'
+
+const MEASURE_ICONS = [MessagesSquare, Phone, Send, UserRound, ListChecks]
+
+// Animated ordinal counter: counts 01→0N when the card enters the viewport.
+// The measures have no public numbers (the site deliberately avoids invented
+// stats), so the counting element is the card index, not a fabricated metric.
+function MeasureCard({ measure, index }: { measure: string; index: number }) {
+  const target = index + 1
+  const [value, setValue] = useState(0)
+  const ref = useRef<HTMLLIElement | null>(null)
+  const startedRef = useRef(false)
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setValue(target)
+      return
+    }
+    const node = ref.current
+    if (!node) return
+    let raf = 0
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting || startedRef.current) return
+        startedRef.current = true
+        observer.disconnect()
+        const started = performance.now()
+        const duration = 500 + target * 160
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - started) / duration)
+          setValue(Math.round(t * target))
+          if (t < 1) raf = requestAnimationFrame(tick)
+        }
+        raf = requestAnimationFrame(tick)
+      },
+      { threshold: 0.4 }
+    )
+    observer.observe(node)
+    return () => {
+      observer.disconnect()
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [target])
+
+  const Icon = MEASURE_ICONS[index] ?? CheckCircle2
+
+  return (
+    <li ref={ref} className="rounded-2xl border border-border-col bg-surface p-5">
+      <div className="flex items-center justify-between">
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
+          <Icon size={17} aria-hidden="true" />
+        </span>
+        <span className="text-2xl font-bold tabular-nums text-accent/80" aria-hidden="true">
+          {String(value).padStart(2, '0')}
+        </span>
+      </div>
+      <p className="mt-3 text-sm font-medium leading-relaxed text-primary">{measure}</p>
+    </li>
+  )
+}
 
 // One section that closes one question: "How do we start?" Re-told as a
 // scroll story: a vertical timeline of the three steps (highlighted while
@@ -104,25 +163,40 @@ export default function LaunchSection({ dict, demoHref = '#demo' }: { dict: Dict
           </div>
         </div>
 
-        {/* What we track after launch */}
+        {/* What we track after launch — counter cards */}
         <div className="mt-14">
-          <h3 className="font-bold text-primary">{dict.measuresTitle}</h3>
-          <ul className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
-            {dict.measures.map((measure) => (
-              <li key={measure} className="flex gap-2.5 text-sm leading-relaxed text-primary">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
-                <span>{measure}</span>
-              </li>
+          <h3 className="text-xl font-bold text-primary">{dict.measuresTitle}</h3>
+          <ul className="mt-5 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
+            {dict.measures.map((measure, index) => (
+              <MeasureCard key={measure} measure={measure} index={index} />
             ))}
           </ul>
         </div>
 
-        {/* Price + CTA */}
+        {/* Price + what's included accordion + CTA */}
         <div id="pricing" className="mt-10 scroll-mt-24 rounded-2xl border border-accent/25 bg-accent-soft/45 p-6 lg:p-8">
-          <div className="grid grid-cols-1 items-center gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-start">
             <div>
               <p className="text-2xl font-bold text-primary">{dict.pricingLine}</p>
-              <p className="mt-2 text-sm leading-relaxed text-secondary">{dict.priceNote}</p>
+              <details className="group mt-4 rounded-xl border border-accent/20 bg-surface/80">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 text-sm font-semibold text-primary marker:hidden">
+                  {dict.priceDetailsLabel}
+                  <span className="text-xl font-normal text-accent transition-transform group-open:rotate-45 motion-reduce:transition-none" aria-hidden="true">
+                    +
+                  </span>
+                </summary>
+                <div className="border-t border-accent/15 px-4 py-3.5">
+                  <ul className="space-y-2">
+                    {dict.priceIncludes.map((item) => (
+                      <li key={item} className="flex gap-2.5 text-sm leading-relaxed text-primary">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-xs leading-relaxed text-secondary">{dict.priceExtraNote}</p>
+                </div>
+              </details>
             </div>
             <div className="flex flex-col gap-2.5">
               <a

@@ -14,7 +14,8 @@ import AdminHandoffSection from '@/components/AdminHandoffSection'
 import LaunchKitSection from '@/components/LaunchKitSection'
 import SafetyFlowSection from '@/components/SafetyFlowSection'
 import LaunchSection from '@/components/LaunchSection'
-import { FaqSection, FounderSection } from '@/components/TrustFirstSections'
+import { FounderSection } from '@/components/TrustFirstSections'
+import FaqSection from '@/components/FaqSection'
 import {
   AutomateSection,
   PainSection,
@@ -22,6 +23,7 @@ import {
   VsChatbotSection,
   WhatWeNeedSection,
 } from '@/components/StorySections'
+import StickyCta from '@/components/StickyCta'
 import { SHOW_PUBLIC_PRICING } from '@/lib/constants'
 
 type Props = { locale: Locale; dict: Dict }
@@ -76,6 +78,7 @@ export default function HomePage({ locale, dict }: Props) {
           <ContactSection dict={dict.contact} />
         </ScrollReveal>
         <Footer dict={dict.footer} site={dict.site} />
+        <StickyCta label={dict.founder.cta} />
       </main>
     )
   }
