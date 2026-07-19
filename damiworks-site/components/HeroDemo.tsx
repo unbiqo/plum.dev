@@ -1,6 +1,6 @@
 import { ArrowRight } from 'lucide-react'
 import type { DictAdminHandoff, DictHeroChat, DictHeroDemo } from '@/lib/i18n'
-import HeroNetworkBackground from '@/components/HeroNetworkBackground'
+import HeroFlowBackground from '@/components/HeroFlowBackground'
 import HeroDialogSim, { HeroDialogCta } from '@/components/HeroDialogSim'
 
 // Two-column hero: the existing claim + CTA on the left, a self-playing
@@ -17,7 +17,9 @@ type Props = {
 export default function HeroDemo({ dict, chat, card, tryDemoLabel }: Props) {
   return (
     <section className="relative isolate overflow-hidden bg-bg">
-      <HeroNetworkBackground />
+      {/* Lightweight SVG backdrop instead of the tsparticles canvas — the
+          particle engine alone cost ~1s of mobile main-thread time. */}
+      <HeroFlowBackground />
 
       <div className="relative z-10 mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-6 py-16 sm:py-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14 lg:py-24">
         {/* Left: claim + CTA */}
