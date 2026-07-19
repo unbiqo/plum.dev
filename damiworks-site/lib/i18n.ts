@@ -270,11 +270,16 @@ export interface DictLaunchKit {
 // «AI знает, где отвечать, а где передать человеку» — the decision flow.
 // Exactly 3 states, colored by the component: answers (green), clarifies
 // (amber), hands off (brand accent — a feature, not a fail state).
+// Rendered as tabs: the 3 states plus a 4th "alarming symptoms" tab built
+// from the hand-off note; each tab shows a mini example exchange.
 export interface DictSafetyFlow {
   headline: string
   subheadline: string
   guarantees: string[]
   states: { title: string; description: string; note?: string }[]
+  alertTabTitle: string
+  // Parallel to states + the alert tab (length = states.length + 1).
+  examples: { user: string; ai: string }[]
 }
 
 export interface DictEvidence {
@@ -1087,6 +1092,13 @@ const en: Dict = {
         description: 'When a question is medical, urgent, contested, or outside the knowledge base.',
         note: 'On alarming symptoms it does not continue the dialog — it points to urgent care and a human.',
       },
+    ],
+    alertTabTitle: 'Alarming symptoms',
+    examples: [
+      { user: 'How late are you open on Saturday?', ai: 'On Saturday the clinic is open from 9:00 to 15:00. Would you like me to help you book a visit?' },
+      { user: 'I want to book an appointment.', ai: 'Which specialist do you need, and what time works for you? Leave a contact — the administrator will confirm the booking.' },
+      { user: 'Can you explain my test results?', ai: 'A doctor works with test results, so I am passing this to the administrator — the team will contact you shortly.' },
+      { user: 'My child has a very high fever that will not go down.', ai: 'This may need urgent help — please call emergency services right away. I have already passed your dialog to the clinic team.' },
     ],
   },
   evidence: {
@@ -2085,6 +2097,13 @@ const ru: Dict = {
         description: 'Когда вопрос медицинский, срочный, спорный или выходит за базу знаний.',
         note: 'При тревожных симптомах не продолжает диалог, а направляет к срочной помощи и человеку.',
       },
+    ],
+    alertTabTitle: 'Тревожные симптомы',
+    examples: [
+      { user: 'До скольки вы работаете в субботу?', ai: 'В субботу клиника работает с 9:00 до 15:00. Хотите, помогу записаться на приём?' },
+      { user: 'Хочу записаться к врачу.', ai: 'Подскажите, к какому специалисту и в какое время удобно? Оставьте контакт — администратор подтвердит запись.' },
+      { user: 'Можете объяснить мои результаты анализов?', ai: 'С результатами анализов работает врач, поэтому передаю вопрос администратору — с вами свяжутся в ближайшее время.' },
+      { user: 'Ребёнку очень плохо, температура не сбивается.', ai: 'Это может требовать срочной помощи — пожалуйста, сразу позвоните в 103. Ваш диалог я уже передал команде клиники.' },
     ],
   },
   evidence: {

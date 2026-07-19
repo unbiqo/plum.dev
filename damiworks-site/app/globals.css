@@ -148,7 +148,8 @@ html {
   opacity: 0;
   transform: translateY(10px);
   transition: opacity 0.5s ease-out, transform 0.5s ease-out;
-  transition-delay: calc(var(--stagger-i, 0) * 140ms);
+  /* --stagger-step on the wrapper slows/speeds the whole cascade. */
+  transition-delay: calc(var(--stagger-i, 0) * var(--stagger-step, 140ms));
 }
 
 .stagger-visible [data-stagger-item] {
@@ -161,5 +162,9 @@ html {
     opacity: 1;
     transform: none;
     transition: none;
+  }
+
+  .animate-fadeInUp {
+    animation: none;
   }
 }

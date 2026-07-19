@@ -27,8 +27,9 @@ export default function AdminHandoffSection({ dict }: { dict: DictAdminHandoff }
           </ul>
         </div>
 
-        {/* Right: the request card, mini-CRM style — fields cascade in like a live заявка filling up */}
-        <StaggerReveal>
+        {/* Right: the request card, mini-CRM style — fields cascade in like a live заявка filling up.
+            Slower stagger step than the default: the card should visibly assemble field by field. */}
+        <StaggerReveal className="[--stagger-step:340ms]">
           <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-6 lg:p-7">
             <div className="mb-5 flex items-center gap-2">
               <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-green-500" aria-hidden="true" />
