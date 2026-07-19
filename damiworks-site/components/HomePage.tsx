@@ -42,13 +42,18 @@ export default function HomePage({ locale, dict }: Props) {
       <main lang="ru">
         <Header
           locale={locale}
-          nav={[]}
-          demoLink={{ label: dict.headerDemoLabel, href: '/ru/demo' }}
+          nav={dict.nav}
+          withProgress
           site={dict.site}
           bookACallLabel={dict.bookACallLabel}
           langSwitcher={dict.langSwitcher}
         />
-        <HeroDemo dict={dict.heroDemo} />
+        <HeroDemo
+          dict={dict.heroDemo}
+          chat={dict.hero.chat}
+          card={dict.adminHandoff.card}
+          tryDemoLabel={dict.headerDemoLabel}
+        />
         <ScrollReveal>
           <AdminHandoffSection dict={dict.adminHandoff} />
         </ScrollReveal>

@@ -1715,7 +1715,7 @@ const ru: Dict = {
     tagline: 'Умный помощник, который отвечает пациентам и записывает на приём.',
   },
   nav: [
-    { label: 'Попробовать', href: '#demo' },
+    { label: 'Попробовать', href: '/ru/demo' },
     { label: 'Как это работает', href: '#how-it-works' },
     { label: 'Сколько стоит', href: '#pricing' },
     { label: 'Безопасность', href: '#trust' },
