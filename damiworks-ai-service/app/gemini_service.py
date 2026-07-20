@@ -3118,10 +3118,11 @@ class GeminiService:
         message: str,
         chat_history: list[ChatHistoryMessage],
         client_facts: dict[str, object] | None = None,
+        history_limit: int | None = None,
     ) -> str:
         history = self._format_history(
             chat_history,
-            limit=self.settings.max_history_messages,
+            limit=history_limit or self.settings.max_history_messages,
         )
         facts = self._format_collected_facts(chat_history, client_facts)
         conversation_state = self._format_conversation_state(

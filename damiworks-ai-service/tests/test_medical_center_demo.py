@@ -106,7 +106,7 @@ class FakeGemini:
             raise RuntimeError("writer LLM down")
         return self._writer_texts.pop(0)
 
-    def _format_chat_prompt(self, message, history, client_facts=None):
+    def _format_chat_prompt(self, message, history, client_facts=None, history_limit=None):
         return f"USER: {message}"
 
 

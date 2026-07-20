@@ -373,7 +373,7 @@ class _RecordingGemini:
             return json.dumps(self._planner_json)
         return self._writer_text
 
-    def _format_chat_prompt(self, message, history, client_facts=None):
+    def _format_chat_prompt(self, message, history, client_facts=None, history_limit=None):
         return f"USER: {message}"
 
 

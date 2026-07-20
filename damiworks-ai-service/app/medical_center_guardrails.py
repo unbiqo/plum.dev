@@ -86,6 +86,18 @@ _GUARANTEE_RE = re.compile(
     r"|обеща(?:ю|ем)\s+(?:результат|выздоров|что)",
     re.IGNORECASE,
 )
+# Honest guarantee DISCLAIMERS are allowed (the writer is told to answer the
+# "а вы гарантируете?" question like a human: no guarantees + doctor's
+# experience + offer the first visit). They are scrubbed from the answer before
+# the guarantee check, so only AFFIRMATIVE guarantees still fail it.
+_NEGATED_GUARANTEE_RE = re.compile(
+    r"не\s+да[юё]\w*\s+(?:\w+\s+){0,2}?гарант\w+"          # «не даёт (никаких) гарантий»
+    r"|не\s+(?:могу|можем|обеща\w+)\s+(?:\w+\s+){0,2}?гарант\w+"
+    r"|гарант\w+(?:\s+\w+){0,3}\s+не\s+(?:да[юё]\w*|быва\w+|обеща\w+)"
+    r"|не\s+гарантиру\w+"
+    r"|без\s+гарантий",
+    re.IGNORECASE,
+)
 
 # Claims of a confirmed booking / free slot — only the administrator confirms.
 _AVAILABILITY_CLAIM_RE = re.compile(
@@ -294,11 +306,16 @@ def validate_answer(
                 "в базе, честно скажи, что уточнит администратор."
             )
 
-    # 10. No treatment-result guarantees.
-    checks["no_guarantees"] = not bool(_GUARANTEE_RE.search(answer or ""))
+    # 10. No treatment-result guarantees. An honest DISCLAIMER of guarantees is
+    # scrubbed first, so it never trips the check (live regression: the honest
+    # "гарантий не даёт ни одна клиника" answer was replaced with the meta
+    # fallback, and the guarantee question got no real answer).
+    scrubbed = _NEGATED_GUARANTEE_RE.sub(" ", answer or "")
+    checks["no_guarantees"] = not bool(_GUARANTEE_RE.search(scrubbed))
     if not checks["no_guarantees"]:
         fixes.append(
-            "Убери гарантии результата лечения. Итог оценивает врач — не обещай выздоровление."
+            "Убери гарантии результата лечения. Итог оценивает врач — не обещай выздоровление. "
+            "Честно скажи, что гарантий результата не даёт ни одна клиника, и предложи первичный приём."
         )
 
     # 11a. Compact length.
@@ -411,8 +428,9 @@ _FALLBACK_ADMIN_HAS_CONTACT = (
     "подобрать подходящий вариант."
 )
 _FALLBACK_OBJECTION = (
-    "Понимаю вопрос. Давайте подберём безопасный следующий шаг — могу подсказать направление "
-    "или передать вопрос администратору."
+    "Понимаю вас. Чтобы не решать вслепую, разумный первый шаг: первичный приём, где врач "
+    "осмотрит и честно скажет, что действительно нужно, а что нет.\n\n"
+    "Хотите, покажу ближайшие окна к подходящему специалисту?"
 )
 _FALLBACK_GENERAL = (
     "Подскажу детали точнее с помощью администратора. Оставьте, пожалуйста, ваше имя и "

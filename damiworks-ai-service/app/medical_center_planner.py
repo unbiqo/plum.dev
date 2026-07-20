@@ -285,9 +285,11 @@ def _build_prompt(
     if state.recent_questions_asked:
         parts.append("Администратор уже спрашивал: " + ", ".join(state.recent_questions_asked))
 
-    convo = _format_history(history)
+    # Full history: the planner fills do_not_ask/slots, so a truncated window
+    # makes it re-ask facts the user already gave ("я же говорил").
+    convo = _format_history(history, limit=max(len(history), 1))
     if convo:
-        parts.append("Недавний диалог:\n" + convo)
+        parts.append("Диалог:\n" + convo)
 
     parts.append(f"Последнее сообщение пользователя: «{message}»")
     parts.append("Верни JSON-план по схеме.")
