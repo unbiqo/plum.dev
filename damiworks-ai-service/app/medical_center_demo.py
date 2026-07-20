@@ -64,6 +64,7 @@ from .medical_center_slots import (
     slots_for,
     specialty_dative,
 )
+from .booking_guardrail import enforce_slot_guardrail
 from .medical_center_state import (
     ConversationState,
     apply_booking_field_seed,
@@ -1236,6 +1237,25 @@ async def handle_medical_center_chat(
                 repair_timeout = True
                 logger.warning("medical_center_chat: repair writer timed out")
                 answer = build_safe_fallback(planner, state, message)
+
+        # Slot guardrail (deterministic): the writer may only speak slots the
+        # provider supplied — plus the already-confirmed slot. An invented
+        # date/time is replaced with the safe "will check and come back" answer.
+        answer, slot_guardrail_replaced = enforce_slot_guardrail(
+            answer=answer,
+            offered_slots=(
+                slots_for(state.specialty)
+                + ([state.selected_slot] if state.selected_slot else [])
+            ),
+            booking_context=bool(
+                _BOOKING_INTENT_RE.search(message)
+                or (planner or {}).get("current_intent") == "wants_booking"
+            ),
+        )
+        if slot_guardrail_replaced:
+            logger.warning(
+                "medical_center_chat: slot guardrail replaced an answer with invented slots"
+            )
 
         fallback_reason: str | None = (
             "planner_timeout" if planner_timeout

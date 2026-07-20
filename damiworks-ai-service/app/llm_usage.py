@@ -8,11 +8,19 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+# NOTE: prices below are indicative and must be confirmed against the live
+# provider price lists (especially the newer claude/gpt/gemini-3.1-pro entries);
+# any correction goes through the MODEL_PRICING_USD_PER_1M_TOKENS_JSON env
+# override without a code change (see _load_pricing_override).
 MODEL_PRICING_USD_PER_1M_TOKENS: dict[str, dict[str, float]] = {
-    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50},
     "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00},
+    "gemini-3.1-pro": {"input": 2.00, "output": 12.00},
+    "claude-sonnet-5": {"input": 3.00, "output": 15.00},
+    "claude-opus-4-8": {"input": 15.00, "output": 75.00},
+    "gpt-5.4-nano": {"input": 0.20, "output": 0.80},
+    "gpt-5.6-luna": {"input": 5.00, "output": 15.00},
 }
 
 _PRICING_ENV = "MODEL_PRICING_USD_PER_1M_TOKENS_JSON"
@@ -172,6 +180,7 @@ def build_llm_call_log(
     error_type: str | None = None,
     fallback_used: bool = False,
     fallback_reason: str | None = None,
+    fallback_chain: list[str] | None = None,
     escalation_used: bool = False,
     escalation_reason: str | None = None,
     metadata: dict[str, Any] | None = None,
@@ -224,6 +233,7 @@ def build_llm_call_log(
         "error_type": error_type,
         "fallback_used": fallback_used,
         "fallback_reason": fallback_reason,
+        "fallback_chain": list(fallback_chain or []),
         "escalation_used": escalation_used,
         "escalation_reason": escalation_reason,
         "metadata": metadata or {},

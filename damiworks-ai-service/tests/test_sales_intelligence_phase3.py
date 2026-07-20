@@ -5,6 +5,8 @@ Pure Python, zero API calls, shadow-only. Run from damiworks-ai-service/:
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.sales_intelligence import ensure_intelligence_metadata, run_intelligence_turn
@@ -12,13 +14,13 @@ from app.sales_intelligence.defaults import default_business_profile, new_field_
 
 
 def _turn(message: str, *, metadata=None, dialog_state=None):
-    return run_intelligence_turn(
+    return asyncio.run(run_intelligence_turn(
         enabled=True,
         message=message,
         chat_history=[],
         session_metadata=metadata or {},
         dialog_state=dialog_state or {},
-    )
+    ))
 
 
 def _debug(message: str, **kw):

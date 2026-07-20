@@ -50,7 +50,7 @@ def _build_payload(
     }
 
 
-async def _request_ai_service(payload: dict[str, Any]) -> str:
+async def _request_ai_service(payload: dict[str, Any]) -> tuple[str, list[str] | None]:
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(config.AI_SERVICE_URL, json=payload)
         response.raise_for_status()
@@ -59,9 +59,17 @@ async def _request_ai_service(payload: dict[str, Any]) -> str:
     answer = data.get("answer")
     if not isinstance(answer, str) or not answer.strip():
         logger.warning("AI service returned response without answer: %r", data)
-        return SERVICE_UNAVAILABLE_TEXT
+        return SERVICE_UNAVAILABLE_TEXT, None
 
-    return answer
+    # Additive multi-bubble contract: 2-3 short messages instead of one.
+    raw_parts = data.get("answer_parts")
+    parts: list[str] | None = None
+    if isinstance(raw_parts, list):
+        cleaned = [part.strip() for part in raw_parts if isinstance(part, str) and part.strip()]
+        if len(cleaned) > 1:
+            parts = cleaned
+
+    return answer, parts
 
 
 async def _send_ai_answer(
@@ -84,15 +92,19 @@ async def _send_ai_answer(
         logger.debug("Failed to send Telegram typing action", exc_info=True)
 
     try:
-        answer = await _request_ai_service(payload)
+        answer, answer_parts = await _request_ai_service(payload)
     except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
         logger.warning("AI service request failed: %s", exc)
-        answer = SERVICE_UNAVAILABLE_TEXT
+        answer, answer_parts = SERVICE_UNAVAILABLE_TEXT, None
     except Exception:
         logger.exception("Unexpected AI service error")
-        answer = SERVICE_UNAVAILABLE_TEXT
+        answer, answer_parts = SERVICE_UNAVAILABLE_TEXT, None
 
-    await message.answer(answer, parse_mode=ParseMode.HTML)
+    if answer_parts:
+        for part in answer_parts:
+            await message.answer(part, parse_mode=ParseMode.HTML)
+    else:
+        await message.answer(answer, parse_mode=ParseMode.HTML)
 
 
 @dp.message(Command("start", "reset"))

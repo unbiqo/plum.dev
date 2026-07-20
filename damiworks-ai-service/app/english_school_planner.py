@@ -403,6 +403,7 @@ async def plan_conversation_turn(
         raw = await gemini._generate_text(
             model=gemini.settings.general_model,
             model_pool=gemini.settings.general_model_pool,
+            model_profile="english_school_planner",
             prompt=prompt,
             system_instruction=_PLANNER_SYSTEM,
             temperature=0.0,

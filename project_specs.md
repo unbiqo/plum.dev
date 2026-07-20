@@ -804,7 +804,7 @@ Structured Extractor
 
 ### 10.1 Model requirement
 
-Use `gemini-2.5-flash-lite` with Structured Outputs / strict JSON schema.
+Use `gemini-3.1-flash-lite` with Structured Outputs / strict JSON schema.
 
 LLM extraction is allowed to:
 
@@ -1376,7 +1376,7 @@ Logs must not expose private prompts or secrets.
 
 ## 18. Cost / Efficiency Requirements
 
-1. Use `gemini-2.5-flash-lite` for structured extraction, routing, light classification.
+1. Use `gemini-3.1-flash-lite` for structured extraction, routing, light classification.
 2. Use stronger model only where quality matters materially, especially roleplay demo if configured.
 3. Keep one-pass final generation where possible.
 4. Do not use LLM for Python-computable math.

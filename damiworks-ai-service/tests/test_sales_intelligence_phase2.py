@@ -5,6 +5,7 @@ Pure Python, zero API calls. Run from damiworks-ai-service/:
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 from datetime import datetime, timedelta, timezone
 
@@ -19,13 +20,13 @@ from app.sales_intelligence.defaults import default_business_profile, new_field_
 
 
 def _turn(message: str, *, metadata=None, dialog_state=None, enabled=True):
-    return run_intelligence_turn(
+    return asyncio.run(run_intelligence_turn(
         enabled=enabled,
         message=message,
         chat_history=[],
         session_metadata=metadata or {},
         dialog_state=dialog_state or {},
-    )
+    ))
 
 
 def _hours_ago(h: float) -> datetime:

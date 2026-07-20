@@ -1,7 +1,9 @@
-"""Intelligence turn orchestrator (Phase 1 shadow + Phase 2 persistence).
+"""Intelligence turn orchestrator (Phase 1 shadow + Phase 2 persistence + Phase B1 insights).
 
-``run_intelligence_turn`` is a pure function: it does not mutate the passed ``session_metadata``
-(works on a deepcopy), does not call Supabase, does not call the LLM. It returns:
+``run_intelligence_turn`` is a coroutine with no side effects of its own: it does not mutate
+the passed ``session_metadata`` (works on a deepcopy), does not call Supabase, and never
+calls the LLM directly — the optional ``llm_extractor`` coroutine is injected by the caller
+(dependency inversion; this module never imports ``gemini_service``). It returns:
 
 - ``debug``: the shadow fields logged into ``chat_logs.metadata.intelligence_shadow``;
 - ``persist_blocks``: metadata blocks the caller may write back into ``chat_sessions.metadata``
@@ -17,15 +19,18 @@ Later phases fold this logic into ``core/conversation_orchestrator.py``.
 from __future__ import annotations
 
 import copy
+import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from .defaults import default_scores, ensure_intelligence_metadata
-from .profile_merger import merge_business_profile
+from .profile_merger import merge_business_profile, merge_llm_insights
 from .roi_engine import build_roi_result
 from .scoring import compute_scores
 from .signal_analyzer import analyze_signals, should_run_llm_extraction
 from .strategy_engine import resolve_strategy
+
+logger = logging.getLogger(__name__)
 
 # conversation_behavior boolean flags that latch True once observed in a session.
 _BEHAVIOR_FLAGS = (
@@ -128,7 +133,7 @@ def _update_qualification_state(prior: dict[str, Any], strategy: dict[str, Any])
     return updated
 
 
-def run_intelligence_turn(
+async def run_intelligence_turn(
     *,
     enabled: bool,
     message: str,
@@ -136,8 +141,15 @@ def run_intelligence_turn(
     session_metadata: dict[str, Any] | None,
     dialog_state: dict[str, Any] | None,
     now: datetime | None = None,
+    llm_extractor: Callable[..., Awaitable[dict[str, Any] | None]] | None = None,
 ) -> dict[str, Any]:
-    """Compute the intelligence turn (see module docstring). Pure — no side effects."""
+    """Compute the intelligence turn (see module docstring). No side effects of its own.
+
+    ``llm_extractor`` (Phase B1) is an injected coroutine
+    ``(*, message, chat_history, business_profile) -> dict | None``. It is awaited only on
+    non-roleplay turns that pass the ``should_run_llm_extraction`` gate; the roleplay branch
+    above returns earlier, so the extractor never sees roleplay messages (§10.3.6).
+    """
     if not enabled:
         return _disabled_result()
 
@@ -183,6 +195,30 @@ def run_intelligence_turn(
     should_run, skip_reason = should_run_llm_extraction(message, chat_history)
     analysis = analyze_signals(message, chat_history)
     merged_profile = merge_business_profile(shadow_meta.get("business_profile") or {}, analysis)
+
+    # Phase B1: LLM insight extraction (injected). Merged into the profile BEFORE
+    # scoring/strategy so downstream logic can react to the fresh hypotheses.
+    insights: dict[str, Any] | None = None
+    if not should_run:
+        extraction_skipped_reason = skip_reason
+    elif llm_extractor is None:
+        extraction_skipped_reason = "extractor_not_configured"
+    else:
+        try:
+            insights = await llm_extractor(
+                message=message,
+                chat_history=chat_history,
+                business_profile=merged_profile,
+            )
+        except Exception:
+            logger.exception("LLM insight extractor failed (ignored, no behavior impact)")
+            insights = None
+            extraction_skipped_reason = "extractor_error"
+        else:
+            extraction_skipped_reason = None if insights else "extractor_no_signal"
+    if insights:
+        merged_profile = merge_llm_insights(merged_profile, insights)
+
     scores = compute_scores(merged_profile, analysis["behavior"])
     strategy = resolve_strategy(
         profile=merged_profile,
@@ -190,9 +226,6 @@ def run_intelligence_turn(
         behavior=analysis["behavior"],
         prior_qualification_state=qualification_state,
     )
-
-    # Phase 1 never calls the LLM extractor; record why it was not run.
-    extraction_skipped_reason = "phase1_llm_disabled" if should_run else skip_reason
 
     # Phase 7: deterministic ROI (Python only). Never runs in roleplay (handled above).
     roi_result = build_roi_result(
@@ -216,6 +249,7 @@ def run_intelligence_turn(
         "shadow_question_budget": strategy["question_budget"],
         "shadow_logging_reasons": strategy["logging_reasons"],
         "shadow_extraction_skipped_reason": extraction_skipped_reason,
+        "shadow_insights": insights or None,
         "shadow_roleplay_isolation_active": False,
         "shadow_bot_guidance": _compact_guidance(strategy["bot_guidance"]),
     }
@@ -235,7 +269,7 @@ def run_intelligence_turn(
     }
 
 
-def run_shadow_profiler(
+async def run_shadow_profiler(
     *,
     enabled: bool,
     message: str,
@@ -244,10 +278,10 @@ def run_shadow_profiler(
     dialog_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Backward-compatible Phase 1 entry point: returns the shadow ``debug`` dict only."""
-    return run_intelligence_turn(
+    return (await run_intelligence_turn(
         enabled=enabled,
         message=message,
         chat_history=chat_history,
         session_metadata=session_metadata,
         dialog_state=dialog_state,
-    )["debug"]
+    ))["debug"]

@@ -56,6 +56,10 @@ class ChatResponse(BaseModel):
     route: Route
     routes: list[Route] = Field(default_factory=list)
     answer: str
+    # Additive: the same answer split into 1-3 short messenger bubbles.
+    # ``answer`` always carries the joined text, so older clients (which never
+    # read this field) are unaffected.
+    answer_parts: list[str] | None = None
     checkout: bool = False
     product_id: str | None = None
     product: ProductCard | None = None

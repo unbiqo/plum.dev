@@ -22,7 +22,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency path
     google_api_exceptions = None
 
-from .config import Settings
+from .config import PROFILE_TEMPERATURES, Settings
 from .gemini_quota import (
     GeminiQuotaExhausted,
     GeminiQuotaLease,
@@ -30,6 +30,14 @@ from .gemini_quota import (
     estimate_embedding_tokens,
     estimate_tokens,
     normalize_model_name,
+)
+from .llm_providers import (
+    PROVIDER_FAILURE_COOLDOWN_SECONDS,
+    PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS,
+    GenerateRequest,
+    ProviderError,
+    ProviderRouter,
+    parse_model_ref,
 )
 from .llm_usage import build_llm_call_log, record_llm_call, usage_from_response
 from .schemas import ChatAttachment, ChatHistoryMessage, Route
@@ -358,6 +366,16 @@ MESSENGER_FORMAT_GUARD_PROMPT = """Messenger formatting guardrail:
 - Sentences must be short and direct. Avoid heavy clauses, long participial phrases, bureaucratic constructions, and overloaded explanations.
 - Correct shape example:
   "Отличный выбор, комплексная автоматизация — это самый мощный вариант.\n\nМы настроим умного ИИ-продавца, подключим авто-корзину для заказов и свяжем всё с вашей CRM-системой.\n\nЧтобы рассчитать точную стоимость под ваш объем трафика, ответьте: какой CRM или таблицей вы пользуетесь сейчас?"
+"""
+
+
+HUMAN_STYLE_PROMPT = """Human voice rules (highest style priority):
+- Write like a real consultant chatting in a messenger, not like a company newsletter.
+- The whole answer is 1-3 short messages (paragraphs separated by a blank line); never a wall of text.
+- Exactly ONE question per answer. Pick the single most useful question; turn every other question into a statement.
+- Empathy before selling: first react to what the client actually said (one short human reaction), only then move the sale forward.
+- No bureaucratic Russian: ban "данная информация", "осуществляется", "в рамках", "надеемся на сотрудничество", "будем рады ответить".
+- No filler closings like "Надеюсь, информация была полезна" — end with substance or the single question.
 """
 
 
@@ -690,6 +708,12 @@ class GeminiService:
             for api_key in settings.gemini_api_keys
         }
         self.quota = GeminiQuotaManager(settings.gemini_api_keys)
+        # Cross-provider routing (anthropic/openai pool entries). Providers
+        # without an API key are simply skipped during the pool walk.
+        self.provider_router = ProviderRouter(
+            anthropic_api_key=settings.anthropic_api_key or None,
+            openai_api_key=settings.openai_api_key or None,
+        )
         self._active_key_index = 0
         self._key_lock = Lock()
 
@@ -827,7 +851,7 @@ class GeminiService:
                 system_prompt,
                 GENERAL_SYSTEM_PROMPT,
             ),
-            temperature=0.4,
+            temperature=PROFILE_TEMPERATURES["sales_writer"],
             max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
         )
 
@@ -991,7 +1015,7 @@ class GeminiService:
             model_profile="rag_writer",
             prompt=prompt,
             system_instruction=system_instruction,
-            temperature=0.2,
+            temperature=PROFILE_TEMPERATURES["rag_writer"],
             max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
         )
         final_answer = await self._avoid_repeated_answer(
@@ -1135,7 +1159,7 @@ class GeminiService:
             model_profile="rag_writer",
             prompt=prompt,
             system_instruction=system_instruction,
-            temperature=0.2,
+            temperature=PROFILE_TEMPERATURES["rag_writer"],
             max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
             response_mime_type="application/json",
             response_schema=COMBINED_ROUTE_ANSWER_SCHEMA,
@@ -1260,7 +1284,7 @@ class GeminiService:
             model_profile="custom_demo_writer",
             prompt=prompt,
             system_instruction=ROLEPLAY_DEMO_SYSTEM_PROMPT,
-            temperature=0.2,
+            temperature=PROFILE_TEMPERATURES["custom_demo_writer"],
             max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
         )
         return self._format_roleplay_messenger_answer(answer.strip())
@@ -1309,7 +1333,7 @@ class GeminiService:
                     "STRICT JSON CONTRACT: respond only with a JSON object matching the schema. Do not wrap JSON in markdown.",
                 ]
             ),
-            temperature=0.2,
+            temperature=PROFILE_TEMPERATURES["custom_demo_writer"],
             max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
             response_mime_type="application/json",
             response_schema=COMBINED_ROUTE_ANSWER_SCHEMA,
@@ -1378,6 +1402,7 @@ class GeminiService:
                         base_system_prompt,
                         STYLE_GUARD_PROMPT,
                         MESSENGER_FORMAT_GUARD_PROMPT,
+                        HUMAN_STYLE_PROMPT,
                         PROMPT_LEAKAGE_GUARD_PROMPT,
                         CONTEXT_RELEVANCE_GUARD_PROMPT,
                         FLOW_FLEXIBILITY_GUARD_PROMPT,
@@ -1394,7 +1419,7 @@ class GeminiService:
                         ),
                     ]
                 ),
-                temperature=0.1,
+                temperature=PROFILE_TEMPERATURES["sales_writer"],
                 max_output_tokens=ECONOMY_MAX_OUTPUT_TOKENS,
             )
         except Exception as exc:
@@ -2073,6 +2098,9 @@ class GeminiService:
             call_start = time.monotonic()
             last_exc: BaseException | None = None
             local_limit_errors: list[BaseException] = []
+            # "provider:model" refs of every real attempt, in walk order —
+            # surfaced as call_info["fallback_chain"] and llm_call_logs.fallback_chain.
+            attempts: list[str] = []
 
             for output_token_budget in output_token_budgets:
                 config = types.GenerateContentConfig(
@@ -2100,6 +2128,111 @@ class GeminiService:
                             time.monotonic() - call_start, model_profile, candidate_model,
                         )
                         break
+
+                    ref = parse_model_ref(candidate_model)
+                    if ref.provider != "google":
+                        # Cross-provider candidate (anthropic/openai): a single
+                        # client per provider — no per-key walk, and a
+                        # per-(provider, model) cooldown instead of the quota guard.
+                        provider_client = self.provider_router.client_for(ref.provider)
+                        if provider_client is None:
+                            logger.debug(
+                                "Skipping pool candidate %s: provider %s is not configured (no API key)",
+                                candidate_model,
+                                ref.provider,
+                            )
+                            continue
+                        if self.provider_router.is_cooling_down(ref.provider, ref.model):
+                            logger.info(
+                                "Skipping pool candidate %s: cooling down after a recent failure",
+                                candidate_model,
+                            )
+                            continue
+                        attempts.append(str(ref))
+                        try:
+                            provider_result = provider_client.generate(
+                                GenerateRequest(
+                                    model=ref.model,
+                                    prompt=prompt,
+                                    system_instruction=system_instruction,
+                                    temperature=temperature,
+                                    max_output_tokens=output_token_budget,
+                                    response_mime_type=response_mime_type,
+                                    response_schema=response_schema,
+                                    timeout_ms=ref.timeout_ms or GEMINI_ATTEMPT_TIMEOUT_MS,
+                                )
+                            )
+                        except Exception as exc:
+                            last_exc = exc
+                            cooldown_seconds = None
+                            if isinstance(exc, ProviderError):
+                                if exc.is_rate_limit:
+                                    cooldown_seconds = PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS
+                                elif exc.is_server_error or exc.is_timeout:
+                                    cooldown_seconds = PROVIDER_FAILURE_COOLDOWN_SECONDS
+                            if cooldown_seconds is not None:
+                                self.provider_router.cool_down(
+                                    ref.provider, ref.model, cooldown_seconds
+                                )
+                            logger.warning(
+                                "%s text generation failed for model=%s; trying next pool candidate: %s",
+                                ref.provider,
+                                ref.model,
+                                exc,
+                            )
+                            continue
+
+                        if not provider_result.text:
+                            last_exc = RuntimeError(
+                                f"{ref.provider} model {ref.model} returned an empty response"
+                            )
+                            continue
+
+                        text = provider_result.text.strip()
+                        latency_ms = round((time.monotonic() - call_start) * 1000)
+                        call_log = build_llm_call_log(
+                            provider=ref.provider,
+                            task_type=model_profile,
+                            model_profile=model_profile,
+                            selected_model=ref.model,
+                            model_pool=candidates,
+                            usage=provider_result.usage,
+                            latency_ms=latency_ms,
+                            success=True,
+                            fallback_used=candidate_model != candidates[0],
+                            fallback_reason=str(last_exc) if last_exc else None,
+                            fallback_chain=attempts,
+                            escalation_used=(
+                                model_profile in ESCALATION_MODEL_PROFILES
+                                and candidate_model == candidates[0]
+                            ),
+                            metadata={"max_output_tokens": output_token_budget},
+                        )
+                        record_llm_call(call_log)
+                        if call_info is not None:
+                            call_info.update({
+                                "model_profile": model_profile,
+                                "model_pool": candidates,
+                                "provider": ref.provider,
+                                "selected_model": ref.model,
+                                "fallback_used": candidate_model != candidates[0],
+                                "fallback_reason": str(last_exc) if last_exc else None,
+                                "fallback_chain": list(attempts),
+                                "latency_ms": latency_ms,
+                                "input_tokens": call_log["input_tokens"],
+                                "output_tokens": call_log["output_tokens"],
+                                "total_tokens": call_log["total_tokens"],
+                                "cached_input_tokens": call_log["cached_input_tokens"],
+                                "thinking_tokens": call_log["thinking_tokens"],
+                                "estimated": call_log["estimated"],
+                                "input_cost_usd": call_log["input_cost_usd"],
+                                "output_cost_usd": call_log["output_cost_usd"],
+                                "total_cost_usd": call_log["total_cost_usd"],
+                                "pricing_missing": call_log["pricing_missing"],
+                                "call_id": call_log["call_id"],
+                            })
+                        return text
+
                     key_order = self._ordered_api_keys()
                     for api_key in key_order:
                         lease: GeminiQuotaLease | None = None
@@ -2123,6 +2256,7 @@ class GeminiService:
                             continue
 
                         try:
+                            attempts.append(f"google:{candidate_model}")
                             response = self.clients[api_key.name].models.generate_content(
                                 model=candidate_model,
                                 contents=prompt,
@@ -2210,6 +2344,7 @@ class GeminiService:
                             success=True,
                             fallback_used=candidate_model != candidates[0],
                             fallback_reason=str(last_exc) if last_exc else None,
+                            fallback_chain=attempts,
                             escalation_used=(
                                 model_profile in ESCALATION_MODEL_PROFILES
                                 and candidate_model == candidates[0]
@@ -2238,9 +2373,11 @@ class GeminiService:
                             call_info.update({
                                 "model_profile": model_profile,
                                 "model_pool": candidates,
+                                "provider": "gemini",
                                 "selected_model": candidate_model,
                                 "fallback_used": candidate_model != candidates[0],
                                 "fallback_reason": str(last_exc) if last_exc else None,
+                                "fallback_chain": list(attempts),
                                 "latency_ms": latency_ms,
                                 "input_tokens": call_log["input_tokens"],
                                 "output_tokens": call_log["output_tokens"],
@@ -2279,15 +2416,18 @@ class GeminiService:
                 error_type=type(last_exc).__name__ if last_exc else "RuntimeError",
                 fallback_used=True,
                 fallback_reason=str(last_exc) if last_exc else "all candidates exhausted",
+                fallback_chain=attempts,
             )
             record_llm_call(failure_call)
             if call_info is not None:
                 call_info.update({
                     "model_profile": model_profile,
                     "model_pool": candidates,
+                    "provider": None,
                     "selected_model": None,
                     "fallback_used": True,
                     "fallback_reason": str(last_exc) if last_exc else "all candidates exhausted",
+                    "fallback_chain": list(attempts),
                     "latency_ms": latency_ms,
                     "input_tokens": failure_call["input_tokens"],
                     "output_tokens": failure_call["output_tokens"],

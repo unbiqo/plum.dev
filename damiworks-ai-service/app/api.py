@@ -51,6 +51,12 @@ from .sales_intelligence import (
     run_intelligence_turn,
     update_question_budget_after_answer,
 )
+from .sales_intelligence.extractor import INSIGHT_SCHEMA, extract_insights
+from .response_stylist import (
+    STYLE_REPAIR_SYSTEM_PROMPT,
+    build_style_repair_prompt,
+    style_answer,
+)
 from .schemas import (
     ChatAttachment,
     ChatHistoryMessage,
@@ -1613,7 +1619,7 @@ async def _build_and_log_roleplay_gate_response(
     return response
 
 
-def _safe_run_intelligence_turn(
+async def _safe_run_intelligence_turn(
     *,
     gemini: GeminiService,
     message: str,
@@ -1623,14 +1629,50 @@ def _safe_run_intelligence_turn(
 ) -> dict[str, Any]:
     """Run the intelligence turn (shadow debug + persist blocks). Observation only — it never
     affects the answer. Wrapped so any failure is swallowed and can never break a request.
+
+    Phase B1: injects the LLM insight extractor (``insight_extractor`` profile, strict JSON)
+    when both the shadow flag and INSIGHT_EXTRACTOR_ENABLED are on and the conversation has
+    not exceeded its cost budget. Otherwise the turn runs heuristic-only.
     """
     try:
-        return run_intelligence_turn(
-            enabled=gemini.settings.intelligence_shadow_enabled,
+        settings = gemini.settings
+        llm_extractor = None
+        if (
+            settings.intelligence_shadow_enabled
+            and settings.insight_extractor_enabled
+            and not session_metadata.get("cost_budget_exceeded")
+        ):
+
+            async def llm_extractor(
+                *,
+                message: str,
+                chat_history: list | None,
+                business_profile: dict | None,
+            ) -> dict | None:
+                return await extract_insights(
+                    message=message,
+                    chat_history=chat_history,
+                    business_profile=business_profile,
+                    llm_call=lambda *, prompt, system_instruction: gemini._generate_text(
+                        model=settings.router_model,
+                        model_pool=None,
+                        model_profile="insight_extractor",
+                        prompt=prompt,
+                        system_instruction=system_instruction,
+                        temperature=0.1,
+                        max_output_tokens=400,
+                        response_mime_type="application/json",
+                        response_schema=INSIGHT_SCHEMA,
+                    ),
+                )
+
+        return await run_intelligence_turn(
+            enabled=settings.intelligence_shadow_enabled,
             message=message,
             chat_history=chat_history,
             session_metadata=session_metadata,
             dialog_state=dialog_state,
+            llm_extractor=llm_extractor,
         )
     except Exception:
         logger.exception("Intelligence turn failed (ignored, no behavior impact)")
@@ -2220,7 +2262,7 @@ async def chat(
         # Intelligence turn: shadow classification + persistable metadata blocks. Computed after
         # dialog_state/roleplay are settled, before any early return, so it logs on every path.
         # Observation only — never affects the answer.
-        intelligence_turn = _safe_run_intelligence_turn(
+        intelligence_turn = await _safe_run_intelligence_turn(
             gemini=gemini,
             message=payload.message,
             chat_history=effective_history,
@@ -2694,6 +2736,13 @@ async def chat(
             response_instruction = _join_non_empty(
                 response_instruction, commercial_policy["price_response_guidance"]
             )
+        # Phase B1: surface LLM-extracted hidden insights to the writer as soft hypotheses.
+        # The block instructs the writer not to quote them verbatim; roleplay never sees it.
+        insights_instruction = _format_llm_insights_instruction(
+            (session_metadata.get("business_profile") or {}).get("llm_insights")
+        )
+        if not roleplay_demo_active and insights_instruction:
+            response_instruction = _join_non_empty(response_instruction, insights_instruction)
         checkout_products: list[ProductCard] = []
         selected_product: ProductCard | None = None
 
@@ -3011,6 +3060,38 @@ async def chat(
                     else None
                 ),
             )
+        # Human-style post-processing: shape the final answer into 1-3 short
+        # messenger parts with exactly one question. Runs after all guardrails/
+        # sanitizers, before dialog-state tracking, so state matches what the
+        # user actually sees. Best-effort: any failure keeps the plain answer.
+        answer_parts: list[str] | None = None
+        if answer and answer.strip() and not roleplay_output_active:
+            try:
+                async def _style_repair(text: str) -> str | None:
+                    return await gemini._generate_text(
+                        model=gemini.settings.router_model,
+                        model_pool=None,
+                        model_profile="classifier",
+                        prompt=build_style_repair_prompt(text),
+                        system_instruction=STYLE_REPAIR_SYSTEM_PROMPT,
+                        temperature=0.2,
+                        max_output_tokens=600,
+                    )
+
+                styled_parts = await style_answer(
+                    answer,
+                    llm_repair=(
+                        None
+                        if session_metadata.get("cost_budget_exceeded")
+                        else _style_repair
+                    ),
+                )
+                if styled_parts:
+                    answer = "\n\n".join(styled_parts)
+                    answer_parts = styled_parts if len(styled_parts) > 1 else None
+            except Exception:
+                logger.exception("Response stylist failed (ignored, plain answer kept)")
+                answer_parts = None
         dialog_state = _update_dialog_state_after_answer(
             dialog_state=dialog_state,
             user_message=payload.message,
@@ -3061,6 +3142,10 @@ async def chat(
                 "skip_reason": "error",
             }
         session_metadata[DIALOG_STATE_KEY] = dialog_state
+        # Soft per-conversation LLM cost guard: accumulate this turn's cost and
+        # flag budget overrun in the persisted session metadata. Phase A only
+        # records/flags; throttling optional features is wired up later.
+        _update_cost_budget_guard(session_metadata, gemini.settings)
         await supabase.upsert_chat_session_metadata(
             instance_id=payload.instance_id,
             channel=payload.channel,
@@ -3077,12 +3162,14 @@ async def chat(
             route=primary_route,
             routes=routes,
             answer=answer,
+            answer_parts=answer_parts,
             checkout=bool(has_checkout_close_intent and selected_product),
             product_id=selected_product.product_id if has_checkout_close_intent and selected_product else None,
             product=selected_product if has_checkout_close_intent else None,
             lead_status=consultant_lead_status,
             lead_sent=consultant_lead_sent,
             metadata={
+                "style_parts_count": len(answer_parts) if answer_parts else 1,
                 "intelligence_shadow": shadow_debug,
                 "prompt_composer": {
                     "prompt_composer_applied": bool(prompt_composer_result.get("applied")),
@@ -3734,6 +3821,38 @@ def _session_dialog_message_count(dialog: str) -> int:
 
 def _join_non_empty(*parts: str) -> str:
     return "\n\n".join(part.strip() for part in parts if part and part.strip())
+
+
+# Labels for the writer-facing llm_insights block (RU, user-facing prompt text).
+_LLM_INSIGHT_LABELS = {
+    "pain": "боль",
+    "budget_signals": "бюджетные сигналы",
+    "urgency": "срочность",
+    "hidden_objection": "скрытое возражение (гипотеза)",
+    "client_intent_vector": "куда движется интент (гипотеза)",
+    "stage": "стадия воронки",
+}
+
+
+def _format_llm_insights_instruction(llm_insights: Any) -> str:
+    """Render the persisted ``business_profile.llm_insights`` block as a writer instruction.
+
+    Defensive: any malformed input yields "" so the answer path is never broken.
+    """
+    if not isinstance(llm_insights, dict):
+        return ""
+    lines: list[str] = []
+    for field, label in _LLM_INSIGHT_LABELS.items():
+        wrapped = llm_insights.get(field)
+        value = wrapped.get("value") if isinstance(wrapped, dict) else wrapped
+        if value in (None, ""):
+            continue
+        lines.append(f"- {label}: {value}")
+    if not lines:
+        return ""
+    return (
+        "Скрытые сигналы клиента (гипотезы, не цитировать дословно):\n" + "\n".join(lines)
+    )
 
 
 def _sanitize_legacy_checkout_context(text: str) -> str:
@@ -5005,6 +5124,33 @@ def _build_log_metadata(response: ChatResponse) -> dict[str, Any]:
     if response.product:
         metadata["product"] = response.product.model_dump(exclude_none=True)
     return metadata
+
+
+def _update_cost_budget_guard(session_metadata: dict[str, Any], settings: "Settings") -> None:
+    """Accumulate this turn's LLM cost into the session metadata and flag overrun.
+
+    Soft budget only: when the conversation's total crosses
+    settings.lead_cost_budget_usd we set ``cost_budget_exceeded`` and log a
+    warning. Skipping optional features on overrun is a later phase; nothing
+    here may break the chat response.
+    """
+    try:
+        calls = current_llm_calls()
+        if not calls:
+            return
+        turn_cost = aggregate_llm_calls(calls).get("total_cost_usd") or 0.0
+        total = float(session_metadata.get("llm_cost_total_usd") or 0.0) + float(turn_cost)
+        session_metadata["llm_cost_total_usd"] = round(total, 8)
+        budget = float(getattr(settings, "lead_cost_budget_usd", 0.15) or 0.15)
+        if total > budget and not session_metadata.get("cost_budget_exceeded"):
+            session_metadata["cost_budget_exceeded"] = True
+            logger.warning(
+                "Lead cost budget exceeded: conversation total %.6f USD > budget %.6f USD",
+                total,
+                budget,
+            )
+    except Exception:
+        logger.exception("cost budget guard failed (ignored, no behavior impact)")
 
 
 def _checkout_contact_guard_answer(

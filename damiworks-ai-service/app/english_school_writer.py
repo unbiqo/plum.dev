@@ -307,6 +307,7 @@ async def write_response(
     raw = await gemini._generate_text(
         model=gemini.settings.general_model,
         model_pool=gemini.settings.general_model_pool,
+        model_profile="english_school_writer",
         prompt=full_prompt,
         system_instruction=system,
         temperature=0.35 if not repair else 0.2,

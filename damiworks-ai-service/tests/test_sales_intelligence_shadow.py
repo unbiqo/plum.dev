@@ -5,6 +5,7 @@ Pure Python, zero API calls. Run from damiworks-ai-service/:
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 
 import pytest
@@ -23,13 +24,13 @@ from app.sales_intelligence.strategy_engine import resolve_strategy
 
 
 def _shadow(message: str, *, metadata=None, dialog_state=None, enabled=True):
-    return run_shadow_profiler(
+    return asyncio.run(run_shadow_profiler(
         enabled=enabled,
         message=message,
         chat_history=[],
         session_metadata=metadata or {},
         dialog_state=dialog_state or {},
-    )
+    ))
 
 
 # ---------------------------------------------------------------------------

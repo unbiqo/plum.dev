@@ -49,13 +49,9 @@ class GeminiQuotaExhausted(RuntimeError):
     pass
 
 
-TEXT_MODEL_LIMITS = {
-    "gemini-2.5-flash-lite": ModelLimits(
-        rpm=DEFAULT_TEXT_RPM,
-        tpm=DEFAULT_TEXT_TPM,
-        rpd=DEFAULT_TEXT_RPD,
-    ),
-}
+# No text model needs bespoke limits right now: every current model is covered
+# by the conservative defaults in limits_for_model below.
+TEXT_MODEL_LIMITS: dict[str, ModelLimits] = {}
 EMBEDDING_MODEL_LIMITS = {
     "text-embedding-004": ModelLimits(
         rpm=DEFAULT_EMBEDDING_RPM,

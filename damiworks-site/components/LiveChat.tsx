@@ -36,7 +36,17 @@ import type { DictLiveChat, DictIntake, DictIntakeQuestion } from '@/lib/i18n'
 // Types
 // ---------------------------------------------------------------------------
 
-type TextMessage = { kind: 'text'; id?: string; from: 'user' | 'ai'; text: string; isIntake: boolean }
+type TextMessage = {
+  kind: 'text'
+  id?: string
+  from: 'user' | 'ai'
+  text: string
+  isIntake: boolean
+  // Non-final bubbles of a multi-part AI answer (answer_parts): rendered as
+  // their own bubble but carry no feedback widget — feedback lives on the
+  // final part.
+  isPart?: boolean
+}
 type SummaryMessage = { kind: 'summary' }
 type Message = TextMessage | SummaryMessage
 
@@ -766,18 +776,26 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
       if (!res.ok) throw new Error('server_error')
       const data = (await res.json()) as {
         answer: string
+        answer_parts?: string[] | null
         lead_status?: string | null
         lead_sent?: boolean
       }
 
-      const aiMsg: Message = {
+      // Multi-bubble contract: when the backend splits the answer into short
+      // messenger parts, render each as its own bubble (feedback on the last).
+      const parts = Array.isArray(data.answer_parts)
+        ? data.answer_parts.filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+        : []
+      const bubbles = parts.length > 1 ? parts : [data.answer]
+      const aiMsgs: Message[] = bubbles.map((text, idx) => ({
         kind: 'text',
-        id: assistantMessageId,
+        id: idx === bubbles.length - 1 ? assistantMessageId : createMessageId('site'),
         from: 'ai',
-        text: data.answer,
+        text,
         isIntake: false,
-      }
-      setMessages((prev) => [...prev, aiMsg])
+        isPart: bubbles.length > 1 && idx < bubbles.length - 1,
+      }))
+      setMessages((prev) => [...prev, ...aiMsgs])
 
       // Lead status applies on both paths — free-form conversations collect
       // contacts too, not only the questionnaire flow.
@@ -980,7 +998,7 @@ export default function LiveChat({ dict, intake: intakeDict, locale, onStateChan
                 >
                   {msg.text}
                 </div>
-                {msg.from === 'ai' && (
+                {msg.from === 'ai' && !msg.isPart && (
                   <MessageFeedback
                     instanceId={SITE_INSTANCE_ID}
                     chatId={chatId}

@@ -55,6 +55,7 @@ class SupabaseService:
         self._quality_feedback_available = _TableAvailability()
         self._ai_conversations_available = _TableAvailability()
         self._llm_call_logs_available = _TableAvailability()
+        self._eval_runs_available = _TableAvailability()
 
     async def search_knowledge_base(
         self,
@@ -236,6 +237,10 @@ class SupabaseService:
             lead_status,
             metadata,
         )
+
+    async def insert_eval_run(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Best-effort insert into eval_runs (nightly quality eval results)."""
+        return await asyncio.to_thread(self._insert_eval_run_sync, row)
 
     async def list_ai_conversations(
         self,
@@ -1148,6 +1153,7 @@ class SupabaseService:
                     "error_type": call.get("error_type"),
                     "fallback_used": bool(call.get("fallback_used")),
                     "fallback_reason": call.get("fallback_reason"),
+                    "fallback_chain": call.get("fallback_chain") or [],
                     "escalation_used": bool(call.get("escalation_used")),
                     "escalation_reason": call.get("escalation_reason"),
                     "metadata": call.get("metadata") or {},
@@ -1168,6 +1174,36 @@ class SupabaseService:
             return
 
         self._llm_call_logs_available.mark_available()
+
+    def _insert_eval_run_sync(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        if self._eval_runs_available.blocked():
+            return None
+
+        payload = {
+            "run_date": row.get("run_date"),
+            "conversation_id": row.get("conversation_id"),
+            "instance_id": row.get("instance_id"),
+            "chat_id": row.get("chat_id"),
+            "scores": row.get("scores") or {},
+            "verdict": row.get("verdict"),
+            "recommendations": row.get("recommendations"),
+            "judge_model": row.get("judge_model"),
+            "batch_id": row.get("batch_id"),
+            "total_cost_usd": row.get("total_cost_usd"),
+        }
+        try:
+            response = self.client.table("eval_runs").insert(payload).execute()
+        except Exception as exc:
+            if self._is_missing_table_error(exc):
+                self._eval_runs_available.mark_unavailable()
+                logger.warning("eval_runs table unavailable; eval run insert skipped")
+                return None
+            logger.exception("Failed to insert eval_runs row")
+            return None
+
+        self._eval_runs_available.mark_available()
+        data = list(response.data or [])
+        return data[0] if data else payload
 
     def _list_llm_call_logs_for_conversations_sync(
         self,

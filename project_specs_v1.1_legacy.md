@@ -657,9 +657,9 @@ Embeddings генерируются через `gemini.get_embedding()` → `tex
 
 | Тип задачи | Рекомендуемая модель | Settings key |
 |---|---|---|
-| Роутинг, HyDE rewrite, sales-stage classify | `gemini-2.5-flash-lite` | `router_model` |
-| RAG_REQUIRED, CHECKOUT ответы | `gemini-2.5-flash-lite` (default) | `rag_model` |
-| GENERAL ответы | `gemini-2.5-flash-lite` | `general_model` |
+| Роутинг, HyDE rewrite, sales-stage classify | `gemini-3.1-flash-lite` | `router_model` |
+| RAG_REQUIRED, CHECKOUT ответы | `gemini-3.1-flash-lite` (default) | `rag_model` |
+| GENERAL ответы | `gemini-3.1-flash-lite` | `general_model` |
 | Roleplay demo | `gemini-2.5-flash` (full) — повышенное качество B2C симуляции | `general_model` (отдельный pool) |
 | Embeddings | `text-embedding-004` | `embedding_model` |
 

@@ -38,15 +38,16 @@ def _make_service() -> GeminiService:
         gemini_api_keys=(GeminiApiKey("TEST", "fake-key"),),
         supabase_url="https://example.supabase.co",
         supabase_service_role_key="fake",
-        model_profiles={**MODEL_PROFILES, "medical_writer": ("gemini-3.1-flash-lite", "gemini-2.5-flash-lite")},
+        model_profiles={**MODEL_PROFILES, "medical_writer": ("gemini-3.1-flash-lite", "gemini-3.5-flash")},
     )
     return GeminiService(settings)
 
 
 def test_cost_calculation_known_models() -> None:
     assert calculate_llm_cost("gemini-3.1-flash-lite", 1_000_000, 1_000_000)["total_cost_usd"] == 1.75
-    assert calculate_llm_cost("gemini-2.5-flash-lite", 1_000_000, 1_000_000)["total_cost_usd"] == 0.5
     assert calculate_llm_cost("gemini-3-flash-preview", 1_000_000, 1_000_000)["total_cost_usd"] == 3.5
+    assert calculate_llm_cost("claude-sonnet-5", 1_000_000, 1_000_000)["total_cost_usd"] == 18.0
+    assert calculate_llm_cost("gpt-5.4-nano", 1_000_000, 1_000_000)["total_cost_usd"] == 1.0
 
 
 def test_cost_calculation_unknown_model_marks_missing_pricing() -> None:
@@ -127,9 +128,9 @@ def test_generate_text_fallback_logs_selected_fallback_model() -> None:
         end_llm_usage_context(token)
 
     assert text == "fallback"
-    assert call_info["selected_model"] == "gemini-2.5-flash-lite"
+    assert call_info["selected_model"] == "gemini-3.5-flash"
     assert call_info["fallback_used"] is True
-    assert calls[0]["selected_model"] == "gemini-2.5-flash-lite"
+    assert calls[0]["selected_model"] == "gemini-3.5-flash"
     assert calls[0]["fallback_used"] is True
 
 

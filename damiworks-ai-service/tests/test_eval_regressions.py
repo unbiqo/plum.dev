@@ -6,6 +6,8 @@ Run from damiworks-ai-service/:
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.api import (
@@ -30,10 +32,10 @@ _ENABLED = {
 
 
 def _turn(message, metadata=None):
-    return run_intelligence_turn(
+    return asyncio.run(run_intelligence_turn(
         enabled=True, message=message, chat_history=[],
         session_metadata=metadata or {}, dialog_state={},
-    )
+    ))
 
 
 # ---------------------------------------------------------------------------

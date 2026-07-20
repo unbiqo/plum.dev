@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
     // present, is logged so a user report can be traced to the backend line.
     const data = (await res.json().catch(() => null)) as {
       answer?: string
+      answer_parts?: string[] | null
       lead_status?: string | null
       lead_sent?: boolean
       metadata?: Record<string, unknown> | null
@@ -113,8 +114,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'backend_error' }, { status: 502 })
     }
 
+    // Multi-bubble contract is additive: forward parts only when the backend
+    // produced more than one; older backends simply omit the field.
+    const answerParts = Array.isArray(data.answer_parts)
+      ? data.answer_parts.filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+      : []
+
     return NextResponse.json({
       answer: data.answer,
+      answer_parts: answerParts.length > 1 ? answerParts : null,
       lead_status: data.lead_status ?? null,
       lead_sent: Boolean(data.lead_sent),
       metadata: data.metadata ?? null,

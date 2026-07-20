@@ -1,0 +1,207 @@
+# Golden dataset for the LLM insight extractor (Phase B1).
+# 20 labeled B2B AI-automation sales dialogs (RU). Each case:
+#   id:      unique slug
+#   history: 0-4 prior messages (role: user|assistant, content: text)
+#   message: the current user message to extract from
+#   expect:  subset of insight fields the extractor should return
+#            (pain, budget_signals, urgency, hidden_objection,
+#             client_intent_vector, stage)
+# Cases marked # UNSPOKEN carry a hidden objection / intent vector that is
+# NOT said aloud in the current message and must be inferred from history.
+- id: hot_lead_ready_for_demo
+  history:
+    - role: user
+      content: "У нас интернет-магазин, заявки сыплют, менеджеры не успевают отвечать"
+    - role: assistant
+      content: "Понимаю. AI-продавец отвечает за секунды и ведёт до оплаты. Хотите посмотреть, как это работает?"
+  message: "Давайте демо, хочу посмотреть, как это работает на практике"
+  expect:
+    pain: "менеджеры не успевают отвечать на заявки"
+    client_intent_vector: "движется к демо и внедрению"
+    stage: "decision"
+
+- id: price_haggling_two_channels
+  history:
+    - role: assistant
+      content: "Подключение WhatsApp или Telegram обсуждается отдельно, по объёму заявок."
+  message: "А если берём два канала сразу, скидка будет?"
+  expect:
+    budget_signals: "торгуется, спрашивает скидку за два канала"
+    stage: "consideration"
+
+- id: too_expensive_objection
+  history: []
+  message: "Посмотрел ваши цены — для нас сейчас дорого"
+  expect:
+    budget_signals: "считает цену дорогой для текущего бюджета"
+    hidden_objection: "не уверен, что внедрение окупится"
+    stage: "consideration"
+
+- id: competitor_cheaper
+  history:
+    - role: user
+      content: "Мы выбираем между вами и ещё одной компанией"
+  message: "У конкурента то же самое на 30% дешевле, чем вы мне озвучили"
+  expect:
+    budget_signals: "сравнивает цену с конкурентом, у которого дешевле на 30%"
+    client_intent_vector: "сравнивает с конкурентом, выбор ещё не сделан"
+    stage: "consideration"
+
+- id: need_to_think
+  history:
+    - role: assistant
+      content: "Могу зафиксировать условия и прислать расчёт окупаемости."
+  message: "Надо подумать, вернусь к вам позже"
+  expect:
+    hidden_objection: "есть неозвученное сомнение — цена, доверие или сроки"
+    urgency: "low"
+    stage: "consideration"
+
+- id: urgent_launch_deadline
+  history: []
+  message: "Нужно запустить бота до конца месяца, у нас горит сезон распродаж"
+  expect:
+    urgency: "high"
+    client_intent_vector: "движется к быстрому старту"
+    stage: "decision"
+
+- id: no_budget_at_all
+  history: []
+  message: "Идея интересная, но бюджета на автоматизацию сейчас нет вообще"
+  expect:
+    budget_signals: "бюджета нет"
+    urgency: "low"
+    stage: "awareness"
+
+- id: enterprise_procurement
+  history:
+    - role: user
+      content: "Мы сеть клиник, 12 филиалов, централизованная закупка"
+  message: "У нас тендерный процесс, решение принимает закупка вместе с IT-директором"
+  expect:
+    budget_signals: "бюджет через тендерный процесс"
+    client_intent_vector: "движется по внутреннему закупочному процессу"
+    stage: "consideration"
+
+- id: curiosity_market_research
+  history: []
+  message: "Да просто смотрю, что сейчас вообще есть на рынке по AI для продаж"
+  expect:
+    client_intent_vector: "изучает рынок без намерения покупки сейчас"
+    urgency: "low"
+    stage: "awareness"
+
+- id: technical_integration_question
+  history:
+    - role: user
+      content: "У нас самописная CRM и 1С на складе"
+  message: "А ваш бот сможет интегрироваться с 1С и нашей самописной CRM?"
+  expect:
+    client_intent_vector: "проверяет техническую применимость, интерес растёт"
+    stage: "consideration"
+
+# UNSPOKEN: внешне нейтральный вопрос, но клиент дважды обошёл тему цены.
+- id: unspoken_price_avoidance
+  history:
+    - role: assistant
+      content: "По стоимости сориентирую после пары уточнений — вам важен бюджетный диапазон?"
+    - role: user
+      content: "Расскажите лучше, что бот умеет"
+    - role: assistant
+      content: "Отвечает, квалифицирует, доводит до оплаты. Кстати, по бюджету есть ориентир?"
+    - role: user
+      content: "А интеграции какие есть?"
+  message: "А как быстро он внедряется?"
+  expect:
+    hidden_objection: "избегает тему цены — вероятно, боится услышать сумму или нет бюджета"
+    client_intent_vector: "осторожный интерес, оттягивает коммерческий разговор"
+    stage: "consideration"
+
+# UNSPOKEN: детальные вопросы, ни разу про цену/старт — собирает инфо не для себя.
+- id: unspoken_not_decision_maker
+  history:
+    - role: user
+      content: "Расскажите подробно про функционал бота и отчётность"
+    - role: assistant
+      content: "Квалификация, ответы 24/7, аналитика по диалогам. Хотите расчёт под ваш объём?"
+    - role: user
+      content: "А как выглядит отчёт для руководства? Можно пример?"
+  message: "Всё понятно, спасибо"
+  expect:
+    hidden_objection: "решение принимает не он — нужно согласование с руководителем"
+    client_intent_vector: "собирает информацию для начальника"
+
+- id: pain_missed_instagram_leads
+  history: []
+  message: "Менеджеры теряют заявки из инстаграма, за неделю штук пять точно уходит"
+  expect:
+    pain: "теряются заявки из Instagram"
+    stage: "consideration"
+
+- id: owner_night_overload
+  history:
+    - role: user
+      content: "Бизнес маленький, сотрудников нет"
+  message: "Я сам всем отвечаю, даже ночью, уже не вывозу"
+  expect:
+    pain: "владелец перегружен, отвечает клиентам сам даже ночью"
+    urgency: "high"
+
+- id: wants_test_on_own_dialogs
+  history:
+    - role: assistant
+      content: "Можем показать работу бота на примере вашей ниши."
+  message: "А можно потестировать на наших реальных диалогах с клиентами?"
+  expect:
+    client_intent_vector: "движется к тесту/демо на своих данных"
+    stage: "decision"
+
+- id: budget_range_stated
+  history: []
+  message: "Мы готовы выделить до 300 тысяч на автоматизацию продаж в этом квартале"
+  expect:
+    budget_signals: "бюджет до 300 тысяч на квартал"
+    stage: "consideration"
+
+- id: postponed_to_autumn
+  history:
+    - role: assistant
+      content: "Когда планируете заняться автоматизацией?"
+  message: "Реально подумаем об этом ближе к осени, сейчас не до этого"
+  expect:
+    urgency: "low"
+    client_intent_vector: "откладывает решение на несколько месяцев"
+    stage: "awareness"
+
+# UNSPOKEN: был горячий интерес, после предложения старта — сухой ответ, риск тишины.
+- id: unspoken_gone_cold
+  history:
+    - role: user
+      content: "О, а он правда сам квалифицирует лиды? Нам бы такое"
+    - role: assistant
+      content: "Да, и передаёт горячих менеджеру. Обсудим запуск на этой неделе?"
+    - role: user
+      content: "Ну не знаю, тут ещё вопросы по деньгам есть"
+    - role: assistant
+      content: "По бюджету подскажу вилку, если скажете объём заявок."
+  message: "Хорошо, я тогда напишу"
+  expect:
+    hidden_objection: "не устроил финансовый аспект, но озвучивать не хочет"
+    client_intent_vector: "остывает, риск ухода в тишину"
+    stage: "consideration"
+
+- id: multichannel_volume_overload
+  history: []
+  message: "У нас WhatsApp, Instagram и Авито, заявок 200 в день, два менеджера физически не справляются"
+  expect:
+    pain: "менеджеры не справляются с потоком заявок из нескольких каналов"
+    stage: "consideration"
+
+- id: data_security_concern
+  history:
+    - role: user
+      content: "У нас медицинский центр, данные пациентов чувствительные"
+  message: "А где хранятся данные наших клиентов и кто к ним имеет доступ?"
+  expect:
+    hidden_objection: "опасается за конфиденциальность данных клиентов"
+    stage: "consideration"
