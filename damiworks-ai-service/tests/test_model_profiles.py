@@ -15,15 +15,25 @@ import time
 import pytest
 
 from app.config import (
+    BOOKING_PRIMARY,
+    CHEAP_CROSS_PROVIDER_FALLBACK,
     DEFAULT_FAST_MODEL,
     ESCALATION_MODEL,
     FALLBACK_CHEAP_MODEL,
+    JUDGE_MODEL,
+    PREMIUM_MODEL,
+    WRITER_ESCALATION,
+    WRITER_FALLBACK_MODEL,
+    WRITER_PRIMARY,
     GeminiApiKey,
     MODEL_PROFILES,
     Settings,
     load_model_profiles,
 )
 from app.gemini_service import GEMINI_ATTEMPT_TIMEOUT_MS, GeminiService, sanitize_history
+from app.english_school_planner import plan_conversation_turn as plan_english_conversation_turn
+from app.english_school_state import build_conversation_state as build_english_conversation_state
+from app.english_school_writer import write_response as write_english_response
 from app.medical_center_planner import plan_conversation_turn
 from app.medical_center_state import build_conversation_state
 from app.medical_center_writer import write_response
@@ -42,14 +52,47 @@ def test_model_profiles_defaults_exist_for_every_named_task_type() -> None:
     for name in (
         "router", "classifier", "sales_writer", "rag_writer", "custom_demo_writer",
         "attachment_extraction", "memory_summary", "medical_planner", "medical_writer",
-        "medical_repair", "quality_eval", "default",
+        "medical_repair", "insight_extractor", "sales_writer_escalated",
+        "english_school_planner", "english_school_writer", "booking",
+        "quality_eval", "default",
     ):
         assert name in MODEL_PROFILES
         assert len(MODEL_PROFILES[name]) >= 2 or name in ("quality_eval",)
 
 
-def test_router_profile_is_fast_then_cheap_fallback() -> None:
-    assert MODEL_PROFILES["router"] == (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL)
+def test_new_profiles_have_the_expected_defaults() -> None:
+    # Cross-provider entries are part of the defaults now that ANTHROPIC/OPENAI
+    # keys are configured; a keyless deployment skips them during the pool walk
+    # (see test_llm_providers.py::test_unconfigured_provider_is_skipped_*).
+    assert MODEL_PROFILES["insight_extractor"] == (
+        DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL, CHEAP_CROSS_PROVIDER_FALLBACK,
+    )
+    assert MODEL_PROFILES["sales_writer_escalated"] == (
+        WRITER_ESCALATION, WRITER_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL,
+    )
+    assert MODEL_PROFILES["english_school_planner"] == (
+        DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL,
+    )
+    assert MODEL_PROFILES["english_school_writer"] == (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL)
+    assert MODEL_PROFILES["booking"] == (
+        BOOKING_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL,
+    )
+    # The OpenAI nano is never a PRIMARY cheap model — only a trailing fallback.
+    for name in ("router", "classifier", "insight_extractor", "memory_summary"):
+        pool = MODEL_PROFILES[name]
+        assert pool[0] == DEFAULT_FAST_MODEL, name
+        if CHEAP_CROSS_PROVIDER_FALLBACK in pool:
+            assert pool[-1] == CHEAP_CROSS_PROVIDER_FALLBACK, name
+
+
+def test_quality_eval_profile_uses_the_offline_judge_model() -> None:
+    assert MODEL_PROFILES["quality_eval"] == (JUDGE_MODEL, PREMIUM_MODEL)
+
+
+def test_router_profile_is_fast_then_cheap_fallbacks() -> None:
+    assert MODEL_PROFILES["router"] == (
+        DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL, CHEAP_CROSS_PROVIDER_FALLBACK,
+    )
 
 
 def test_medical_planner_profile_escalates_then_falls_back() -> None:
@@ -74,10 +117,15 @@ def test_medical_repair_profile_can_still_reach_the_escalation_model() -> None:
     assert MODEL_PROFILES["medical_repair"] != MODEL_PROFILES["medical_writer"]
 
 
-def test_sales_and_rag_writer_profiles_try_fast_then_escalate() -> None:
-    expected = (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL)
+def test_sales_and_rag_writer_profiles_use_the_writer_tier() -> None:
+    # WRITER tier: Claude Sonnet primary, gemini-3.5-flash cross-provider
+    # fallback, cheap Gemini as the last resort. The preview escalation model
+    # is deliberately NOT in the live writer pools (503 history).
+    expected = (WRITER_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL)
     assert MODEL_PROFILES["sales_writer"] == expected
     assert MODEL_PROFILES["rag_writer"] == expected
+    assert MODEL_PROFILES["custom_demo_writer"] == expected
+    assert ESCALATION_MODEL not in MODEL_PROFILES["sales_writer"]
 
 
 def test_no_live_profile_starts_with_the_preview_escalation_model() -> None:
@@ -94,14 +142,16 @@ def test_load_model_profiles_env_override(monkeypatch) -> None:
     monkeypatch.setenv("MEDICAL_WRITER_MODEL_POOL", "custom-model-a,custom-model-b")
     profiles = load_model_profiles()
     assert profiles["medical_writer"] == ("custom-model-a", "custom-model-b")
-    # Unset profiles keep the MODEL_PROFILES default.
-    assert profiles["medical_planner"] == MODEL_PROFILES["medical_planner"]
+    # Unset profiles keep the MODEL_PROFILES default. env_csv dedupes entries,
+    # which now matters: FALLBACK_CHEAP_MODEL equals DEFAULT_FAST_MODEL, so the
+    # loaded default pools collapse to the unique models only.
+    assert profiles["medical_planner"] == tuple(dict.fromkeys(MODEL_PROFILES["medical_planner"]))
 
 
 def test_load_model_profiles_missing_env_keeps_defaults() -> None:
     profiles = load_model_profiles()
-    assert profiles["router"] == MODEL_PROFILES["router"]
-    assert profiles["quality_eval"] == MODEL_PROFILES["quality_eval"]
+    assert profiles["router"] == tuple(dict.fromkeys(MODEL_PROFILES["router"]))
+    assert profiles["quality_eval"] == tuple(dict.fromkeys(MODEL_PROFILES["quality_eval"]))
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +347,33 @@ def test_medical_writer_uses_medical_repair_profile_on_repair_pass() -> None:
         "болит ухо", [], state, planner, "kb context", gem, repair="fix this",
     ))
     assert gem.profiles_seen == ["medical_repair"]
+
+
+def test_english_school_planner_uses_english_school_planner_profile() -> None:
+    gem = _RecordingGemini()
+    state = build_english_conversation_state([], "хочу английский для сына")
+    _run(plan_english_conversation_turn("хочу английский для сына", [], state, "kb context", gem))
+    assert gem.profiles_seen == ["english_school_planner"]
+
+
+def test_english_school_writer_uses_english_school_writer_profile() -> None:
+    gem = _RecordingGemini()
+    state = build_english_conversation_state([], "хочу английский для сына")
+    planner = gem._planner_json
+    _run(write_english_response("хочу английский для сына", [], state, planner, "kb context", gem))
+    assert gem.profiles_seen == ["english_school_writer"]
+
+
+def test_english_school_writer_repair_keeps_the_writer_profile() -> None:
+    # Unlike medical there is no separate repair profile for the English demo:
+    # the repair pass stays on english_school_writer.
+    gem = _RecordingGemini()
+    state = build_english_conversation_state([], "хочу английский для сына")
+    planner = gem._planner_json
+    _run(write_english_response(
+        "хочу английский для сына", [], state, planner, "kb context", gem, repair="fix this",
+    ))
+    assert gem.profiles_seen == ["english_school_writer"]
 
 
 def test_answer_with_route_json_uses_rag_writer_profile() -> None:

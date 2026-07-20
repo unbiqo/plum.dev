@@ -13,9 +13,9 @@ TEXT_GENERATION_MODEL = "gemini-3.1-flash-lite"
 # _generate_text walks the whole pool inside a single attempt, so a second model
 # rescues the turn without waiting for the tenacity retry/timeout to expire.
 # NOTE: gemini-2.5-flash (no "-lite") was retired by Google and must never be
-# the sole fallback again — gemini-2.5-flash-lite stays as the cheap emergency
-# fallback across every pool below.
-TEXT_GENERATION_FALLBACK_MODEL = "gemini-2.5-flash-lite"
+# the sole fallback again; gemini-2.5-flash-lite retires 2026-10-16, so the
+# legacy pool below also falls back to gemini-3.1-flash-lite.
+TEXT_GENERATION_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_TEXT_MODEL_POOL = (TEXT_GENERATION_MODEL, TEXT_GENERATION_FALLBACK_MODEL)
 
 # ---------------------------------------------------------------------------
@@ -39,9 +39,22 @@ DEFAULT_TEXT_MODEL_POOL = (TEXT_GENERATION_MODEL, TEXT_GENERATION_FALLBACK_MODEL
 #                           a live-chat default.
 # ---------------------------------------------------------------------------
 DEFAULT_FAST_MODEL = "gemini-3.1-flash-lite"
-FALLBACK_CHEAP_MODEL = "gemini-2.5-flash-lite"
+FALLBACK_CHEAP_MODEL = "gemini-3.1-flash-lite"
 ESCALATION_MODEL = "gemini-3-flash-preview"
 PREMIUM_MODEL = "gemini-3.5-flash"
+
+# Cross-provider routing constants. Pools support the "provider:model" syntax
+# (see app/llm_providers.parse_model_ref); a bare model name means "google".
+# Cross-provider entries appear in the default pools below: a deployment
+# without ANTHROPIC_API_KEY / OPENAI_API_KEY simply skips those candidates
+# (ProviderRouter has no client for the provider) and walks on to the next
+# pool entry, so GEMINI_API_KEY alone still works.
+CHEAP_CROSS_PROVIDER_FALLBACK = "openai:gpt-5.4-nano"
+WRITER_PRIMARY = "anthropic:claude-sonnet-5"
+WRITER_FALLBACK_MODEL = "gemini-3.5-flash"
+WRITER_ESCALATION = "anthropic:claude-opus-4-8"
+JUDGE_MODEL = "gemini-3.1-pro"
+BOOKING_PRIMARY = "openai:gpt-5.6-luna"
 
 # NOTE on ESCALATION_MODEL's position: gemini-3-flash-preview was made the
 # PRIMARY choice for the live writers and the medical planner. In production it
@@ -54,22 +67,42 @@ PREMIUM_MODEL = "gemini-3.5-flash"
 # default answers first, and the stronger model is still tried when the default
 # fails. Put it back in front (per profile) via the *_MODEL_POOL env vars once
 # Google's availability recovers — no code change needed.
+#
+# Pool entries may use the "provider:model" syntax (anthropic:/openai:); bare
+# names mean provider "google". A pool entry whose provider has no API key is
+# skipped during the walk, so the same defaults work with GEMINI_API_KEY alone.
 MODEL_PROFILES: dict[str, tuple[str, ...]] = {
-    "router": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
-    "classifier": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
-    "sales_writer": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
-    "rag_writer": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
-    "custom_demo_writer": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
+    # CHEAP tier: gemini-3.1-flash-lite stays the primary cheap model; the
+    # OpenAI nano is only a trailing cross-provider fallback, never primary.
+    "router": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL, CHEAP_CROSS_PROVIDER_FALLBACK),
+    "classifier": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL, CHEAP_CROSS_PROVIDER_FALLBACK),
+    # WRITER tier: live sales dialogue / rewrite / follow-up texts.
+    "sales_writer": (WRITER_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL),
+    "rag_writer": (WRITER_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL),
+    "custom_demo_writer": (WRITER_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL),
     "attachment_extraction": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, PREMIUM_MODEL),
-    "memory_summary": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
+    "memory_summary": (
+        DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL,
+        CHEAP_CROSS_PROVIDER_FALLBACK,
+    ),
     "medical_planner": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
     "medical_writer": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
     "medical_repair": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
-    "quality_eval": (PREMIUM_MODEL, ESCALATION_MODEL),
+    "insight_extractor": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL, CHEAP_CROSS_PROVIDER_FALLBACK),
+    # Escalated writer (hot lead / hard objection / repeated failures): opus first.
+    "sales_writer_escalated": (
+        WRITER_ESCALATION, WRITER_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL,
+    ),
+    "english_school_planner": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
+    "english_school_writer": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    # Booking (structured outputs): the OpenAI booking model first, Gemini fallback.
+    "booking": (BOOKING_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL),
+    "quality_eval": (JUDGE_MODEL, PREMIUM_MODEL),
     "default": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
 }
 # Env var name for each profile's pool override (CSV), e.g.
 # MEDICAL_PLANNER_MODEL_POOL=gemini-3-flash-preview,gemini-3.1-flash-lite
+# Values may mix providers: SALES_WRITER_MODEL_POOL=anthropic:claude-sonnet-5,gemini-3.5-flash
 _PROFILE_ENV_VARS: dict[str, str] = {
     "router": "ROUTER_MODEL_POOL",  # reuses the pre-existing env var
     "classifier": "CLASSIFIER_MODEL_POOL",
@@ -81,8 +114,25 @@ _PROFILE_ENV_VARS: dict[str, str] = {
     "medical_planner": "MEDICAL_PLANNER_MODEL_POOL",
     "medical_writer": "MEDICAL_WRITER_MODEL_POOL",
     "medical_repair": "MEDICAL_REPAIR_MODEL_POOL",
+    "insight_extractor": "INSIGHT_EXTRACTOR_MODEL_POOL",
+    "sales_writer_escalated": "SALES_WRITER_ESCALATED_MODEL_POOL",
+    "english_school_planner": "ENGLISH_SCHOOL_PLANNER_MODEL_POOL",
+    "english_school_writer": "ENGLISH_SCHOOL_WRITER_MODEL_POOL",
+    "booking": "BOOKING_MODEL_POOL",
     "quality_eval": "QUALITY_EVAL_MODEL_POOL",
     "default": "DEFAULT_MODEL_POOL",
+}
+
+# Per-profile generation temperature. Live writers run hot (0.8-0.85) so the
+# sales agent sounds like a human rather than a form letter; classifiers,
+# routers and extractors stay deterministic (0.0-0.2) and are set at their
+# call sites. Profiles not listed here keep their existing literal values
+# (e.g. medical/english writers at 0.35, guarded by their own test suites).
+PROFILE_TEMPERATURES: dict[str, float] = {
+    "sales_writer": 0.85,
+    "sales_writer_escalated": 0.85,
+    "rag_writer": 0.8,
+    "custom_demo_writer": 0.8,
 }
 
 
@@ -119,6 +169,7 @@ class Settings:
     enable_hyde_rewrite: bool = False
     enable_b2b_memory_summary: bool = True
     intelligence_shadow_enabled: bool = True
+    insight_extractor_enabled: bool = True
     supabase_products_table: str = "products"
     checkout_product_ids: tuple[str, ...] = (
         "ai-assistant-basic",
@@ -130,6 +181,14 @@ class Settings:
     lead_telegram_bot_token: str = ""
     lead_telegram_chat_id: str = ""
     quality_console_admin_token: str = ""
+    # Optional cross-provider keys. Empty means the provider is not configured:
+    # pool entries for it are skipped by the provider router (see
+    # app/llm_providers.ProviderRouter), so defaults never require them.
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    # Soft per-conversation LLM cost budget; crossing it only raises a flag in
+    # the session metadata (feature throttling is a later phase).
+    lead_cost_budget_usd: float = 0.15
 
     @property
     def gemini_api_key(self) -> str:
@@ -158,6 +217,19 @@ def env_int(name: str, default: int, *, min_value: int, max_value: int) -> int:
 
     try:
         parsed = int(value)
+    except ValueError:
+        return default
+
+    return max(min_value, min(parsed, max_value))
+
+
+def env_float(name: str, default: float, *, min_value: float, max_value: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        parsed = float(value)
     except ValueError:
         return default
 
@@ -258,6 +330,7 @@ def get_settings() -> Settings:
         enable_hyde_rewrite=env_bool("ENABLE_HYDE_REWRITE", False),
         enable_b2b_memory_summary=env_bool("ENABLE_B2B_MEMORY_SUMMARY", True),
         intelligence_shadow_enabled=env_bool("INTELLIGENCE_SHADOW_ENABLED", True),
+        insight_extractor_enabled=env_bool("INSIGHT_EXTRACTOR_ENABLED", True),
         supabase_products_table=os.getenv("SUPABASE_PRODUCTS_TABLE", "products"),
         checkout_product_ids=env_csv(
             "CHECKOUT_PRODUCT_IDS",
@@ -266,4 +339,12 @@ def get_settings() -> Settings:
         lead_telegram_bot_token=os.getenv("LEAD_TELEGRAM_BOT_TOKEN", ""),
         lead_telegram_chat_id=os.getenv("LEAD_TELEGRAM_CHAT_ID", ""),
         quality_console_admin_token=os.getenv("QUALITY_CONSOLE_ADMIN_TOKEN", ""),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY", ""),
+        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        lead_cost_budget_usd=env_float(
+            "LEAD_COST_BUDGET_USD",
+            0.15,
+            min_value=0.0,
+            max_value=100.0,
+        ),
     )
