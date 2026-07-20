@@ -1,15 +1,21 @@
-"""Nightly offline quality eval.
+"""Weekly offline quality eval.
 
-Samples 15-20% of a day's conversations from ai_conversations, judges each
-transcript with the offline JUDGE model (rubric: naturalness, pain_discovery,
-funnel_progression, rag_factual_accuracy, guardrail_compliance + verdict +
-prompt-diff recommendations), writes rows into eval_runs, and alerts the owner
-on Telegram when a rubric mean drops below its threshold.
+Takes ALL conversations of the past week (default window: the 7 days ending
+yesterday; volume is small, so no sampling), judges each transcript with the
+offline JUDGE model (rubric: naturalness, pain_discovery, funnel_progression,
+rag_factual_accuracy, guardrail_compliance + verdict + prompt-diff
+recommendations), writes rows into eval_runs, and alerts the owner on Telegram
+when a rubric mean drops below its threshold.
 
-Runs on the VPS cron inside the app container, e.g.:
+Runs on the VPS cron inside the app container WEEKLY, e.g. (Mondays 03:00 UTC):
 
-    python scripts/nightly_quality_eval.py
-    python scripts/nightly_quality_eval.py --date 2026-07-17 --sample-rate 0.2
+    0 3 * * 1 cd /opt/damiworks && docker compose exec -T api python scripts/nightly_quality_eval.py
+
+Manual runs stay supported (see AGENTS.md — run one after a manual test
+session over the demos):
+
+    python scripts/nightly_quality_eval.py                       # past 7 days
+    python scripts/nightly_quality_eval.py --date 2026-07-19 --days 1
     python scripts/nightly_quality_eval.py --no-batch --max 50 --dry-run
 
 Batch mode (Gemini Batch API, ~-50% cost) is the default; any batch failure
@@ -60,17 +66,23 @@ BATCH_MAX_WAIT_MINUTES = int(os.getenv("EVAL_BATCH_MAX_WAIT_MINUTES", "60"))
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Nightly quality eval of AI conversations")
+    parser = argparse.ArgumentParser(description="Weekly quality eval of AI conversations")
     parser.add_argument(
         "--date",
         default=None,
-        help="Day to evaluate (YYYY-MM-DD, UTC). Default: yesterday.",
+        help="Last day of the window (YYYY-MM-DD, UTC). Default: yesterday.",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=int(os.getenv("EVAL_WINDOW_DAYS", "7")),
+        help="Window size in days ending on --date (default 7 = weekly run).",
     )
     parser.add_argument(
         "--sample-rate",
         type=float,
-        default=float(os.getenv("EVAL_SAMPLE_RATE", "0.17")),
-        help="Fraction of conversations to judge (default 0.17 = ~15-20%%).",
+        default=float(os.getenv("EVAL_SAMPLE_RATE", "1.0")),
+        help="Fraction of conversations to judge (default 1.0 = all of them).",
     )
     parser.add_argument(
         "--max",
@@ -93,9 +105,10 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _day_window(day: date) -> tuple[str, str]:
-    start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
-    end = start + timedelta(days=1)
+def _window(day: date, days: int) -> tuple[str, str]:
+    """UTC [start, end) covering ``days`` days that END on ``day`` (inclusive)."""
+    end = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) + timedelta(days=1)
+    start = end - timedelta(days=max(days, 1))
     return start.isoformat(), end.isoformat()
 
 
@@ -213,7 +226,7 @@ async def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     day = date.fromisoformat(args.date) if args.date else (datetime.now(timezone.utc) - timedelta(days=1)).date()
-    date_from, date_to = _day_window(day)
+    date_from, date_to = _window(day, args.days)
 
     settings = get_settings()
     gemini = GeminiService(settings)
@@ -225,7 +238,10 @@ async def main() -> int:
         date_to=date_to,
         limit=500,
     )
-    logger.info("Conversations on %s: %d", day.isoformat(), len(rows))
+    logger.info(
+        "Conversations in window %s..%s (%dd): %d",
+        date_from[:10], day.isoformat(), args.days, len(rows),
+    )
     if not rows:
         return 0
 

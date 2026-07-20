@@ -52,7 +52,7 @@ FastAPI backend. All routes are under `/api/v1`.
 - `app/llm_usage.py` — per-request token/cost tracking.
 - `app/response_stylist.py` — deterministic "human style" post-processing: splits the final answer into 1–3 messenger parts (never drops content — overflow tail merges into the last part) and reduces it to exactly one question; optional cheap LLM repair pass is injected by the caller.
 - `app/booking_guardrail.py` — booking slot guardrail: the model may only speak slots supplied by the slot provider; invented dates/times are replaced with the safe "уточню и вернусь" answer.
-- `app/quality_eval.py` — offline judge rubric (naturalness, pain_discovery, funnel_progression, rag_factual_accuracy, guardrail_compliance); driven nightly by `scripts/nightly_quality_eval.py` into the `eval_runs` table.
+- `app/quality_eval.py` — offline judge rubric (naturalness, pain_discovery, funnel_progression, rag_factual_accuracy, guardrail_compliance); driven WEEKLY by `scripts/nightly_quality_eval.py` (100% of the week's dialogs, no sampling) into the `eval_runs` table.
 - `app/supabase_service.py` — Supabase client: RAG, chat logs, sessions, leads, feedback, tenant prompts.
 - `app/lead_notifier.py` — best-effort Telegram lead notifications to the owner.
 - `app/web_site_intake_policy.py` / `app/web_site_lead.py` — B2B website intake and lead-stage state machine.
@@ -62,7 +62,7 @@ FastAPI backend. All routes are under `/api/v1`.
 - `app/sales_intelligence/` — Adaptive Sales Intelligence layer (shadow profiler, scoring, strategy, ROI, commercial policy, question budget, wow router, insight extractor, etc.).
 - `app/demo_knowledge/` — static markdown knowledge bases for demos.
 - `tests/` — pytest suite, including phase-by-phase sales-intelligence tests and eval harness.
-- `scripts/` — utility scripts (deploy, RAG indexing, Telegram chat ID helper, prompt sync, `nightly_quality_eval.py` offline judge batch, `cost_report.py` SLO report).
+- `scripts/` — utility scripts (deploy, RAG indexing, Telegram chat ID helper, prompt sync, `nightly_quality_eval.py` weekly offline judge batch, `cost_report.py` SLO report).
 - `sql/` — Supabase schema migrations and helper SQL.
 - `Dockerfile` / `docker-compose.yml` / `Caddyfile` — VPS deployment artifacts.
 
@@ -372,6 +372,26 @@ Use `seed_damiworks.py` and `sync_damiworks_infrastructure.py` to bootstrap the 
 6. To enable prompt behavior, add the mode to `prompt_composer.ENABLED_MODES` and provide an instruction (tenant override key `prompt_mode_<mode>`).
 7. Add commercial framing in `app/sales_intelligence/commercial_policy.py` if price-relevant.
 8. Add tests in `tests/test_sales_intelligence_phaseN.py` and an E2E row.
+
+**Weekly quality eval (LLM judge):**
+
+The judge runs WEEKLY (not nightly), over 100% of the window's dialogs — volume is small, sampling is off by default. On the VPS it is scheduled via cron inside the app container:
+
+```cron
+# Mondays 03:00 UTC — judge the previous 7 days, all dialogs
+0 3 * * 1 cd /opt/damiworks && docker compose exec -T api python scripts/nightly_quality_eval.py
+```
+
+Manual runs are kept and expected: **after a manual test session over the demos, run the judge by hand** so the fresh dialogs get scored without waiting for Monday:
+
+```bash
+# today's dialogs only (UTC date)
+docker compose exec api python scripts/nightly_quality_eval.py --date $(date -u +%F) --days 1
+# local dev equivalent
+python scripts/nightly_quality_eval.py --date 2026-07-19 --days 1 --no-batch
+```
+
+`--sample-rate`, `--max`, `--instance`, `--dry-run` still work for narrower runs.
 
 **Run a full black-box eval:**
 

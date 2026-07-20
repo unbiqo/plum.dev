@@ -154,8 +154,29 @@ def test_mean_scores() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Nightly sampling helpers
+# Weekly-run sampling/window helpers
 # ---------------------------------------------------------------------------
+
+def test_weekly_default_sample_rate_takes_every_conversation() -> None:
+    # The weekly run judges 100% of dialogs (volume is small, no sampling).
+    from scripts.nightly_quality_eval import _sample_conversations
+    from datetime import date
+
+    rows = [{"instance_id": "i", "chat_id": f"c{n}"} for n in range(37)]
+    assert _sample_conversations(rows, 1.0, 200, date(2026, 7, 19)) == rows
+
+
+def test_weekly_window_spans_seven_days_ending_on_the_given_day() -> None:
+    from scripts.nightly_quality_eval import _window
+    from datetime import date
+
+    date_from, date_to = _window(date(2026, 7, 19), 7)
+    assert date_from == "2026-07-13T00:00:00+00:00"  # 7 full days: 13..19
+    assert date_to == "2026-07-20T00:00:00+00:00"    # exclusive end
+    one_from, one_to = _window(date(2026, 7, 19), 1)
+    assert one_from == "2026-07-19T00:00:00+00:00"
+    assert one_to == date_to
+
 
 def test_nightly_sampling_is_deterministic_and_bounded() -> None:
     from scripts.nightly_quality_eval import _sample_conversations
