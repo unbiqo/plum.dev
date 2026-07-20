@@ -65,14 +65,14 @@ assert.equal(detectSpecialty('терапевт'), 'Терапевт')
 assert.equal(detectSpecialty('ортопед'), 'Травматолог-ортопед')
 pass('detectSpecialty shows — instead of guessing when backend has no specialty')
 
-// Demo order remains DamiWorks -> Medical Center -> English School.
+// Demo order: RU is a clinic-focused landing — the English School tab is
+// intentionally hidden there (see the comment on the RU 'english' scenario in
+// lib/i18n.ts); EN keeps it visible as the third tab.
 function visibleOrder(locale: Locale): string[] {
   return getDict(locale).demo.scenarios.filter((s) => !s.hidden).map((s) => s.id)
 }
-for (const locale of ['ru', 'en'] as const) {
-  const order = visibleOrder(locale)
-  assert.deepEqual(order, ['damiworks', 'medical', 'english'], `${locale}: demo order`)
-}
+assert.deepEqual(visibleOrder('ru'), ['damiworks', 'medical'], 'ru: demo order')
+assert.deepEqual(visibleOrder('en'), ['damiworks', 'medical', 'english'], 'en: demo order')
 pass('demo order is DamiWorks, Medical Center, English School')
 
 // English School scenario still present and intact.

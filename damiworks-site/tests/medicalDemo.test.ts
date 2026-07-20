@@ -39,7 +39,7 @@ checkLocale('ru')
 const ruDemo = getDict('ru').demo
 assert.equal(ruDemo.medicalChat.introMessage, RU_INTRO, 'ru: intro message matches required copy')
 assert.ok(
-  ruDemo.medicalChat.quickReplies.includes('Записаться к врачу'),
+  ruDemo.medicalChat.quickReplies.includes('К какому врачу записаться?'),
   'ru: quick replies include booking chip',
 )
 pass('Russian dictionary contains required intro and quick replies')

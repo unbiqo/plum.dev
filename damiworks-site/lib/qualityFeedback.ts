@@ -116,14 +116,15 @@ export function createMessageId(prefix = 'msg'): string {
 export function ensureMessageIds<T extends QualityChatMessage>(
   messages: T[],
   prefix = 'msg',
-): T[] {
+): (T & { id: string })[] {
   let changed = false
   const next = messages.map((message) => {
     if (message.id) return message
     changed = true
     return { ...message, id: createMessageId(prefix) }
   })
-  return changed ? next : messages
+  // Every element has an id on return: pre-existing or assigned above.
+  return (changed ? next : messages) as (T & { id: string })[]
 }
 
 export function findPreviousUserMessage(
