@@ -73,7 +73,7 @@ def test_new_profiles_have_the_expected_defaults() -> None:
     assert MODEL_PROFILES["english_school_planner"] == (
         DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL,
     )
-    assert MODEL_PROFILES["english_school_writer"] == (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL)
+    assert MODEL_PROFILES["english_school_writer"] == (DEFAULT_FAST_MODEL, PREMIUM_MODEL)
     assert MODEL_PROFILES["booking"] == (
         BOOKING_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL,
     )
@@ -105,8 +105,61 @@ def test_medical_planner_profile_escalates_then_falls_back() -> None:
     )
 
 
-def test_medical_writer_profile_is_fast_then_cheap_fallback() -> None:
-    assert MODEL_PROFILES["medical_writer"] == (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL)
+def test_medical_writer_profile_is_premium_first_then_lite() -> None:
+    # Prospects watch the medical demo: the premium flash answers first, the
+    # cheap lite is only the provider-error rescue.
+    assert MODEL_PROFILES["medical_writer"] == (PREMIUM_MODEL, DEFAULT_FAST_MODEL)
+
+
+def test_english_school_writer_profile_is_lite_first_then_premium() -> None:
+    # Mass scenario: cheap lite leads, the premium flash is the fallback.
+    assert MODEL_PROFILES["english_school_writer"] == (DEFAULT_FAST_MODEL, PREMIUM_MODEL)
+
+
+def test_medical_writer_falls_back_from_premium_to_lite_on_provider_error() -> None:
+    svc = _make_service()
+    calls: list[str] = []
+
+    def fake_generate_content(*, model, contents, config):
+        calls.append(model)
+        if model == PREMIUM_MODEL:
+            raise RuntimeError("503 UNAVAILABLE. high demand")
+        return _FakeResponse("rescued")
+
+    svc.clients["TEST"].models.generate_content = fake_generate_content
+
+    info: dict[str, object] = {}
+    text = _run(svc._generate_text(
+        model="x", model_pool=None, model_profile="medical_writer",
+        prompt="hi", system_instruction="sys", temperature=0.2, call_info=info,
+    ))
+    assert text == "rescued"
+    assert calls == [PREMIUM_MODEL, DEFAULT_FAST_MODEL]
+    assert info["selected_model"] == DEFAULT_FAST_MODEL
+    assert info["fallback_used"] is True
+
+
+def test_english_school_writer_falls_back_from_lite_to_premium_on_provider_error() -> None:
+    svc = _make_service()
+    calls: list[str] = []
+
+    def fake_generate_content(*, model, contents, config):
+        calls.append(model)
+        if model == DEFAULT_FAST_MODEL:
+            raise RuntimeError("503 UNAVAILABLE. high demand")
+        return _FakeResponse("rescued")
+
+    svc.clients["TEST"].models.generate_content = fake_generate_content
+
+    info: dict[str, object] = {}
+    text = _run(svc._generate_text(
+        model="x", model_pool=None, model_profile="english_school_writer",
+        prompt="hi", system_instruction="sys", temperature=0.2, call_info=info,
+    ))
+    assert text == "rescued"
+    assert calls == [DEFAULT_FAST_MODEL, PREMIUM_MODEL]
+    assert info["selected_model"] == PREMIUM_MODEL
+    assert info["fallback_used"] is True
 
 
 def test_medical_repair_profile_can_still_reach_the_escalation_model() -> None:

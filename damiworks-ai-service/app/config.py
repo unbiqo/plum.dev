@@ -35,8 +35,9 @@ DEFAULT_TEXT_MODEL_POOL = (TEXT_GENERATION_MODEL, TEXT_GENERATION_FALLBACK_MODEL
 #   ESCALATION_MODEL      — stronger live model for tasks where a bad answer
 #                           costs more than the extra tokens (sales/RAG
 #                           grounding, medical planning/repair, extraction).
-#   PREMIUM_MODEL         — reserved for rare premium/offline/eval work, never
-#                           a live-chat default.
+#   PREMIUM_MODEL         — stronger flash tier: premium/offline/eval work plus
+#                           the client-facing medical demo writer (prospects
+#                           watch that demo, so quality beats pennies there).
 # ---------------------------------------------------------------------------
 DEFAULT_FAST_MODEL = "gemini-3.1-flash-lite"
 FALLBACK_CHEAP_MODEL = "gemini-3.1-flash-lite"
@@ -86,7 +87,11 @@ MODEL_PROFILES: dict[str, tuple[str, ...]] = {
         CHEAP_CROSS_PROVIDER_FALLBACK,
     ),
     "medical_planner": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
-    "medical_writer": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    # Demo writers, split by audience: the medical demo is what prospects watch,
+    # so the premium flash answers first and the cheap lite only rescues provider
+    # errors; the English school demo is the mass scenario, so lite leads and the
+    # premium flash is the emergency fallback.
+    "medical_writer": (PREMIUM_MODEL, DEFAULT_FAST_MODEL),
     "medical_repair": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
     "insight_extractor": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL, CHEAP_CROSS_PROVIDER_FALLBACK),
     # Escalated writer (hot lead / hard objection / repeated failures): opus first.
@@ -94,7 +99,7 @@ MODEL_PROFILES: dict[str, tuple[str, ...]] = {
         WRITER_ESCALATION, WRITER_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL,
     ),
     "english_school_planner": (DEFAULT_FAST_MODEL, ESCALATION_MODEL, FALLBACK_CHEAP_MODEL),
-    "english_school_writer": (DEFAULT_FAST_MODEL, FALLBACK_CHEAP_MODEL),
+    "english_school_writer": (DEFAULT_FAST_MODEL, PREMIUM_MODEL),
     # Booking (structured outputs): the OpenAI booking model first, Gemini fallback.
     "booking": (BOOKING_PRIMARY, WRITER_FALLBACK_MODEL, FALLBACK_CHEAP_MODEL),
     "quality_eval": (JUDGE_MODEL, PREMIUM_MODEL),
