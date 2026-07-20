@@ -413,3 +413,23 @@ class TestRoleplayHistoryIsolation:
         router_requested_roleplay_exit = True
         b2b_history = history[:rp_start] if (router_requested_roleplay_exit and rp_start > 0) else history
         assert b2b_history is history
+
+
+class TestEmDashStripping:
+    """Every ChatResponse strips em/en dashes at construction (schemas validator),
+    so no pipeline (main chat, demos, custom demo) can leak them to the user."""
+
+    def test_answer_and_parts_are_stripped(self):
+        from app.schemas import ChatResponse, Route
+        resp = ChatResponse(
+            route=Route.general,
+            answer="Ольга Панченко — офтальмолог.\n— Первый пункт",
+            answer_parts=["Часть первая — вот", "– пункт"],
+        )
+        assert resp.answer == "Ольга Панченко, офтальмолог.\nПервый пункт"
+        assert resp.answer_parts == ["Часть первая, вот", "пункт"]
+
+    def test_hyphenated_words_survive(self):
+        from app.schemas import ChatResponse, Route
+        resp = ChatResponse(route=Route.general, answer="травматолог-ортопед")
+        assert resp.answer == "травматолог-ортопед"

@@ -39,7 +39,7 @@ from app.english_school_state import (
     looks_like_contact,
 )
 from app.english_school_writer import build_turn_plan, write_response
-from app.schemas import ChatHistoryMessage, ChatRequest
+from app.schemas import ChatHistoryMessage, ChatRequest, strip_em_dash
 
 
 # ---------------------------------------------------------------------------
@@ -878,7 +878,8 @@ def test_a2_b2_timeline_gets_general_answer_not_admin_fallback() -> None:
     )
     resp = _run(handle_english_school_chat(gem, _request("за сколько я смогу поднять уровень с А2 до Б2?")))
     assert resp.metadata["current_intent"] == "ask_general_advice"
-    assert resp.answer == general_answer
+    # ChatResponse strips em/en dashes on construction (writer text keeps them).
+    assert resp.answer == strip_em_dash(general_answer)
     assert gem.writer_calls == 1  # no repair needed
     assert _ADMIN_FALLBACK_MARKER not in resp.answer
 
@@ -901,7 +902,7 @@ def test_repeated_a2_b2_question_does_not_repeat_admin_fallback() -> None:
     resp = _run(handle_english_school_chat(
         gem, _request("как быстро я смогу поднять уровень языка с А2 до Б2?", history=history)
     ))
-    assert resp.answer == general_answer
+    assert resp.answer == strip_em_dash(general_answer)
     assert _ADMIN_FALLBACK_MARKER not in resp.answer
 
 
@@ -916,7 +917,7 @@ def test_speaking_advice_question_gets_useful_answer() -> None:
         writer_texts=[advice],
     )
     resp = _run(handle_english_school_chat(gem, _request("как перестать бояться говорить на английском?")))
-    assert resp.answer == advice
+    assert resp.answer == strip_em_dash(advice)
     assert resp.metadata["validation_result"]["failed"] is False
     assert resp.metadata.get("handoff_recommended") is False
 
@@ -1055,7 +1056,7 @@ def test_booking_with_phone_acknowledged_and_routed_to_admin() -> None:
         writer_texts=[good],
     )
     resp = _run(handle_english_school_chat(gem, _request("запишите внука на ближайший урок +7777282882")))
-    assert resp.answer == good
+    assert resp.answer == strip_em_dash(good)
     assert resp.metadata["validation_result"]["failed"] is False
     assert resp.lead_status == "contact_collected"
 

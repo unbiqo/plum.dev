@@ -1,9 +1,34 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+_RANGE_DASH_RE = re.compile(r"(?<=\d)\s*[—–]\s*(?=\d)")
+_EM_DASH_RE = re.compile(r"\s*[—–]\s*")
+
+
+def strip_em_dash(text: str) -> str:
+    """Remove em/en dashes from an AI-facing answer.
+
+    Prompt rules alone do not hold: writers still emit the dash live, so every
+    ChatResponse strips it in code (see the validator on ChatResponse). A
+    numeric range ("2–3 раза") keeps its meaning as a hyphen ("2-3"); a dash
+    between clauses becomes a comma; a leading dash (a list bullet) becomes
+    nothing. Hyphens inside words ("травматолог-ортопед") are untouched.
+    """
+    if not text:
+        return text
+    lines = []
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if stripped[:1] in ("—", "–"):
+            line = line[: len(line) - len(stripped)] + stripped[1:].lstrip()
+        line = _RANGE_DASH_RE.sub("-", line)
+        lines.append(_EM_DASH_RE.sub(", ", line))
+    return "\n".join(lines)
 
 
 class Route(str, Enum):
@@ -67,6 +92,15 @@ class ChatResponse(BaseModel):
     # DamiWorks consultant lead lifecycle (None on non-consultant channels).
     lead_status: Literal["open", "contact_requested", "contact_collected", "closed"] | None = None
     lead_sent: bool = False
+
+    # Em dashes never reach a user: one choke point for every pipeline (main
+    # chat, both vertical demos, custom demo) instead of per-writer stripping.
+    @field_validator("answer", "answer_parts", mode="after")
+    @classmethod
+    def _strip_em_dashes(cls, value: str | list[str] | None) -> str | list[str] | None:
+        if isinstance(value, list):
+            return [strip_em_dash(part) for part in value]
+        return strip_em_dash(value) if value else value
 
 
 class LeadCreateRequest(BaseModel):

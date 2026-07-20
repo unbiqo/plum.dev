@@ -80,7 +80,7 @@ from .medical_center_state import (
     reconstruct_specialty_from_history,
 )
 from .medical_center_writer import write_response
-from .schemas import ChatHistoryMessage, ChatResponse, Route
+from .schemas import ChatHistoryMessage, ChatResponse, Route, strip_em_dash
 
 if TYPE_CHECKING:
     from .gemini_service import GeminiService
@@ -248,26 +248,9 @@ _SLOT_REJECTION_RE = re.compile(
 )
 
 
-_EM_DASH_RE = re.compile(r"\s*[—–]\s*")
-
-
-def strip_em_dash(text: str) -> str:
-    """Remove the em/en dash from an LLM-written answer (writer style rule 22).
-
-    The prompt rule alone does not hold: the writer still produced "Руслан
-    Ермекович — травматолог-ортопед" live. A dash between clauses becomes a
-    comma; a leading dash (a list bullet) becomes nothing. Hyphens inside words
-    ("травматолог-ортопед") are untouched, since they are not dashes.
-    """
-    if not text:
-        return text
-    lines = []
-    for line in text.split("\n"):
-        stripped = line.lstrip()
-        if stripped[:1] in ("—", "–"):
-            line = line[: len(line) - len(stripped)] + stripped[1:].lstrip()
-        lines.append(_EM_DASH_RE.sub(", ", line))
-    return "\n".join(lines)
+# strip_em_dash moved to schemas (a ChatResponse validator now strips dashes
+# for every pipeline); the medical flow still strips BEFORE its guardrails so
+# validation and the slot guardrail see the exact text the user will get.
 
 
 def _intake_metadata(intake, planner_reviewed: bool) -> dict[str, object] | None:
