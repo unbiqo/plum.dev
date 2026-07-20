@@ -150,6 +150,39 @@ def test_anthropic_client_wraps_sdk_errors_in_provider_error() -> None:
     assert exc_info.value.provider == "anthropic"
 
 
+def test_anthropic_client_retries_without_temperature_when_deprecated() -> None:
+    # Newer Claude models answer 400 "`temperature` is deprecated for this
+    # model." — the client must retry once without the parameter instead of
+    # failing the pool candidate (seen on prod 2026-07-20).
+    client = AnthropicProviderClient(api_key="fake-key")
+    attempts: list[dict] = []
+
+    class _DeprecatedTemperatureError(Exception):
+        status_code = 400
+
+        def __str__(self) -> str:
+            return "Error code: 400 - {'error': {'message': '`temperature` is deprecated for this model.'}}"
+
+    usage = SimpleNamespace(input_tokens=4, output_tokens=2, cache_read_input_tokens=0)
+    response = SimpleNamespace(content=[SimpleNamespace(text="ok")], usage=usage)
+
+    def create(**kw):
+        attempts.append(dict(kw))
+        if "temperature" in kw:
+            raise _DeprecatedTemperatureError()
+        return response
+
+    client._client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    result = client.generate(GenerateRequest(
+        model="claude-sonnet-5", prompt="hi", temperature=0.85,
+    ))
+
+    assert result.text == "ok"
+    assert len(attempts) == 2
+    assert attempts[0]["temperature"] == 0.85
+    assert "temperature" not in attempts[1]
+
+
 def test_openai_client_maps_text_usage_and_json_mode() -> None:
     client = OpenAIProviderClient(api_key="fake-key")
     captured: dict = {}

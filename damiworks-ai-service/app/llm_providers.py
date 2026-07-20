@@ -180,6 +180,17 @@ class AnthropicProviderClient:
             self._client = anthropic.Anthropic(api_key=self._api_key)
         return self._client
 
+    @staticmethod
+    def _is_deprecated_temperature_error(exc: BaseException) -> bool:
+        # Newer Claude models reject the temperature parameter outright
+        # (400 invalid_request_error "`temperature` is deprecated for this
+        # model.") — the only recovery is to retry without it.
+        return (
+            getattr(exc, "status_code", None) == 400
+            and "temperature" in str(exc)
+            and "deprecated" in str(exc)
+        )
+
     def generate(self, request: GenerateRequest) -> GenerateResult:
         client = self._get_client()
         system_text = request.system_instruction or ""
@@ -212,7 +223,17 @@ class AnthropicProviderClient:
         try:
             response = client.messages.create(**kwargs)
         except Exception as exc:
-            raise ProviderError("anthropic", request.model, exc) from exc
+            if not self._is_deprecated_temperature_error(exc):
+                raise ProviderError("anthropic", request.model, exc) from exc
+            logger.info(
+                "anthropic model %s deprecates temperature; retrying without it",
+                request.model,
+            )
+            kwargs.pop("temperature", None)
+            try:
+                response = client.messages.create(**kwargs)
+            except Exception as retry_exc:
+                raise ProviderError("anthropic", request.model, retry_exc) from retry_exc
 
         text = "".join(
             getattr(block, "text", "") for block in (response.content or [])
