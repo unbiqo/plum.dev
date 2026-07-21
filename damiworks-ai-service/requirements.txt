@@ -10,3 +10,6 @@ pypdf>=4.0.0
 python-multipart>=0.0.9
 anthropic>=0.40.0
 openai>=1.0.0
+# IANA time-zone data for zoneinfo (bundled on Linux, absent on Windows) — the
+# demo booking slot engine resolves clinic-local times (e.g. Asia/Almaty).
+tzdata>=2024.1
