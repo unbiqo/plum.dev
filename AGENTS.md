@@ -52,6 +52,9 @@ FastAPI backend. All routes are under `/api/v1`.
 - `app/llm_usage.py` — per-request token/cost tracking.
 - `app/response_stylist.py` — deterministic "human style" post-processing: splits the final answer into 1–3 messenger parts (never drops content — overflow tail merges into the last part) and reduces it to exactly one question; optional cheap LLM repair pass is injected by the caller.
 - `app/booking_guardrail.py` — booking slot guardrail: the model may only speak slots supplied by the slot provider; invented dates/times are replaced with the safe "уточню и вернусь" answer.
+- `app/clinic_profile.py` — normalized `ClinicProfile` (name, timezone, working hours, specialties, doctors+schedules) parsed purely from the tenant KB markdown, cached by KB content hash. Nothing clinic-specific is hardcoded; a KB swap rebuilds it. Degrades to a default template when a KB has no parseable doctors.
+- `app/slot_engine.py` — deterministic, timezone-aware slot generator over a `ClinicProfile`. One engine, two filters (specialty = aggregate over its doctors, doctor = single); excludes past slots (clinic tz) and injected busy pairs.
+- `app/booking_provider.py` — `BookingProvider` interface + `DemoBookingProvider` (soft-hold 5 min → confirm, double-booking race protection) over an `AppointmentStore` (`InMemoryAppointmentStore` for tests/no-DB fallback, `SupabaseAppointmentStore` for the `demo_appointments` table). `slots_to_labels` bridges provider slots to the relative-day labels the writer/guardrail use.
 - `app/quality_eval.py` — offline judge rubric (naturalness, pain_discovery, funnel_progression, rag_factual_accuracy, guardrail_compliance); driven WEEKLY by `scripts/nightly_quality_eval.py` (100% of the week's dialogs, no sampling) into the `eval_runs` table.
 - `app/supabase_service.py` — Supabase client: RAG, chat logs, sessions, leads, feedback, tenant prompts.
 - `app/lead_notifier.py` — best-effort Telegram lead notifications to the owner.
@@ -342,6 +345,7 @@ Run the SQL migrations in `damiworks-ai-service/sql/` to create the required tab
 - `chat_logs`, `chat_sessions`, `ai_conversations`, `ai_conversation_messages`
 - `ai_message_feedback`, `damiworks_leads`, `llm_call_logs`
 - `omnichannel_memory`, `user_memories`, `products`
+- `demo_appointments` (demo booking store — `sql/demo_appointments.sql`, idempotent + manual rollback block)
 
 Use `seed_damiworks.py` and `sync_damiworks_infrastructure.py` to bootstrap the Dami Works tenant (`instance_id = damiworks_dev`) and knowledge-base embeddings. These are one-off scripts; do not run them repeatedly in production without understanding that they clear/replace existing tenant chunks.
 
@@ -401,6 +405,27 @@ python tests/eval_runner.py
 ```
 
 This writes `eval_reports/latest.md` and `eval_reports/latest.json`.
+
+**Demo booking (slot engine + provider):**
+
+The demo lets a visitor really book: pick a specialty or doctor, see live dated slots, hold and confirm. Everything is derived from the current tenant KB — nothing clinic-specific is hardcoded, so swapping the KB swaps the bookable doctors/hours with no code change.
+
+- `ClinicProfile` (`app/clinic_profile.py`) is parsed from the KB markdown and cached by content hash.
+- The slot engine (`app/slot_engine.py`) turns a profile + injected busy set into dated, timezone-aware slots.
+- `BookingProvider` (`app/booking_provider.py`) is the seam. `DemoBookingProvider` persists to `demo_appointments` via an `AppointmentStore`; soft-hold is 5 minutes, a unique index on `(instance_id, doctor_id, start_ts) where status in ('hold','confirmed')` is the race guard.
+
+**Connecting a real CRM** (Altegio / 1С / Bitrix24): implement the same `BookingProvider` interface — do NOT change the bot or the guardrail. Entity mapping:
+
+| Provider concept | Real CRM |
+|---|---|
+| specialty | service category |
+| doctor | staff member |
+| slot | schedule opening |
+| appointment (hold/confirmed) | booking |
+
+`get_slots`/`suggest_doctors` read the CRM's availability; `hold_slot`/`confirm_appointment`/`book_slot` create the CRM booking; `reset` is demo-only (a real provider can no-op it). The `booking_guardrail` keeps working unchanged: feed it the provider's slot labels via `slots_to_labels`.
+
+Apply the migration once: run `sql/demo_appointments.sql` in Supabase (idempotent; a manual rollback block sits at the bottom of the same file). Wipe demo data between showings via the `/api/v1/demo/reset_appointments` endpoint.
 
 **Index RAG documents:**
 
