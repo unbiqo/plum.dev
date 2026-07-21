@@ -23,6 +23,7 @@ from .medical_center_slots import normalize_specialty, specialty_dative
 from .medical_center_state import (
     ConversationState,
     apply_booking_field_seed,
+    detect_symptom_specialty,
     is_affirmation,
 )
 from .schemas import ChatHistoryMessage
@@ -63,6 +64,61 @@ def find_specialty_id(profile: ClinicProfile, ru_specialty: str | None) -> str |
     for specialty in profile.specialties:
         if normalize_specialty(specialty.name) == canonical:
             return specialty.id
+    return None
+
+
+# Adults default to a general practitioner, children to a paediatrician, when a
+# symptom routes to a specialty this clinic cannot book (e.g. гастроэнтеролог has
+# no doctor in the KB — the KB itself says "направление ведёт терапевт").
+_GP_SPECIALTY_ADULT = "терапевт"
+_GP_SPECIALTY_CHILD = "педиатр"
+
+
+def _first_bookable_specialty(profile: ClinicProfile, text: str | None) -> str | None:
+    """The earliest-mentioned BOOKABLE specialty in ``text``.
+
+    Unlike normalize_specialty (which returns the first specialty by position,
+    bookable or not), this scans only the profile's specialties — all of which
+    have a doctor — so an ambiguous route like "гастроэнтеролог или терапевт"
+    resolves to терапевт instead of the unbookable гастроэнтеролог."""
+    low = (text or "").casefold()
+    if not low:
+        return None
+    best: tuple[int, str] | None = None
+    for specialty in profile.specialties:
+        canonical = normalize_specialty(specialty.name)
+        if not canonical:
+            continue
+        stem = canonical[: max(4, len(canonical) - 2)]  # tolerate declensions
+        pos = low.find(stem)
+        if pos != -1 and (best is None or pos < best[0]):
+            best = (pos, specialty.id)
+    return best[1] if best else None
+
+
+def _gp_specialty(profile: ClinicProfile, state: ConversationState) -> str | None:
+    gp = _GP_SPECIALTY_CHILD if getattr(state, "child_case", False) else _GP_SPECIALTY_ADULT
+    return find_specialty_id(profile, gp)
+
+
+def _booking_specialty(
+    profile: ClinicProfile, state: ConversationState, message: str
+) -> str | None:
+    """A single bookable specialty to drive this booking, or None to defer.
+
+    Order: the committed specialty, then one named in this message, then the
+    symptom-routed one (picking a bookable option from an ambiguous route), then
+    the GP fallback — but only when a complaint is known, so we never invent a
+    specialty for a bare "запишите" with nothing to go on (KB routing rule)."""
+    sid = find_specialty_id(profile, state.specialty)
+    if sid:
+        return sid
+    sid = _first_bookable_specialty(profile, message)
+    if sid:
+        return sid
+    if state.symptoms_or_goal:
+        routed = detect_symptom_specialty(state.symptoms_or_goal)
+        return _first_bookable_specialty(profile, routed or "") or _gp_specialty(profile, state)
     return None
 
 
@@ -189,8 +245,15 @@ def resolve(
         doctor = _recover_doctor_from_history(profile, history)
     if doctor is not None:
         specialty_id = doctor.specialty_id
+    # No committed specialty yet: derive a single BOOKABLE one from the message
+    # or the known complaint (an ambiguous route like "гастроэнтеролог или
+    # терапевт" resolves to the bookable терапевт; a non-bookable route falls
+    # back to the GP). This is what lets "запиши" close fast instead of the
+    # writer dawdling with no specialty locked.
     if specialty_id is None and doctor is None:
-        return None  # can't book without a target; let the router/LLM ask
+        specialty_id = _booking_specialty(profile, state, message)
+    if specialty_id is None and doctor is None:
+        return None  # nothing to book on (no specialty, no complaint) — let the LLM ask
 
     try:
         if doctor is not None:

@@ -144,6 +144,51 @@ def test_e2e_book_by_named_doctor() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Ambiguous / non-bookable route resolves to a bookable specialty (GP fallback)
+# ---------------------------------------------------------------------------
+
+def test_ambiguous_route_picks_the_bookable_specialty() -> None:
+    from app.clinic_profile import get_clinic_profile
+    from app.medical_center_booking import _first_bookable_specialty, _booking_specialty
+    from app.medical_center_state import ConversationState
+
+    profile = get_clinic_profile()
+    # "гастроэнтеролог или терапевт": гастроэнтеролог has no doctor in this KB,
+    # so the bookable терапевт must win (not the first-mentioned one).
+    assert _first_bookable_specialty(profile, "гастроэнтеролог или терапевт") == "терапевт"
+
+    st = ConversationState()
+    st.symptoms_or_goal = "боль в животе"
+    st.specialty = ""
+    assert _booking_specialty(profile, st, "хорошо, запишите") == "терапевт"
+
+    # No specialty and no complaint -> defer (don't invent one).
+    empty = ConversationState()
+    assert _booking_specialty(profile, empty, "запишите меня") is None
+
+
+def test_e2e_abdominal_pain_books_via_terapevt_and_persists() -> None:
+    # Wed 2026-07-22 08:00 Almaty — терапевт Айдана works Пн/Ср/Пт.
+    clock = datetime(2026, 7, 22, 3, 0, tzinfo=timezone.utc)
+    provider = DemoBookingProvider(InMemoryAppointmentStore(), clock=lambda: clock)
+    plan = {**_BOOKING_PLAN, "slots": {"symptoms_or_goal": "боль в животе"}}
+    session = _Session(provider, plan)
+
+    offer = session.say("хорошо, запишите на приём")
+    assert offer.metadata["booking_provider_used"] is True
+    assert "терапевт" in offer.answer.lower()  # not the unbookable gastro
+    assert "Айдана" in offer.answer
+
+    session.say("сегодня 09:30")
+    done = session.say("Дамир, 23, +7 777 123 45 67")
+    assert done.metadata["conversation_status"] == "booking_created"
+    appt = done.metadata["demo_appointment"]
+    assert appt["specialty_id"] == "терапевт"
+    assert appt["doctor_id"] == "айдана_сейдахметова"
+    assert _confirmed_rows(provider)  # persisted
+
+
+# ---------------------------------------------------------------------------
 # Seed
 # ---------------------------------------------------------------------------
 
