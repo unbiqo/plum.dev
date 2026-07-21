@@ -175,6 +175,10 @@ class Settings:
     enable_b2b_memory_summary: bool = True
     intelligence_shadow_enabled: bool = True
     insight_extractor_enabled: bool = True
+    # Opt-in: when true, the medical demo books through the real slot provider
+    # (demo_appointments) instead of the legacy fictional-slot flow. Default off
+    # so the feature only activates where it has been deliberately enabled.
+    demo_booking_provider_enabled: bool = False
     supabase_products_table: str = "products"
     checkout_product_ids: tuple[str, ...] = (
         "ai-assistant-basic",
@@ -336,6 +340,7 @@ def get_settings() -> Settings:
         enable_b2b_memory_summary=env_bool("ENABLE_B2B_MEMORY_SUMMARY", True),
         intelligence_shadow_enabled=env_bool("INTELLIGENCE_SHADOW_ENABLED", True),
         insight_extractor_enabled=env_bool("INSIGHT_EXTRACTOR_ENABLED", True),
+        demo_booking_provider_enabled=env_bool("DEMO_BOOKING_PROVIDER_ENABLED", False),
         supabase_products_table=os.getenv("SUPABASE_PRODUCTS_TABLE", "products"),
         checkout_product_ids=env_csv(
             "CHECKOUT_PRODUCT_IDS",

@@ -304,6 +304,18 @@ def test_supabase_store_reads_skip_expired_holds() -> None:
 # booking_guardrail bridge on real provider slots
 # ---------------------------------------------------------------------------
 
+def test_booking_provider_flag_defaults_off_and_reads_env(monkeypatch) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "x")
+    monkeypatch.delenv("DEMO_BOOKING_PROVIDER_ENABLED", raising=False)
+    assert get_settings().demo_booking_provider_enabled is False
+    monkeypatch.setenv("DEMO_BOOKING_PROVIDER_ENABLED", "true")
+    assert get_settings().demo_booking_provider_enabled is True
+
+
 def test_guardrail_allows_a_real_provider_slot_and_replaces_an_invented_one() -> None:
     clock = _tue_morning()
     prov = _provider(clock)

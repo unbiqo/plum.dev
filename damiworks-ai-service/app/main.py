@@ -27,11 +27,14 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.gemini = GeminiService(settings)
     app.state.supabase = SupabaseService(settings)
-    # Demo booking provider backed by the demo_appointments table. If the table
-    # is missing, reads degrade to "all free" and writes are declined, so the
-    # bot simply falls back to its legacy booking flow — never a 500.
-    app.state.booking_provider = DemoBookingProvider(
-        SupabaseAppointmentStore(app.state.supabase.client)
+    # Demo booking provider backed by the demo_appointments table. Opt-in via
+    # DEMO_BOOKING_PROVIDER_ENABLED; when off, the medical demo keeps its legacy
+    # fictional-slot flow. When on and the table is missing, reads degrade to
+    # "all free" and writes are declined, so the bot falls back — never a 500.
+    app.state.booking_provider = (
+        DemoBookingProvider(SupabaseAppointmentStore(app.state.supabase.client))
+        if settings.demo_booking_provider_enabled
+        else None
     )
     app.include_router(router)
 

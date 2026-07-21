@@ -281,6 +281,7 @@ ANTHROPIC_API_KEY=              # enables anthropic:* pool entries (CLAUDE_API_K
 OPENAI_API_KEY=                 # enables openai:* pool entries
 LEAD_COST_BUDGET_USD=0.15       # soft per-lead cost guard
 INSIGHT_EXTRACTOR_ENABLED=true
+DEMO_BOOKING_PROVIDER_ENABLED=false  # opt-in: medical demo books via demo_appointments (needs sql/demo_appointments.sql)
 MAX_HISTORY_MESSAGES=15
 RAG_MATCH_COUNT=3
 RAG_CHUNK_MAX_CHARS=1800
