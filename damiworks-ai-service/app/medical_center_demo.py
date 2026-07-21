@@ -83,6 +83,7 @@ from .medical_center_writer import write_response
 from .schemas import ChatHistoryMessage, ChatResponse, Route, strip_em_dash
 
 if TYPE_CHECKING:
+    from .booking_provider import BookingProvider
     from .gemini_service import GeminiService
     from .schemas import ChatRequest
 
@@ -782,9 +783,78 @@ def _safe_planner_fallback(message: str) -> dict:
     }
 
 
+def _resolve_provider_booking(
+    provider: "BookingProvider",
+    instance_id: str,
+    state: "ConversationState",
+    planner: dict,
+    message: str,
+    history: list[ChatHistoryMessage],
+) -> ChatResponse | None:
+    """Run one booking turn through the provider and build the response.
+
+    Returns None to defer to the legacy flow (e.g. specialty not resolvable, or
+    the store is unavailable). Every slot spoken here comes from the provider, so
+    the slot guardrail (belt-and-suspenders) never has cause to replace it.
+    """
+    from . import medical_center_booking as mcb
+
+    turn = mcb.resolve(
+        provider=provider, instance_id=instance_id, state=state,
+        message=message, history=history, now=provider.now(),
+    )
+    if turn is None:
+        return None
+
+    answer = strip_em_dash(turn.answer)
+    answer, _replaced = enforce_slot_guardrail(
+        answer=answer,
+        offered_slots=turn.offered_labels,
+        booking_context=True,
+    )
+
+    status = turn.conversation_status
+    lead_status = _derive_lead_status(state, history)
+    if lead_status == "open" and status == "awaiting_contact":
+        lead_status = "contact_requested"
+
+    metadata: dict[str, object] = {
+        "medical_center_demo": True,
+        "planner_llm_used": "_error" not in planner,
+        "writer_llm_used": False,
+        "booking_provider_used": True,
+        "booking_stage": status,
+        "current_intent": planner.get("current_intent"),
+        "medical_lead_status": (
+            "appointment_created" if status == "booking_created"
+            else _derive_medical_lead_status(lead_status, history, message)
+        ),
+        "state": state.to_metadata(),
+        "conversation_status": status,
+        "conversation_status_label": _CONV_STATUS_LABELS.get(status, status),
+        "conversation_status_reason": (
+            f"provider_booking stage={status} specialty={state.specialty} "
+            f"slot={state.selected_slot}"
+        ),
+    }
+    if turn.appointment is not None:
+        metadata["demo_appointment"] = turn.lead
+
+    return ChatResponse(
+        route=Route.general,
+        routes=[Route.general],
+        answer=answer,
+        checkout=False,
+        lead_status=lead_status,
+        metadata=metadata,
+    )
+
+
 async def handle_medical_center_chat(
     gemini: "GeminiService",
     payload: "ChatRequest",
+    *,
+    provider: "BookingProvider | None" = None,
 ) -> ChatResponse:
     history: list[ChatHistoryMessage] = list(payload.chat_history or [])
     message = payload.message or ""
@@ -1129,6 +1199,17 @@ async def handle_medical_center_chat(
         state.selected_slot = reconstruct_selected_slot(history, message, state.specialty)
         if state.selected_slot:
             state.preferred_time = state.selected_slot  # summary shows the picked slot
+
+        # ---- PROVIDER BOOKING FLOW (real dated slots -> demo_appointments) ----
+        # Only when a BookingProvider is wired in. Offers a specialty's doctor(s)
+        # with real free windows, persists a confirmed booking, and forms the
+        # ready lead. Without a provider this is skipped and the legacy flow runs.
+        if provider is not None and _is_booking_turn(state, planner, message, history):
+            provider_turn = _resolve_provider_booking(
+                provider, payload.instance_id, state, planner, message, history
+            )
+            if provider_turn is not None:
+                return provider_turn
 
         # ---- DETERMINISTIC BOOKING FLOW (controlled demo slots, no LLM) ----
         # Owns the booking mechanics so slots are never invented and a booking is

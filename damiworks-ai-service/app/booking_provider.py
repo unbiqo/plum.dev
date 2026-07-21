@@ -236,6 +236,12 @@ class BookingProvider(ABC):
     def reset(self, instance_id: str) -> int:
         ...
 
+    @abstractmethod
+    def now(self) -> datetime:
+        """The provider's clock — callers derive 'today' from this so tests with
+        an injected clock stay consistent."""
+        ...
+
 
 class DemoBookingProvider(BookingProvider):
     def __init__(
@@ -331,6 +337,9 @@ class DemoBookingProvider(BookingProvider):
 
     def reset(self, instance_id):
         return self._store.clear_instance(instance_id)
+
+    def now(self):
+        return self._clock()
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import logging
 from fastapi import FastAPI
 
 from .api import router
+from .booking_provider import DemoBookingProvider, SupabaseAppointmentStore
 from .config import get_settings
 from .gemini_service import GeminiService
 from .supabase_service import SupabaseService
@@ -26,6 +27,12 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.gemini = GeminiService(settings)
     app.state.supabase = SupabaseService(settings)
+    # Demo booking provider backed by the demo_appointments table. If the table
+    # is missing, reads degrade to "all free" and writes are declined, so the
+    # bot simply falls back to its legacy booking flow — never a 500.
+    app.state.booking_provider = DemoBookingProvider(
+        SupabaseAppointmentStore(app.state.supabase.client)
+    )
     app.include_router(router)
 
     @app.get("/health")

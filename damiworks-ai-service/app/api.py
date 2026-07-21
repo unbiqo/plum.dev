@@ -2035,6 +2035,18 @@ async def _save_medical_center_lead(
         logger.exception("_save_medical_center_lead failed (ignored)")
 
 
+@router.post("/demo/reset_appointments")
+async def reset_demo_appointments(payload: dict, request: Request) -> dict:
+    """Wipe demo bookings for an instance before a showing. Demo-only; the
+    provider degrades to a no-op count if the store is unavailable."""
+    provider = getattr(request.app.state, "booking_provider", None)
+    if provider is None:
+        return {"removed": 0, "note": "no booking provider configured"}
+    instance_id = (payload or {}).get("instance_id") or MEDICAL_CENTER_INSTANCE_ID
+    removed = await asyncio.to_thread(provider.reset, instance_id)
+    return {"removed": removed, "instance_id": instance_id}
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     payload: ChatRequest,
@@ -2089,7 +2101,9 @@ async def chat(
 
         # Medical center demo (MedNova Clinic) — same self-contained pattern.
         if payload.instance_id == MEDICAL_CENTER_INSTANCE_ID:
-            response = await handle_medical_center_chat(gemini, payload)
+            response = await handle_medical_center_chat(
+                gemini, payload, provider=getattr(request.app.state, "booking_provider", None)
+            )
             await supabase.log_ai_conversation_turn(
                 channel=payload.channel,
                 chat_id=payload.chat_id,
