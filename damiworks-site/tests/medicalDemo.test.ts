@@ -24,7 +24,6 @@ function checkLocale(locale: Locale) {
   assert.ok(english, `${locale}: English School scenario remains present`)
   assert.equal(beauty?.hidden, true, `${locale}: beauty scenario remains hidden`)
   assert.equal(dict.customDemoTab.id, 'custom_demo', `${locale}: custom demo tab untouched`)
-  assert.equal(dict.medicalChat.quickReplies.length, 5, `${locale}: medical quick reply count`)
   assert.ok(
     dict.medicalSummary.statusValues.emergency.length > 0,
     `${locale}: emergency status is present`,
@@ -38,10 +37,6 @@ pass('English dictionary contains visible MedNova Clinic scenario')
 checkLocale('ru')
 const ruDemo = getDict('ru').demo
 assert.equal(ruDemo.medicalChat.introMessage, RU_INTRO, 'ru: intro message matches required copy')
-assert.ok(
-  ruDemo.medicalChat.quickReplies.includes('К какому врачу записаться?'),
-  'ru: quick replies include booking chip',
-)
-pass('Russian dictionary contains required intro and quick replies')
+pass('Russian dictionary contains required intro message')
 
 console.log('\nAll medicalDemo tests passed.\n')

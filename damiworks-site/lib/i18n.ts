@@ -422,7 +422,6 @@ export interface DictMedicalChatLabels {
   introMessage: string
   // Shorter first AI message shown on mobile — falls back to introMessage.
   mobileIntroMessage?: string
-  quickReplies: string[]
   // Staged loading lines shown while the backend thinks — sells the process.
   // Falls back to plain typing dots when omitted.
   loadingStages?: string[]
@@ -1324,13 +1323,6 @@ const en: Dict = {
       errorMessage: 'Something went wrong. Please try again.',
       introMessage:
         "Hello! 💚 My name is Aigul, and I'm the administrator at MedNova Clinic. I can help choose a doctor, explain pricing, and book an appointment. Is the patient an adult or a child? What is bothering you?",
-      quickReplies: [
-        'Book a doctor',
-        'Prices',
-        'How to choose a specialist?',
-        'Preparing for tests',
-        'Doctor schedule',
-      ],
     },
     medicalSummary: {
       title: 'Medical lead',
@@ -2346,13 +2338,6 @@ const ru: Dict = {
       introMessage:
         'Здравствуйте! 💚 Меня зовут Айгуль, я администратор MedNova Clinic. Помогу подобрать врача, сориентировать по стоимости и записать на приём. Подскажите, пожалуйста, пациент взрослый или ребёнок, и что вас беспокоит?',
       mobileIntroMessage: 'Здравствуйте! Помогу с записью, ценами и выбором специалиста. Что вас интересует?',
-      quickReplies: [
-        'Сколько стоит консультация?',
-        'К какому врачу записаться?',
-        'Как подготовиться к анализам?',
-        'Можно записать ребёнка?',
-        'График врачей',
-      ],
       loadingStages: [
         'AI читает вопрос…',
         'Уточняет детали…',

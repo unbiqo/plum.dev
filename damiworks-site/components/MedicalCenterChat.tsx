@@ -207,9 +207,6 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
     }
   }
 
-  // Quick replies are shown until the visitor sends their first message.
-  const showQuickReplies = !messages.some((m) => m.from === 'user')
-
   // ------------ render ------------
 
   return (
@@ -281,22 +278,6 @@ export default function MedicalCenterChat({ dict, onConversationUpdate, onStateU
           </div>
         )}
       </div>
-
-      {/* Quick replies */}
-      {showQuickReplies && (
-        <div className="px-4 pb-2 flex flex-wrap gap-2">
-          {dict.quickReplies.map((chip) => (
-            <button
-              key={chip}
-              onClick={() => void sendMessage(chip)}
-              disabled={loading || !chatId}
-              className="text-xs px-3 py-1.5 rounded-full border border-border-col text-secondary hover:text-primary hover:border-accent transition-colors disabled:opacity-50"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Error */}
       {error && (
