@@ -7,3 +7,8 @@ venv/
 
 .vercel
 .env*.local
+
+# Runtime / dev-server logs
+*.log
+.uvicorn-*.log
+.next-dev-*.log
