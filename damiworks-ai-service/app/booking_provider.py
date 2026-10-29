@@ -333,7 +333,9 @@ class DemoBookingProvider(BookingProvider):
             patient_name=patient_name, contact=contact,
         )
         confirmed = self.confirm_appointment(instance_id, appt.id)
-        return confirmed or appt
+        if confirmed is None or confirmed.status != "confirmed":
+            raise StoreUnavailableError("appointment confirmation did not persist")
+        return confirmed
 
     def reset(self, instance_id):
         return self._store.clear_instance(instance_id)
@@ -385,9 +387,9 @@ def _is_missing_table(exc: Exception) -> bool:
 
 
 class SupabaseAppointmentStore(AppointmentStore):
-    """Backed by the demo_appointments table. Maps a unique-violation to
-    SlotTakenError; a missing table degrades reads to empty and raises
-    StoreUnavailableError on writes so the bot can fall back gracefully."""
+    """Backed by demo_appointments. Maps unique violations to SlotTakenError,
+    degrades reads to empty when the table is missing, and surfaces write
+    failures as StoreUnavailableError so a booking is never falsely confirmed."""
 
     _TABLE = "demo_appointments"
 
@@ -448,14 +450,15 @@ class SupabaseAppointmentStore(AppointmentStore):
             resp = (
                 self._client.table(self._TABLE)
                 .update(updates)
+                .select("*")
                 .eq("instance_id", instance_id)
                 .eq("id", appointment_id)
                 .eq("status", from_status)
                 .execute()
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             logger.exception("demo_appointments status update failed")
-            return None
+            raise StoreUnavailableError("appointment status update failed") from exc
         data = list(resp.data or [])
         return _row_to_appointment(data[0]) if data else None
 

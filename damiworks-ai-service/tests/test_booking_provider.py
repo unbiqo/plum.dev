@@ -71,7 +71,9 @@ def test_get_slots_excludes_a_confirmed_booking() -> None:
     day = datetime(2026, 7, 21, tzinfo=_ALMATY).date()
     before = prov.get_slots(_INST, date_from=day, date_to=day, doctor_id="ольга_панченко")
     taken = before[0].start
-    prov.book_slot(_INST, doctor_id="ольга_панченко", start=taken, patient_name="Дамир", contact="+7700")
+    booked = prov.book_slot(_INST, doctor_id="ольга_панченко", start=taken, patient_name="Дамир", contact="+7700")
+    assert booked.status == "confirmed"
+    assert booked.hold_expires_at is None
     after = prov.get_slots(_INST, date_from=day, date_to=day, doctor_id="ольга_панченко")
     assert len(after) == len(before) - 1
     assert all(s.start != taken for s in after)
@@ -128,6 +130,9 @@ def test_double_booking_the_same_slot_is_rejected() -> None:
     prov.book_slot(_INST, doctor_id="ольга_панченко", start=slot.start, patient_name="Первый")
     with pytest.raises(SlotTakenError):
         prov.book_slot(_INST, doctor_id="ольга_панченко", start=slot.start, patient_name="Второй")
+
+    # A rejected retry must not create a second row.
+    assert len(prov._store._rows) == 1  # type: ignore[attr-defined]
 
 
 def test_store_enforces_active_slot_uniqueness_directly() -> None:
@@ -223,6 +228,11 @@ class _FakeQuery:
                 raise self._t.raise_on_insert
             self._t.inserted.append(self._payload)
             return type("R", (), {"data": [self._payload]})()
+        if self._op == "update":
+            if self._t.raise_on_update:
+                raise self._t.raise_on_update
+            if self._t.empty_update_result:
+                return type("R", (), {"data": []})()
         return type("R", (), {"data": self._t.rows})()
 
 
@@ -231,6 +241,8 @@ class _FakeTable:
         self.rows: list[dict] = []
         self.inserted: list[dict] = []
         self.raise_on_insert: Exception | None = None
+        self.raise_on_update: Exception | None = None
+        self.empty_update_result = False
 
     def __getattr__(self, name):
         return getattr(_FakeQuery(self, ""), name)
@@ -269,6 +281,30 @@ def test_supabase_store_maps_missing_table_to_unavailable() -> None:
     store = SupabaseAppointmentStore(_FakeClient(table))
     with pytest.raises(StoreUnavailableError):
         store.insert(_appt())
+
+
+def test_supabase_status_update_failure_is_reported_as_unavailable() -> None:
+    table = _FakeTable()
+    table.raise_on_update = Exception("connection lost")
+    store = SupabaseAppointmentStore(_FakeClient(table))
+
+    with pytest.raises(StoreUnavailableError):
+        store.set_status(_INST, _appt().id, from_status="hold", to_status="confirmed")
+
+
+def test_empty_confirmation_result_fails_booking() -> None:
+    table = _FakeTable()
+    table.empty_update_result = True
+    store = SupabaseAppointmentStore(_FakeClient(table))
+    provider = DemoBookingProvider(store, clock=_tue_morning())
+
+    day = datetime(2026, 7, 21, tzinfo=_ALMATY).date()
+    slot = provider.get_slots(_INST, date_from=day, date_to=day, doctor_id="ольга_панченко")[0]
+    with pytest.raises(StoreUnavailableError):
+        provider.book_slot(_INST, doctor_id="ольга_панченко", start=slot.start, patient_name="Дамир")
+
+    assert len(table.inserted) == 1
+    assert table.inserted[0]["status"] == "hold"
 
 
 def test_supabase_store_reads_skip_expired_holds() -> None:
