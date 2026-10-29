@@ -13,7 +13,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.booking_provider import DemoBookingProvider, InMemoryAppointmentStore, SlotTakenError
+from app.booking_provider import (
+    DemoBookingProvider,
+    InMemoryAppointmentStore,
+    SlotTakenError,
+    StoreUnavailableError,
+)
 from app.demo_seed import seed_demo_appointments
 from app.medical_center_demo import MEDICAL_CENTER_INSTANCE_ID, handle_medical_center_chat
 from app.schemas import ChatHistoryMessage, ChatRequest
@@ -106,9 +111,14 @@ def test_e2e_book_by_specialty() -> None:
     assert len(rows) == 1 and rows[0].doctor_id == "ольга_панченко"
 
 
-def test_e2e_empty_confirmation_result_never_claims_booking_succeeded() -> None:
+@pytest.mark.parametrize("raise_confirmation_error", [False, True])
+def test_e2e_failed_confirmation_never_claims_booking_succeeded(
+    raise_confirmation_error: bool,
+) -> None:
     class _ProviderWithoutConfirmation(DemoBookingProvider):
         def confirm_appointment(self, instance_id: str, appointment_id: str):
+            if raise_confirmation_error:
+                raise StoreUnavailableError("mock Supabase update failed")
             return None
 
     provider = _ProviderWithoutConfirmation(InMemoryAppointmentStore(), clock=lambda: _CLOCK)
