@@ -318,7 +318,15 @@ def resolve(
         return _offer(provider, instance_id, profile, chosen_slot.specialty_id, None, fresh, today,
                       prefix="Это время только что заняли. ")
     except StoreUnavailableError:
-        return None
+        return BookingTurn(
+            answer=(
+                "Не удалось завершить запись: сейчас она не подтверждена и не оформлена. "
+                "Пожалуйста, не считайте это время забронированным. "
+                "Попробуйте позже или свяжитесь с администратором."
+            ),
+            conversation_status="booking_failed",
+            offered_labels=[chosen_slot.relative_label(today)],
+        )
 
     return BookingTurn(
         answer=(

@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.booking_provider import DemoBookingProvider, InMemoryAppointmentStore
+from app.booking_provider import (
+    DemoBookingProvider,
+    InMemoryAppointmentStore,
+    SlotTakenError,
+    StoreUnavailableError,
+)
 from app.demo_seed import seed_demo_appointments
 from app.medical_center_demo import MEDICAL_CENTER_INSTANCE_ID, handle_medical_center_chat
 from app.schemas import ChatHistoryMessage, ChatRequest
@@ -104,6 +109,41 @@ def test_e2e_book_by_specialty() -> None:
 
     rows = _confirmed_rows(provider)
     assert len(rows) == 1 and rows[0].doctor_id == "ольга_панченко"
+
+
+@pytest.mark.parametrize("raise_confirmation_error", [False, True])
+def test_e2e_failed_confirmation_never_claims_booking_succeeded(
+    raise_confirmation_error: bool,
+) -> None:
+    class _ProviderWithoutConfirmation(DemoBookingProvider):
+        def confirm_appointment(self, instance_id: str, appointment_id: str):
+            if raise_confirmation_error:
+                raise StoreUnavailableError("mock Supabase update failed")
+            return None
+
+    provider = _ProviderWithoutConfirmation(InMemoryAppointmentStore(), clock=lambda: _CLOCK)
+    session = _Session(provider)
+    session.say("хочу записаться к офтальмологу")
+    session.say("запишите на сегодня 09:00")
+
+    done = session.say("Дамир, 23 года, +7 700 111 22 33")
+
+    assert done.metadata["conversation_status"] == "booking_failed"
+    assert "не подтверждена" in done.answer
+    assert "не оформлена" in done.answer
+    assert "Готово" not in done.answer
+    assert not done.metadata.get("demo_appointment")
+    assert _confirmed_rows(provider) == []
+    # The hold protects against a second row while confirmation is unavailable.
+    assert len(provider._store._rows) == 1  # type: ignore[attr-defined]
+    with pytest.raises(SlotTakenError):
+        provider.book_slot(
+            MEDICAL_CENTER_INSTANCE_ID,
+            doctor_id="ольга_панченко",
+            start=datetime(2026, 7, 21, 9, 0, tzinfo=timezone(timedelta(hours=5))),
+            patient_name="Дамир",
+        )
+    assert len(provider._store._rows) == 1  # type: ignore[attr-defined]
 
 
 def test_e2e_booked_slot_no_longer_offered() -> None:

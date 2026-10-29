@@ -202,6 +202,7 @@ _CONV_STATUS_LABELS: dict[str, str] = {
     "slots_offered":     "Предложены окна",
     "awaiting_contact":  "Ожидает контакт",
     "booking_created":   "Запись создана",
+    "booking_failed":    "Запись не подтверждена",
     "contact_requested": "Контакт запрошен",
     "contact_collected": "Контакт получен",
     "off_topic":         "Не по теме",
